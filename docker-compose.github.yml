@@ -1,0 +1,148 @@
+services:
+  imagine_qdrant:
+    image: qdrant/qdrant:latest
+    container_name: imagine_qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: 6333
+      QDRANT__LOG_LEVEL: INFO
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+    networks:
+      - imagine_net
+
+  imagine_ollama:
+    image: ollama/ollama:latest
+    container_name: imagine_ollama
+    restart: unless-stopped
+    command: serve
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./data/ollama:/root/.ollama
+    networks:
+      - imagine_net
+
+  imagine_db:
+    image: postgres:15-alpine
+    container_name: imagine_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-afi_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-afi_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-afiliaciones}
+    ports:
+      - "5432:5432"
+    volumes:
+      - imagine_postgres_data:/var/lib/postgresql/data
+    networks:
+      - imagine_net
+
+  imagine_compat_db:
+    image: postgres:15-alpine
+    container_name: imagine_compat_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${COMPAT_POSTGRES_USER:-escobar}
+      POSTGRES_PASSWORD: ${COMPAT_POSTGRES_PASSWORD:-escobar}
+      POSTGRES_DB: ${COMPAT_POSTGRES_DB:-postgres}
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${COMPAT_POSTGRES_USER:-escobar} -d ${COMPAT_POSTGRES_DB:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - imagine_compat_postgres_data:/var/lib/postgresql/data
+      - ./compat-db/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - imagine_net
+
+  imagine_compat_backend:
+    build:
+      context: ./compat-backend
+      dockerfile: Dockerfile
+    container_name: imagine_compat_backend
+    restart: unless-stopped
+    depends_on:
+      imagine_compat_db:
+        condition: service_healthy
+    environment:
+      APP_PROFILE: afiliaciones
+      DATABASE_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/temporal
+      DB_ALIAS_TEMPORAL_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/temporal
+      DB_ALIAS_WIMG004_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/wimg004
+      DB_ALIAS_YBR_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/ybr
+      AFILIACIONES_ENGINE_STATE_PATH: /tmp/afiliaciones_engine_state.json
+      AI_RAG_BACKEND: postgres
+      AI_RAG_DB_ALIAS: temporal
+      AI_RAG_DB_TABLE: nova_rag_chunks
+      AI_MASK_SENSITIVE: "false"
+      AI_REQUIRE_REAL_DATA: "false"
+      LLM_PROVIDER: openai-compatible
+      LLM_BASE_URL: http://host.docker.internal:1234/v1
+      LLM_API_KEY: lm-studio
+      LLM_MODEL: google/gemma-3-4b:2
+      LLM_EMBED_MODEL: ""
+    ports:
+      - "8011:8000"
+    volumes:
+      - ./shared_downloads:/host_downloads:ro
+    networks:
+      - imagine_net
+
+  imagine_backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: imagine_backend
+    restart: unless-stopped
+    depends_on:
+      - imagine_qdrant
+      - imagine_ollama
+      - imagine_db
+      - imagine_compat_backend
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-afi_user}:${POSTGRES_PASSWORD:-afi_pass}@imagine_db:5432/${POSTGRES_DB:-afiliaciones}
+      QDRANT_URL: http://imagine_qdrant:6333
+      OLLAMA_URL: http://imagine_ollama:11434
+      MODEL_NAME: ${MODEL_NAME:-llama3.2:1b}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      KNOWLEDGE_DIR: /data/knowledge
+      LEGACY_PROJECT_ROOT: /compat-backend
+      LEGACY_BACKEND_URL: http://imagine_compat_backend:8000/api/v1/afiliaciones
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+      - ./compat-backend:/compat-backend:ro
+    networks:
+      - imagine_net
+
+  imagine_frontend:
+    build:
+      context: ./frontend-nova
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: http://localhost:8000
+    container_name: imagine_frontend
+    restart: unless-stopped
+    depends_on:
+      - imagine_backend
+    ports:
+      - "3000:80"
+    networks:
+      - imagine_net
+
+volumes:
+  imagine_postgres_data:
+  imagine_compat_postgres_data:
+
+networks:
+  imagine_net:
+    driver: bridge

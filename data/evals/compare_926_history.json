@@ -1,0 +1,239 @@
+[
+  {
+    "generated_at": "2026-03-16T17:27:28.273223+00:00",
+    "left_case_id": "case-5fac3cab19",
+    "right_case_id": "",
+    "left_lines": 5,
+    "right_lines": 5,
+    "different_lines": 0,
+    "similarity": 1.0,
+    "match": true,
+    "diffs": []
+  },
+  {
+    "generated_at": "2026-03-16T17:30:57.904243+00:00",
+    "left_case_id": "case-5fac3cab19",
+    "right_case_id": "",
+    "empresa": "Servicios Demo",
+    "nit": "900123456",
+    "documento": "123456789",
+    "left_lines": 5,
+    "right_lines": 5,
+    "different_lines": 0,
+    "similarity": 1.0,
+    "match": true,
+    "diffs": []
+  },
+  {
+    "generated_at": "2026-03-16T17:30:57.912730+00:00",
+    "left_case_id": "",
+    "right_case_id": "",
+    "empresa": "",
+    "nit": "",
+    "documento": "",
+    "left_lines": 5,
+    "right_lines": 5,
+    "different_lines": 0,
+    "similarity": 1.0,
+    "match": true,
+    "diffs": []
+  },
+  {
+    "generated_at": "2026-03-18T21:16:30.636483+00:00",
+    "left_case_id": "",
+    "right_case_id": "",
+    "empresa": "",
+    "nit": "",
+    "documento": "",
+    "left_lines": 15,
+    "right_lines": 15,
+    "different_lines": 1,
+    "similarity": 0.999,
+    "match": true,
+    "exact_match_raw": false,
+    "business_similarity": 1.0,
+    "operational_only": true,
+    "diffs": [
+      {
+        "line": "1",
+        "left": "100012092050000000900716227    SOCIEDAD MARIA MONTESSORI S.A.S.                      08001CL 64 43 110                      314443792000000001000000008718832PUGLIESE       GUEVARA        JORGE               ENRIQUE             REPRESENTANTE LEGAL      2851201110   11SOCIEDAD MARIA MONTESSORI S.A.S.                      04080012026022720260401202603182000003 000000J000000180326000001600120260227000000000001202603189 3144437920GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          1    NNA    U                                                                                                    NNNSSSNSOCIEDAD MARIA MONTESSORI S.A.S.                                                                                                                                                                                                                          2   00000000B     ",
+        "right": "100012092050000000900716227    SOCIEDAD MARIA MONTESSORI S.A.S.                      08001CL 64 43 110                      314443792000000001000000008718832PUGLIESE       GUEVARA        JORGE               ENRIQUE             REPRESENTANTE LEGAL      2851201110   11SOCIEDAD MARIA MONTESSORI S.A.S.                      04080012026022720260401202603062000003 000000J000000060326000001600120260227000001016524202603069 3144437920GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          1    NNA    U                                                                                                    NNNSSSNSOCIEDAD MARIA MONTESSORI S.A.S.                                                                                                                                                                                                                          2   00000000B     "
+      }
+    ]
+  },
+  {
+    "generated_at": "2026-03-19T03:31:34.116814+00:00",
+    "left_case_id": "",
+    "right_case_id": "",
+    "empresa": "",
+    "nit": "",
+    "documento": "",
+    "left_lines": 14,
+    "right_lines": 15,
+    "different_lines": 13,
+    "similarity": 0.9806,
+    "match": false,
+    "exact_match_raw": false,
+    "business_similarity": 0.9814,
+    "operational_only": false,
+    "diffs": [
+      {
+        "line": "1",
+        "left": "100012092050000000900716227    SOCIEDAD MARIA MONTESSORI S.A.S.                      08001CL 64 43 110                      314443792000000001000000008718832PUGLIESE       GUEVARA        JORGE               ENRIQUE             REPRESENTANTE LEGAL      28512012     11SOCIEDAD MARIA MONTESSORI S.A.S.                      00080012026022720260401202603182000003 000000J000000180326000001600120260227000000001001202603189 3144437920GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          1    NNA    UNA                                                                                                  NNNSSSNSOCIEDAD MARIA MONTESSORI S.A.S.                                                                                                                                                                                                                          3   00000000B     ",
+        "right": "100012092050000000900716227    SOCIEDAD MARIA MONTESSORI S.A.S.                      08001CL 64 43 110                      314443792000000001000000008718832PUGLIESE       GUEVARA        JORGE               ENRIQUE             REPRESENTANTE LEGAL      2851201110   11SOCIEDAD MARIA MONTESSORI S.A.S.                      04080012026022720260401202603062000003 000000J000000060326000001600120260227000001016524202603069 3144437920GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          1    NNA    U                                                                                                    NNNSSSNSOCIEDAD MARIA MONTESSORI S.A.S.                                                                                                                                                                                                                          2   00000000B     "
+      },
+      {
+        "line": "2",
+        "left": "71     PRINCIPAL                         08001CL 64 43 110                      314443792000000002                001NA                                                                                                  U3144437920                                                  GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          S      N                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   ",
+        "right": "71     PRINCIPAL                         08001CL 64 43 110                      314443792000000002                001                                                                                                    U3144437920                                                  GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          S      N                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   "
+      },
+      {
+        "line": "4",
+        "left": "2000002SERVICIOS                         08001CL 64 43 110                      314443792000000002285120121201.044000NA                                                                                                  U3144437920                                                  GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          N1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         ",
+        "right": "22     RIESGO 2                          08001CL 64 43 110                      314443792000000002285120121201.044000                                                                                                    U3144437920                                                  GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          N1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         "
+      },
+      {
+        "line": "6",
+        "left": "31000000055233972CONEO          PEREZ          VIVIANA                                 19850505F000002DOCENTE                                 00017509050003700002D                                                                                                  08001CRA 24455                                         3144437                              00000003116644579CONEOPEREZVIVIANA@GMAIL.COM                                                                                                  1    0    A    000000U                                                                                                    A    A         000001                                                                                                                                                                                                                                                                                                                ",
+        "right": "31000000055233972CONEO          PEREZ          VIVIANA                                 19850505F2     DOCENTE                                 00017509050003700002D                                                                                                  08001CRA 24455                                         3144437                              00000003116644579CONEOPEREZVIVIANA@GMAIL.COM                                                                                                  1    0    A    000000U                                                                                                    A    A         000001                                                                                                                                                                                                                                                                                                                "
+      },
+      {
+        "line": "7",
+        "left": "31000000026812605DEL VALLE      POLO           MARINA                                  19710211F000002RECTORA                                 00017509050000500002D                                                                                                  08001CALLE 58 23110                                    3144437                              00000003135523638MARINADELVALLEPOLO@HOTMAIL.COM                                                                                               1    0    A    000000U                                                                                                    A    A         000001                                                                                                                                                                                                                                                                                                                ",
+        "right": "31000000026812605DEL VALLE      POLO           MARINA                                  19710211F2     RECTORA                                 00017509050000500002D                                                                                                  08001CALLE 58 23110                                    3144437                              00000003135523638MARINADELVALLEPOLO@HOTMAIL.COM                                                                                               1    0    A    000000U                                                                                                    A    A         000001                                                                                                                                                                                                                                                                                                                "
+      },
+      {
+        "line": "8",
+        "left": "31000000032734541FLOREZ         VIVES          CAMEN               CECILIA             19701026F000002DOCENTE                                 00017509050003700002D                                                                                                  08001CRA 38D74225                                      3144437                              00000003007402696CARMENFLOREZ@HOTMAIL.COM                                                                                                     1    0    A    000000U                                                                                                    A    A         000001                                                                                                                                                                                                                                                                                                                ",
+        "right": "31000000032734541FLOREZ         VIVES          CAMEN               CECILIA             19701026F2     DOCENTE                                 00017509050003700002D                                                                                                  08001CRA 38D74225                                      3144437                              00000003007402696CARMENFLOREZ@HOTMAIL.COM                                                                                                     1    0    A    000000U                                                                                                    A    A         000001                                                                                                                                                                                                                                                                                                                "
+      },
+      {
+        "line": "9",
+        "left": "31000000032769931NORIEGA        DE LA ROSA     LUZ                 MARINA              19740724F000002DOCENTE                                 00017509050000500014D                                                                                                  08001CALLE 6538B31 APTO 201                            3144437                              00000003014636760LUZMARINALEO_7@HOTMAIL.COM                                                                                                   1    0    A    000000U                                                                                                    A    A         000001                                                                                                                                                                                                                                                                                                                ",
+        "right": "31000000032769931NORIEGA        DE LA ROSA     LUZ                 MARINA              19740724F2     DOCENTE                                 00017509050000500014D                                                                                                  08001CALLE 6538B31 APTO 201                            3144437                              00000003014636760LUZMARINALEO_7@HOTMAIL.COM                                                                                                   1    0    A    000000U                                                                                                    A    A         000001                                                                                                                                                                                                                                                                                                                "
+      },
+      {
+        "line": "10",
+        "left": "31000000032724593PALMA          ROJANO         BEDELIA             ESTHER              19681222F000002OFICIOS VARIOS                          00017509050003700002D                                                                                                  08001CRA 7 131 98 T 21 APTO 303                        3144437                              00000003046667485GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          1    0    A    000000U                                                                                                    A    A         000001                                                                                                                                                                                                                                                                                                                ",
+        "right": "31000000032724593PALMA          ROJANO         BEDELIA             ESTHER              19681222F2     OFICIOS VARIOS                          00017509050003700002D                                                                                                  08001CRA 7 131 98 T 21 APTO 303                        3144437                              00000003046667485GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          1    0    A    000000U                                                                                                    A    A         000001                                                                                                                                                                                                                                                                                                                "
+      },
+      {
+        "line": "11",
+        "left": "31000000032771389PERALTA        ESCALANTE      ALEIDA                                  19740823F000002DOCENTE                                 00017509050000500002D                                                                                                  08001CALLE 70 C1068                                    3144437                              00000003145008696GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          1    0    A    000000U                                                                                                    A    A         000001                                                                                                                                                                                                                                                                                                                ",
+        "right": "31000000032771389PERALTA        ESCALANTE      ALEIDA                                  19740823F2     DOCENTE                                 00017509050000500002D                                                                                                  08001CALLE 70 C1068                                    3144437                              00000003145008696GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          1    0    A    000000U                                                                                                    A    A         000001                                                                                                                                                                                                                                                                                                                "
+      },
+      {
+        "line": "12",
+        "left": "31000000036724575PEREA          NAVARRO        LILI                ORIANA              19811023F000002DOCENTE                                 00017509050000200002D                                                                                                  08001CRA 25 65 B18                                     3144437                              00000003135819604LILIPEREA23@GMAIL.COM                                                                                                        1    0    A    000000U                                                                                                    A    A         000001                                                                                                                                                                                                                                                                                                                ",
+        "right": "31000000036724575PEREA          NAVARRO        LILI                ORIANA              19811023F2     DOCENTE                                 00017509050000200002D                                                                                                  08001CRA 25 65 B18                                     3144437                              00000003135819604LILIPEREA23@GMAIL.COM                                                                                                        1    0    A    000000U                                                                                                    A    A         000001                                                                                                                                                                                                                                                                                                                "
+      },
+      {
+        "line": "13",
+        "left": "31000000032867250ROBLES         ACOSTA         ERIKA               DEL SOCORRO         19740729F000002DOCENTE                                 00017509050003700002D                                                                                                  08001CRA37 A5A50                                       3144437                              00000003003402511ERIKAROBLES031@GMAIL.COM                                                                                                     1    0    A    000000U                                                                                                    A    A         000001                                                                                                                                                                                                                                                                                                                ",
+        "right": "31000000032867250ROBLES         ACOSTA         ERIKA               DEL SOCORRO         19740729F2     DOCENTE                                 00017509050003700002D                                                                                                  08001CRA37 A5A50                                       3144437                              00000003003402511ERIKAROBLES031@GMAIL.COM                                                                                                     1    0    A    000000U                                                                                                    A    A         000001                                                                                                                                                                                                                                                                                                                "
+      },
+      {
+        "line": "14",
+        "left": "31000001043011338ROMERO         POLO           MARIA               ALEJANDRA           19921212F000002DOCENTE                                 00017509050003700002D                                                                                                  08832CRA2413 A115                                      3144437                              00000003241495911MROMEROPOLO12@GMAIL.COM                                                                                                      1    0    A    000000U                                                                                                    A    A         000001",
+        "right": "31000001043011338ROMERO         POLO           MARIA               ALEJANDRA           19921212F2     DOCENTE                                 00017509050003700002D                                                                                                  08832CRA2413 A115                                      3144437                              00000003241495911MROMEROPOLO12@GMAIL.COM                                                                                                      1    0    A    000000U                                                                                                    A    A         000001                                                                                                                                                                                                                                                                                                                "
+      },
+      {
+        "line": "15",
+        "left": "",
+        "right": "41    0000011431194122100.00"
+      }
+    ]
+  },
+  {
+    "generated_at": "2026-03-19T03:33:52.224452+00:00",
+    "left_case_id": "",
+    "right_case_id": "",
+    "empresa": "",
+    "nit": "",
+    "documento": "",
+    "left_lines": 15,
+    "right_lines": 15,
+    "different_lines": 1,
+    "similarity": 0.9986,
+    "match": true,
+    "exact_match_raw": false,
+    "business_similarity": 1.0,
+    "operational_only": true,
+    "diffs": [
+      {
+        "line": "1",
+        "left": "100012092050000000900716227    SOCIEDAD MARIA MONTESSORI S.A.S.                      08001CL 64 43 110                      314443792000000001000000008718832PUGLIESE       GUEVARA        JORGE               ENRIQUE             REPRESENTANTE LEGAL      2851201110   11SOCIEDAD MARIA MONTESSORI S.A.S.                      04080012026022720260401202603192000003 000000J000000190326000001600120260227000000000006202603199 3144437920GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          1    NNA    U                                                                                                    NNNSSSNSOCIEDAD MARIA MONTESSORI S.A.S.                                                                                                                                                                                                                          2   00000000B     ",
+        "right": "100012092050000000900716227    SOCIEDAD MARIA MONTESSORI S.A.S.                      08001CL 64 43 110                      314443792000000001000000008718832PUGLIESE       GUEVARA        JORGE               ENRIQUE             REPRESENTANTE LEGAL      2851201110   11SOCIEDAD MARIA MONTESSORI S.A.S.                      04080012026022720260401202603062000003 000000J000000060326000001600120260227000001016524202603069 3144437920GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          1    NNA    U                                                                                                    NNNSSSNSOCIEDAD MARIA MONTESSORI S.A.S.                                                                                                                                                                                                                          2   00000000B     "
+      }
+    ]
+  },
+  {
+    "generated_at": "2026-03-19T03:52:19.454999+00:00",
+    "left_case_id": "",
+    "right_case_id": "",
+    "empresa": "",
+    "nit": "",
+    "documento": "",
+    "left_lines": 15,
+    "right_lines": 15,
+    "different_lines": 1,
+    "similarity": 0.9985,
+    "match": true,
+    "exact_match_raw": false,
+    "business_similarity": 1.0,
+    "operational_only": true,
+    "diffs": [
+      {
+        "line": "1",
+        "left": "100012092050000000900716227    SOCIEDAD MARIA MONTESSORI S.A.S.                      08001CL 64 43 110                      314443792000000001000000008718832PUGLIESE       GUEVARA        JORGE               ENRIQUE             REPRESENTANTE LEGAL      2851201110   11SOCIEDAD MARIA MONTESSORI S.A.S.                      04080012026022720260401202603192000003 000000J000000190326000001600120260227000000000007202603199 3144437920GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          1    NNA    U                                                                                                    NNNSSSNSOCIEDAD MARIA MONTESSORI S.A.S.                                                                                                                                                                                                                          2   00000000B     ",
+        "right": "100012092050000000900716227    SOCIEDAD MARIA MONTESSORI S.A.S.                      08001CL 64 43 110                      314443792000000001000000008718832PUGLIESE       GUEVARA        JORGE               ENRIQUE             REPRESENTANTE LEGAL      2851201110   11SOCIEDAD MARIA MONTESSORI S.A.S.                      04080012026022720260401202603062000003 000000J000000060326000001600120260227000001016524202603069 3144437920GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          1    NNA    U                                                                                                    NNNSSSNSOCIEDAD MARIA MONTESSORI S.A.S.                                                                                                                                                                                                                          2   00000000B     "
+      }
+    ]
+  },
+  {
+    "generated_at": "2026-03-20T01:25:32.436652+00:00",
+    "left_case_id": "",
+    "right_case_id": "",
+    "empresa": "",
+    "nit": "",
+    "documento": "",
+    "left_lines": 15,
+    "right_lines": 15,
+    "different_lines": 1,
+    "similarity": 0.999,
+    "match": true,
+    "exact_match_raw": false,
+    "business_similarity": 1.0,
+    "operational_only": true,
+    "diffs": [
+      {
+        "line": "1",
+        "left": "100012092050000000900716227    SOCIEDAD MARIA MONTESSORI S.A.S.                      08001CL 64 43 110                      314443792000000001000000008718832PUGLIESE       GUEVARA        JORGE               ENRIQUE             REPRESENTANTE LEGAL      2851201110   11SOCIEDAD MARIA MONTESSORI S.A.S.                      04080012026022720260401202603202000003 000000J000000200326000001600120260227000000000001202603209 3144437920GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          1    NNA    U                                                                                                    NNNSSSNSOCIEDAD MARIA MONTESSORI S.A.S.                                                                                                                                                                                                                          2   00000000B     ",
+        "right": "100012092050000000900716227    SOCIEDAD MARIA MONTESSORI S.A.S.                      08001CL 64 43 110                      314443792000000001000000008718832PUGLIESE       GUEVARA        JORGE               ENRIQUE             REPRESENTANTE LEGAL      2851201110   11SOCIEDAD MARIA MONTESSORI S.A.S.                      04080012026022720260401202603062000003 000000J000000060326000001600120260227000001016524202603069 3144437920GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          1    NNA    U                                                                                                    NNNSSSNSOCIEDAD MARIA MONTESSORI S.A.S.                                                                                                                                                                                                                          2   00000000B     "
+      }
+    ]
+  },
+  {
+    "generated_at": "2026-03-21T02:36:06.474017+00:00",
+    "left_case_id": "",
+    "right_case_id": "",
+    "empresa": "",
+    "nit": "",
+    "documento": "",
+    "left_lines": 15,
+    "right_lines": 15,
+    "different_lines": 1,
+    "similarity": 0.999,
+    "match": true,
+    "exact_match_raw": false,
+    "business_similarity": 1.0,
+    "operational_only": true,
+    "diffs": [
+      {
+        "line": "1",
+        "left": "100012092050000000900716227    SOCIEDAD MARIA MONTESSORI S.A.S.                      08001CL 64 43 110                      314443792000000001000000008718832PUGLIESE       GUEVARA        JORGE               ENRIQUE             REPRESENTANTE LEGAL      2851201110   11SOCIEDAD MARIA MONTESSORI S.A.S.                      04080012026022720260401202603212000003 000000J000000210326000001600120260227000000000003202603219 3144437920GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          1    NNA    U                                                                                                    NNNSSSNSOCIEDAD MARIA MONTESSORI S.A.S.                                                                                                                                                                                                                          2   00000000B     ",
+        "right": "100012092050000000900716227    SOCIEDAD MARIA MONTESSORI S.A.S.                      08001CL 64 43 110                      314443792000000001000000008718832PUGLIESE       GUEVARA        JORGE               ENRIQUE             REPRESENTANTE LEGAL      2851201110   11SOCIEDAD MARIA MONTESSORI S.A.S.                      04080012026022720260401202603062000003 000000J000000060326000001600120260227000001016524202603069 3144437920GIMNASIOMARIAMONTESSORI@HOTMAIL.COM                                                                                          1    NNA    U                                                                                                    NNNSSSNSOCIEDAD MARIA MONTESSORI S.A.S.                                                                                                                                                                                                                          2   00000000B     "
+      }
+    ]
+  }
+]

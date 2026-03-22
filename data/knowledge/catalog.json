@@ -1,0 +1,404 @@
+{
+  "afiliacion-independientes.md": {
+    "topic": "independientes",
+    "document_type": "guia_operativa",
+    "audience": "operaciones"
+  },
+  "documentos-afiliacion.md": {
+    "topic": "documentos",
+    "document_type": "requisitos",
+    "audience": "operaciones"
+  },
+  "aportes-y-plazos.md": {
+    "topic": "aportes",
+    "document_type": "reglas",
+    "audience": "operaciones"
+  },
+  "checklist-operativo-afiliacion.md": {
+    "topic": "checklist",
+    "document_type": "checklist",
+    "audience": "operaciones"
+  },
+  "validaciones-documentales.md": {
+    "topic": "validaciones",
+    "document_type": "control",
+    "audience": "operaciones"
+  },
+  "flujo-casos-observados.md": {
+    "topic": "observaciones",
+    "document_type": "workflow",
+    "audience": "operaciones"
+  },
+  "afiliacion-empresas.md": {
+    "topic": "empresas",
+    "document_type": "guia_operativa",
+    "audience": "operaciones"
+  },
+  "glosario-operativo.md": {
+    "topic": "glosario",
+    "document_type": "referencia",
+    "audience": "general"
+  },
+  "normativa-ley-100-1993.md": {
+    "topic": "normativa",
+    "document_type": "norma_marco",
+    "audience": "operaciones",
+    "source_url": "https://minsalud.gov.co/salud/Documents/APAGO%20Y%20RECAUDO.pdf"
+  },
+  "normativa-decreto-1072-2015.md": {
+    "topic": "normativa",
+    "document_type": "decreto",
+    "audience": "operaciones",
+    "source_url": "https://www1.funcionpublica.gov.co/documents/34645357/34703621/Decreto_1072_de_2015.pdf/ba60c71c-ebb0-d606-b91a-3d43037aecd4"
+  },
+  "normativa-resolucion-2388-2016.md": {
+    "topic": "normativa",
+    "document_type": "resolucion",
+    "audience": "operaciones",
+    "source_url": "https://www.minsalud.gov.co/sites/rid/Lists/BibliotecaDigital/RIDE/DE/DIJ/resolucion-2388-2016.pdf"
+  },
+  "normativa-decreto-780-2016.md": {
+    "topic": "normativa",
+    "document_type": "decreto",
+    "audience": "operaciones",
+    "source_url": "https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=77813"
+  },
+  "cliente-colmena-colmena-arl-home.md": {
+    "topic": "empresas",
+    "document_type": "portal",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/arl",
+    "owner": "colmena_seguros"
+  },
+  "cliente-colmena-colmena-tramites-riesgos-laborales.md": {
+    "topic": "documentos",
+    "document_type": "tramites",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/tramites",
+    "owner": "colmena_seguros"
+  },
+  "cliente-colmena-colmena-radicacion-solicitudes.md": {
+    "topic": "documentos",
+    "document_type": "formulario",
+    "audience": "operaciones",
+    "source_url": "https://sp.colmenaseguros.com/arl/Paginas/formularios-radicacion-solicitudes.aspx",
+    "owner": "colmena_seguros",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-colmena-radicacion-incapacidades.md": {
+    "topic": "documentos",
+    "document_type": "formulario",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/arl/hacemos-las-cosas-faciles/radicacion-incapacidades-temporales",
+    "owner": "colmena_seguros"
+  },
+  "cliente-colmena-colmena-productos-prevencion.md": {
+    "topic": "validaciones",
+    "document_type": "guia_operativa",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/arl/productos-de-prevencion",
+    "owner": "colmena_seguros"
+  },
+  "cliente-colmena-colmena-reporte-trabajo-alturas.md": {
+    "topic": "validaciones",
+    "document_type": "tramites",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/reporte-de-trabajo-en-alturas",
+    "owner": "colmena_seguros"
+  },
+  "cliente-colmena-colmena-formacion-formar.md": {
+    "topic": "validaciones",
+    "document_type": "capacitacion",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/inscripciones",
+    "owner": "colmena_seguros"
+  },
+  "cliente-colmena-ley-100-1993.md": {
+    "topic": "normativa",
+    "document_type": "norma_marco",
+    "audience": "operaciones",
+    "source_url": "https://minsalud.gov.co/salud/Documents/APAGO%20Y%20RECAUDO.pdf",
+    "owner": "normativa_oficial",
+    "source_type": "pdf",
+    "ocr": false
+  },
+  "cliente-colmena-decreto-1072-2015.md": {
+    "topic": "normativa",
+    "document_type": "decreto",
+    "audience": "operaciones",
+    "source_url": "https://www1.funcionpublica.gov.co/documents/34645357/34703621/Decreto_1072_de_2015.pdf/ba60c71c-ebb0-d606-b91a-3d43037aecd4",
+    "owner": "normativa_oficial",
+    "source_type": "pdf",
+    "ocr": false
+  },
+  "cliente-colmena-colmena-seguros-arl-seguros-de-vida-y-seguros-generales.md": {
+    "topic": "empresas",
+    "document_type": "portal",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com",
+    "owner": "colmena_seguros",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-arl.md": {
+    "topic": "empresas",
+    "document_type": "portal",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/arl",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-arl-asistencia-en-salud-atencion-accidentes-de-trabajo.md": {
+    "topic": "aportes",
+    "document_type": "asistencia",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/arl/asistencia-en-salud/atencion-accidentes-de-trabajo",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-arl-hacemos-las-cosas-faciles-radicacion-incapacidades-temporales.md": {
+    "topic": "aportes",
+    "document_type": "tramites",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/arl/hacemos-las-cosas-faciles/radicacion-incapacidades-temporales",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-arl-productos-de-prevencion.md": {
+    "topic": "validaciones",
+    "document_type": "guia_operativa",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/arl/productos-de-prevencion",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-atencion-al-cliente-pqrs.md": {
+    "topic": "documentos",
+    "document_type": "tramites",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/atencion-al-cliente/pqrs",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-colmena-crisotilo-fibras.md": {
+    "topic": "normativa",
+    "document_type": "guia_operativa",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/b/uso-de-crisotilo-y-otras-fibras",
+    "owner": "colmena_seguros"
+  },
+  "cliente-colmena-inscripciones.md": {
+    "topic": "empresas",
+    "document_type": "guia_operativa",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/inscripciones",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-reporte-de-trabajo-en-alturas.md": {
+    "topic": "documentos",
+    "document_type": "tramites",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/reporte-de-trabajo-en-alturas",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-trabajadores.md": {
+    "topic": "empresas",
+    "document_type": "portal",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/trabajadores",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-tramites.md": {
+    "topic": "documentos",
+    "document_type": "tramites",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/tramites",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-colmena-adelante-valientes.md": {
+    "topic": "empresas",
+    "document_type": "portal",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/web/adelante-valientes",
+    "owner": "colmena_seguros"
+  },
+  "cliente-colmena-decreto-780-2016.md": {
+    "topic": "normativa",
+    "document_type": "decreto",
+    "audience": "operaciones",
+    "source_url": "https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=77813",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-resolucion-2388-2016.md": {
+    "topic": "normativa",
+    "document_type": "resolucion",
+    "audience": "operaciones",
+    "source_url": "https://www.minsalud.gov.co/sites/rid/Lists/BibliotecaDigital/RIDE/DE/DIJ/resolucion-2388-2016.pdf",
+    "owner": "normativa_oficial",
+    "source_type": "pdf",
+    "ocr": false
+  },
+  "cliente-colmena-arl-herramientas-estandares-minimos.md": {
+    "topic": "validaciones",
+    "document_type": "guia_operativa",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/arl/herramientas/estandares-minimos",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-documents-34927-335113-informe-gestio-cc-81n-rl-colmena-seguros-2023-pdf-baa2b02e-1f10-2cfe-e63a-7c4685c65d14.md": {
+    "topic": "general",
+    "document_type": "informe",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/documents/34927/335113/Informe_Gestio%CC%81n_RL_Colmena_Seguros_2023.pdf/baa2b02e-1f10-2cfe-e63a-7c4685c65d14?t=1714420565129",
+    "owner": "colmena_seguros",
+    "source_type": "pdf",
+    "ocr": false
+  },
+  "cliente-colmena-mari-la-asesora-virtual.md": {
+    "topic": "documentos",
+    "document_type": "tramites",
+    "audience": "operaciones",
+    "source_url": "https://sp.colmenaseguros.com/Paginas/Mari-la-asesora-virtual.aspx",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-arl-paginas-default-aspx.md": {
+    "topic": "empresas",
+    "document_type": "portal",
+    "audience": "operaciones",
+    "source_url": "https://sp.colmenaseguros.com/arl/Paginas/default.aspx",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-arl-paginas-formularios-radicacion-solicitudes-aspx.md": {
+    "topic": "documentos",
+    "document_type": "tramites",
+    "audience": "operaciones",
+    "source_url": "https://sp.colmenaseguros.com/arl/Paginas/formularios-radicacion-solicitudes.aspx",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-arl-gestion-conocimiento-paginas-convenios-universitarios-aspx.md": {
+    "topic": "empresas",
+    "document_type": "portal",
+    "audience": "operaciones",
+    "source_url": "https://sp.colmenaseguros.com/arl/gestion-conocimiento/Paginas/convenios-universitarios.aspx",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-arl-gestion-conocimiento-formar-virtual-paginas-e-learning-fiso-aspx.md": {
+    "topic": "empresas",
+    "document_type": "guia_operativa",
+    "audience": "operaciones",
+    "source_url": "https://sp.colmenaseguros.com/arl/gestion-conocimiento/formar-virtual/Paginas/e-learning-fiso.aspx",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-imagenescolmenaarp-contenido-arl-manual-gestion-escritorio-v03-web-pdf.md": {
+    "topic": "empresas",
+    "document_type": "informe",
+    "audience": "operaciones",
+    "source_url": "https://sp.colmenaseguros.com/imagenesColmenaARP/contenido/ARL/Manual_Gestion_Escritorio_V03_web.pdf",
+    "owner": "colmena_seguros",
+    "source_type": "pdf",
+    "ocr": true
+  },
+  "cliente-colmena-imagenescolmenaarp-contenido-coronavirus-boletin26-noticia-20destacada-pdf.md": {
+    "topic": "general",
+    "document_type": "documento",
+    "audience": "operaciones",
+    "source_url": "https://sp.colmenaseguros.com/imagenescolmenaARP/contenido/coronavirus/boletin26/Noticia%20Destacada.pdf",
+    "owner": "colmena_seguros",
+    "source_type": "pdf",
+    "ocr": false
+  },
+  "cliente-colmena-imagenescolmenaarp-contenido-coronavirus-boletin28-noticia-20destacada-pdf.md": {
+    "topic": "general",
+    "document_type": "documento",
+    "audience": "operaciones",
+    "source_url": "https://sp.colmenaseguros.com/imagenescolmenaARP/contenido/coronavirus/boletin28/Noticia%20Destacada.pdf",
+    "owner": "colmena_seguros",
+    "source_type": "pdf",
+    "ocr": false
+  },
+  "cliente-colmena-b-uso-de-crisotilo-y-otras-fibras.md": {
+    "topic": "general",
+    "document_type": "portal",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/b/uso-de-crisotilo-y-otras-fibras",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-es-atencion-al-cliente-asistente-virtual-mari.md": {
+    "topic": "general",
+    "document_type": "portal",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/es/atencion-al-cliente/asistente-virtual-mari",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "cliente-colmena-web-adelante-valientes.md": {
+    "topic": "general",
+    "document_type": "portal",
+    "audience": "operaciones",
+    "source_url": "https://www.colmenaseguros.com/web/adelante-valientes",
+    "owner": "normativa_oficial",
+    "source_type": "html",
+    "ocr": false
+  },
+  "colmena-estandares-minimos-operativo.md": {
+    "topic": "validaciones",
+    "document_type": "guia_operativa",
+    "audience": "operaciones"
+  },
+  "colmena-capacitaciones-operativo.md": {
+    "topic": "validaciones",
+    "document_type": "capacitacion",
+    "audience": "operaciones"
+  },
+  "colmena-manual-gestion-escritorio.md": {
+    "topic": "empresas",
+    "document_type": "informe",
+    "audience": "operaciones"
+  },
+  "colmena-pqrs-operativo.md": {
+    "topic": "documentos",
+    "document_type": "tramites",
+    "audience": "operaciones"
+  },
+  "observaciones-subsanacion-operativo.md": {
+    "topic": "observaciones",
+    "document_type": "workflow",
+    "audience": "operaciones"
+  },
+  "normativa-sgsst-decreto-1072-aplicado.md": {
+    "topic": "normativa",
+    "document_type": "decreto",
+    "audience": "operaciones"
+  }
+}

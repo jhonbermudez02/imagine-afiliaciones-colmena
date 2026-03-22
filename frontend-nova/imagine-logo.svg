@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 150" role="img" aria-labelledby="title desc">
+  <title id="title">Imagine S.A.S.</title>
+  <desc id="desc">Logotipo estilizado de Imagine S.A.S. en azul.</desc>
+  <rect width="520" height="150" rx="18" fill="#ffffff"/>
+  <text x="18" y="102" fill="#1f4aa5" font-size="92" font-weight="700" font-style="italic" font-family="Brush Script MT, Segoe Script, Lucida Handwriting, cursive">Imagine</text>
+  <text x="390" y="104" fill="#111111" font-size="46" font-weight="500" font-family="IBM Plex Sans, Segoe UI, sans-serif">S.A.S</text>
+</svg>

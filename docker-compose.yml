@@ -1,0 +1,92 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: afi_qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__LOG_LEVEL=INFO
+    restart: unless-stopped
+    platform: linux/arm64
+    networks:                 # ← AGREGAR
+      - afi_network           # ← AGREGAR
+
+  frontend-nova:
+    image: node:18-alpine
+    container_name: afi_frontend_nova
+    working_dir: /app
+    volumes:
+      - ./frontend-nova:/app
+    ports:
+      - "3000:5173"
+    command: sh -c "npm install && npx vite --host 0.0.0.0"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    restart: unless-stopped
+    networks:                 # ← AGREGAR
+      - afi_network           # ← AGREGAR
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: afi_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./data/ollama:/root/.ollama
+    restart: unless-stopped
+    command: serve
+    platform: linux/arm64
+    networks:                 # ← AGREGAR
+      - afi_network           # ← AGREGAR
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: afi_postgres
+    environment:
+      POSTGRES_USER: afi_user
+      POSTGRES_PASSWORD: afi_pass
+      POSTGRES_DB: afiliaciones
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:                 # ← AGREGAR
+      - afi_network           # ← AGREGAR
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: afi_backend
+    depends_on:
+      - qdrant
+      - ollama
+      - postgres
+    environment:
+      - DATABASE_URL=postgresql://afi_user:afi_pass@postgres:5432/afiliaciones
+      - QDRANT_URL=http://qdrant:6333
+      - OLLAMA_URL=http://ollama:11434
+      - MODEL_NAME=llama3.2:1b
+      - EMBEDDING_MODEL=nomic-embed-text
+      - KNOWLEDGE_DIR=/data/knowledge
+    volumes:
+      - ./backend:/app
+      - ./data:/data
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    networks:                 # ← AGREGAR
+      - afi_network           # ← AGREGAR
+
+networks:
+  afi_network:
+    driver: bridge
+
+volumes:
+  postgres_data:

@@ -1,0 +1,245 @@
+[
+  {
+    "slug": "ley-100-1993",
+    "title": "Ley 100 de 1993",
+    "url": "https://minsalud.gov.co/salud/Documents/APAGO%20Y%20RECAUDO.pdf",
+    "source_type": "pdf",
+    "topic": "normativa",
+    "document_type": "norma_marco",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "mari-la-asesora-virtual",
+    "title": "Colmena Seguros - Mari la asesora virtual",
+    "url": "https://sp.colmenaseguros.com/Paginas/Mari-la-asesora-virtual.aspx",
+    "source_type": "html",
+    "topic": "documentos",
+    "document_type": "tramites",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "arl-paginas-default-aspx",
+    "title": "P\u00e1ginas\r\n\t\t\t-\r\n\t\t\tInicio",
+    "url": "https://sp.colmenaseguros.com/arl/Paginas/default.aspx",
+    "source_type": "html",
+    "topic": "empresas",
+    "document_type": "portal",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "arl-paginas-formularios-radicacion-solicitudes-aspx",
+    "title": "P\u00e1ginas\r\n\t\t\t-\r\n\t\t\tProductos de Prevenci\u00f3n",
+    "url": "https://sp.colmenaseguros.com/arl/Paginas/formularios-radicacion-solicitudes.aspx",
+    "source_type": "html",
+    "topic": "documentos",
+    "document_type": "tramites",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "arl-gestion-conocimiento-paginas-convenios-universitarios-aspx",
+    "title": "P\u00e1ginas\r\n\t\t\t-\r\n\t\t\tConvenios Universitarios",
+    "url": "https://sp.colmenaseguros.com/arl/gestion-conocimiento/Paginas/convenios-universitarios.aspx",
+    "source_type": "html",
+    "topic": "empresas",
+    "document_type": "portal",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "arl-gestion-conocimiento-formar-virtual-paginas-e-learning-fiso-aspx",
+    "title": "P\u00e1ginas\r\n\t\t\t-\r\n\t\t\te-learning FISO",
+    "url": "https://sp.colmenaseguros.com/arl/gestion-conocimiento/formar-virtual/Paginas/e-learning-fiso.aspx",
+    "source_type": "html",
+    "topic": "empresas",
+    "document_type": "guia_operativa",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "imagenescolmenaarp-contenido-arl-manual-gestion-escritorio-v03-web-pdf",
+    "title": "Imagenescolmenaarp Contenido Arl Manual_Gestion_Escritorio_V03_Web.Pdf",
+    "url": "https://sp.colmenaseguros.com/imagenesColmenaARP/contenido/ARL/Manual_Gestion_Escritorio_V03_web.pdf",
+    "source_type": "pdf",
+    "topic": "empresas",
+    "document_type": "informe",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "imagenescolmenaarp-contenido-coronavirus-boletin26-noticia-20destacada-pdf",
+    "title": "Imagenescolmenaarp Contenido Coronavirus Boletin26 Noticia%20Destacada.Pdf",
+    "url": "https://sp.colmenaseguros.com/imagenescolmenaARP/contenido/coronavirus/boletin26/Noticia%20Destacada.pdf",
+    "source_type": "pdf",
+    "topic": "general",
+    "document_type": "documento",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "imagenescolmenaarp-contenido-coronavirus-boletin28-noticia-20destacada-pdf",
+    "title": "Imagenescolmenaarp Contenido Coronavirus Boletin28 Noticia%20Destacada.Pdf",
+    "url": "https://sp.colmenaseguros.com/imagenescolmenaARP/contenido/coronavirus/boletin28/Noticia%20Destacada.pdf",
+    "source_type": "pdf",
+    "topic": "general",
+    "document_type": "documento",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "colmena-seguros-arl-seguros-de-vida-y-seguros-generales",
+    "title": "Colmena Seguros - ARL, Seguros de vida y Seguros Generales",
+    "url": "https://www.colmenaseguros.com",
+    "source_type": "html",
+    "topic": "empresas",
+    "document_type": "portal",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "arl",
+    "title": "Colmena Seguros - ARL (Administradora de Riesgos Laborales)",
+    "url": "https://www.colmenaseguros.com/arl",
+    "source_type": "html",
+    "topic": "empresas",
+    "document_type": "portal",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "arl-asistencia-en-salud-atencion-accidentes-de-trabajo",
+    "title": "Colmena Seguros - ARL atenci\u00f3n en accidentes de trabajo",
+    "url": "https://www.colmenaseguros.com/arl/asistencia-en-salud/atencion-accidentes-de-trabajo",
+    "source_type": "html",
+    "topic": "aportes",
+    "document_type": "asistencia",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "arl-hacemos-las-cosas-faciles-radicacion-incapacidades-temporales",
+    "title": "Colmena Seguros - ARL radicaci\u00f3n incapacidades temporales",
+    "url": "https://www.colmenaseguros.com/arl/hacemos-las-cosas-faciles/radicacion-incapacidades-temporales",
+    "source_type": "html",
+    "topic": "aportes",
+    "document_type": "tramites",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "arl-herramientas-estandares-minimos",
+    "title": "Colmena Seguros - ARL est\u00e1ndares m\u00ednimos del SG-SST",
+    "url": "https://www.colmenaseguros.com/arl/herramientas/estandares-minimos",
+    "source_type": "html",
+    "topic": "validaciones",
+    "document_type": "guia_operativa",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "arl-productos-de-prevencion",
+    "title": "Colmena Seguros - ARL productos de prevenci\u00f3n",
+    "url": "https://www.colmenaseguros.com/arl/productos-de-prevencion",
+    "source_type": "html",
+    "topic": "validaciones",
+    "document_type": "guia_operativa",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "atencion-al-cliente-pqrs",
+    "title": "Colmena Seguros - D\u00e9janos tus comentarios y sugerencias",
+    "url": "https://www.colmenaseguros.com/atencion-al-cliente/pqrs",
+    "source_type": "html",
+    "topic": "documentos",
+    "document_type": "tramites",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "b-uso-de-crisotilo-y-otras-fibras",
+    "title": "Uso de Crisotilo y otras fibras",
+    "url": "https://www.colmenaseguros.com/b/uso-de-crisotilo-y-otras-fibras",
+    "source_type": "html",
+    "topic": "general",
+    "document_type": "portal",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "documents-34927-335113-informe-gestio-cc-81n-rl-colmena-seguros-2023-pdf-baa2b02e-1f10-2cfe-e63a-7c4685c65d14",
+    "title": "Documents 34927 335113 Informe_Gestio%Cc%81N_Rl_Colmena_Seguros_2023.Pdf Baa2B02E 1F10 2Cfe E63A 7C4685C65D14",
+    "url": "https://www.colmenaseguros.com/documents/34927/335113/Informe_Gestio%CC%81n_RL_Colmena_Seguros_2023.pdf/baa2b02e-1f10-2cfe-e63a-7c4685c65d14?t=1714420565129",
+    "source_type": "pdf",
+    "topic": "general",
+    "document_type": "informe",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "es-atencion-al-cliente-asistente-virtual-mari",
+    "title": "Colmena Seguros - Asistente virtual Mari",
+    "url": "https://www.colmenaseguros.com/es/atencion-al-cliente/asistente-virtual-mari",
+    "source_type": "html",
+    "topic": "general",
+    "document_type": "portal",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "inscripciones",
+    "title": "Colmena Seguros - ARL Calendario de Capacitaciones y eventos",
+    "url": "https://www.colmenaseguros.com/inscripciones",
+    "source_type": "html",
+    "topic": "empresas",
+    "document_type": "guia_operativa",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "reporte-de-trabajo-en-alturas",
+    "title": "Reporte de Trabajo en Alturas",
+    "url": "https://www.colmenaseguros.com/reporte-de-trabajo-en-alturas",
+    "source_type": "html",
+    "topic": "documentos",
+    "document_type": "tramites",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "trabajadores",
+    "title": "Colmena Seguros - Portal de trabajadores ARL",
+    "url": "https://www.colmenaseguros.com/trabajadores",
+    "source_type": "html",
+    "topic": "empresas",
+    "document_type": "portal",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "tramites",
+    "title": "Conoce como realizar los diferentes tr\u00e1mites de riesgos laborales.",
+    "url": "https://www.colmenaseguros.com/tramites",
+    "source_type": "html",
+    "topic": "documentos",
+    "document_type": "tramites",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "web-adelante-valientes",
+    "title": "Colmena Seguros - Acompa\u00f1amos a los Valientes de Colombia - Adelante valientes",
+    "url": "https://www.colmenaseguros.com/web/adelante-valientes",
+    "source_type": "html",
+    "topic": "general",
+    "document_type": "portal",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "decreto-780-2016",
+    "title": "Decreto 780 de 2016",
+    "url": "https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=77813",
+    "source_type": "html",
+    "topic": "normativa",
+    "document_type": "decreto",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "resolucion-2388-2016",
+    "title": "Resolucion 2388 de 2016",
+    "url": "https://www.minsalud.gov.co/sites/rid/Lists/BibliotecaDigital/RIDE/DE/DIJ/resolucion-2388-2016.pdf",
+    "source_type": "pdf",
+    "topic": "normativa",
+    "document_type": "resolucion",
+    "audience": "operaciones"
+  },
+  {
+    "slug": "decreto-1072-2015",
+    "title": "Decreto 1072 de 2015",
+    "url": "https://www1.funcionpublica.gov.co/documents/34645357/34703621/Decreto_1072_de_2015.pdf/ba60c71c-ebb0-d606-b91a-3d43037aecd4",
+    "source_type": "pdf",
+    "topic": "normativa",
+    "document_type": "decreto",
+    "audience": "operaciones"
+  }
+]

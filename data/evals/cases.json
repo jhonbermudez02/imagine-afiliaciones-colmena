@@ -1,0 +1,178 @@
+[
+  {
+    "id": "arl_tramites_radicacion",
+    "consulta": "Que tramites y canales publicos ofrece Colmena ARL para radicacion y gestion de solicitudes?",
+    "contexto": {
+      "topics": ["documentos", "empresas"]
+    },
+    "expected_keywords": ["radicacion", "tramites", "solicitudes", "colmena"],
+    "expected_sources": ["tramites", "radicacion", "solicitudes"],
+    "min_sources": 2,
+    "notes": "Debe recuperar paginas de tramites o radicacion de Colmena."
+  },
+  {
+    "id": "arl_accidente_trabajo",
+    "consulta": "Como orienta Colmena la atencion en accidentes de trabajo dentro de ARL?",
+    "contexto": {
+      "topics": ["aportes", "empresas"]
+    },
+    "expected_keywords": ["accidentes", "trabajo", "atencion", "arl"],
+    "expected_sources": ["accidentes-de-trabajo", "asistencia-en-salud"],
+    "min_sources": 1,
+    "notes": "Debe priorizar asistencia en salud o accidentes de trabajo."
+  },
+  {
+    "id": "estandares_minimos_sgsst",
+    "consulta": "Que apoyo ofrece Colmena sobre estandares minimos del SG-SST?",
+    "contexto": {
+      "topics": ["validaciones"]
+    },
+    "expected_keywords": ["estandares", "sg-sst", "minimos", "colmena"],
+    "expected_sources": ["estandares-minimos"],
+    "min_sources": 1,
+    "notes": "Debe encontrar la herramienta o guia de estandares minimos."
+  },
+  {
+    "id": "normativa_pila_res2388",
+    "consulta": "Cual es el soporte normativo para PILA y recaudo que maneja NOVA?",
+    "contexto": {
+      "topics": ["normativa", "aportes"]
+    },
+    "expected_keywords": ["normativo", "pila", "resolucion", "recaudo"],
+    "expected_sources": ["2388", "resolucion", "aportes-y-plazos"],
+    "min_sources": 2,
+    "notes": "Debe recuperar resolucion 2388 y material de aportes."
+  },
+  {
+    "id": "normativa_sst_decreto1072",
+    "consulta": "Que soporte normativo del SG-SST aparece relacionado con el Decreto 1072 de 2015?",
+    "contexto": {
+      "topics": ["normativa", "validaciones"]
+    },
+    "expected_keywords": ["1072", "sg-sst", "decreto", "normativo"],
+    "expected_sources": ["1072", "decreto"],
+    "min_sources": 1,
+    "notes": "Debe traer el decreto 1072 como minimo."
+  },
+  {
+    "id": "afiliacion_independientes",
+    "consulta": "Que documentos y validaciones piden para afiliacion de independientes?",
+    "contexto": {
+      "topics": ["independientes", "documentos", "validaciones"]
+    },
+    "expected_keywords": ["independientes", "documentos", "validaciones", "afiliacion"],
+    "expected_sources": ["independientes", "documentos-afiliacion", "validaciones"],
+    "min_sources": 2,
+    "notes": "Debe combinar corpus operativo y documental."
+  },
+  {
+    "id": "caso_observado_subsanacion",
+    "consulta": "Como deberia actuar NOVA frente a un caso observado por inconsistencia documental?",
+    "contexto": {
+      "topics": ["observaciones", "validaciones"]
+    },
+    "expected_keywords": ["observado", "inconsistencia", "documental", "validaciones"],
+    "expected_sources": ["observados", "validaciones", "flujo-casos-observados"],
+    "min_sources": 1,
+    "notes": "Debe recuperar flujos de observaciones o validaciones."
+  },
+  {
+    "id": "productos_prevencion",
+    "consulta": "Que productos de prevencion publica Colmena ARL para empresas?",
+    "contexto": {
+      "topics": ["validaciones", "empresas"]
+    },
+    "expected_keywords": ["productos", "prevencion", "empresas", "arl"],
+    "expected_sources": ["productos-de-prevencion"],
+    "min_sources": 1,
+    "notes": "Debe recuperar productos de prevencion."
+  },
+  {
+    "id": "calendario_capacitaciones",
+    "consulta": "Donde ve NOVA el calendario de capacitaciones y eventos de Colmena?",
+    "contexto": {
+      "topics": ["validaciones", "empresas"]
+    },
+    "expected_keywords": ["capacitaciones", "eventos", "calendario", "colmena"],
+    "expected_sources": ["inscripciones", "e-learning", "convenios"],
+    "min_sources": 1,
+    "notes": "Debe recuperar inscripciones o gestion del conocimiento."
+  },
+  {
+    "id": "manual_gestion_escritorio",
+    "consulta": "Existe material de apoyo tipo manual para la gestion operativa en ARL Colmena?",
+    "contexto": {
+      "topics": ["empresas", "validaciones"]
+    },
+    "expected_keywords": ["manual", "gestion", "operativa", "arl"],
+    "expected_sources": ["manual_gestion_escritorio", "gestion-escritorio"],
+    "min_sources": 1,
+    "notes": "Debe recuperar el PDF manual de gestion de escritorio."
+  },
+  {
+    "id": "fuzzy_documentos_inconsistentes",
+    "consulta": "como hago una afiliaicon de indepemdimntes con documntos inconsistentes?",
+    "contexto": {
+      "topics": ["independientes", "documentos", "validaciones"]
+    },
+    "expected_keywords": ["independientes", "documentos", "validaciones"],
+    "expected_sources": ["independientes", "documentos", "validaciones"],
+    "min_sources": 2,
+    "notes": "Valida fuzzy match en consulta mal escrita."
+  },
+  {
+    "id": "pqrs_colmena",
+    "consulta": "Que canal publico de PQRS tiene Colmena Seguros?",
+    "contexto": {
+      "topics": ["documentos"]
+    },
+    "expected_keywords": ["pqrs", "canal", "colmena"],
+    "expected_sources": ["pqrs"],
+    "min_sources": 1,
+    "notes": "Debe recuperar la pagina de PQRS."
+  },
+  {
+    "id": "subsanacion_documental_detallada",
+    "consulta": "Que debe indicar NOVA cuando solicita subsanacion por documento ilegible o inconsistente?",
+    "contexto": {
+      "topics": ["observaciones", "validaciones"]
+    },
+    "expected_keywords": ["subsanacion", "documento", "ilegible", "inconsistente"],
+    "expected_sources": ["subsanacion", "observaciones", "validaciones"],
+    "min_sources": 1,
+    "notes": "Debe recuperar la guia curada de subsanacion."
+  },
+  {
+    "id": "manual_instalacion_escritorio",
+    "consulta": "Existe un instructivo o manual para instalar o actualizar Colmena Gestion en escritorio?",
+    "contexto": {
+      "topics": ["empresas", "validaciones"]
+    },
+    "expected_keywords": ["manual", "instalar", "actualizar", "escritorio"],
+    "expected_sources": ["manual", "gestion-escritorio"],
+    "min_sources": 1,
+    "notes": "Debe recuperar el manual o la guia curada de gestion de escritorio."
+  },
+  {
+    "id": "capacitacion_virtual_colmena",
+    "consulta": "Que opciones de formacion virtual o e-learning publica Colmena ARL?",
+    "contexto": {
+      "topics": ["validaciones", "empresas"]
+    },
+    "expected_keywords": ["formacion", "virtual", "e-learning", "colmena"],
+    "expected_sources": ["e-learning", "capacitaciones", "inscripciones"],
+    "min_sources": 1,
+    "notes": "Debe recuperar contenidos de formacion virtual o gestion del conocimiento."
+  },
+  {
+    "id": "sgsst_brechas_acciones",
+    "consulta": "Como debe orientar NOVA una consulta sobre brechas y plan de accion en estandares minimos del SG-SST?",
+    "contexto": {
+      "topics": ["validaciones", "normativa"]
+    },
+    "expected_keywords": ["brechas", "plan", "accion", "estandares"],
+    "expected_sources": ["estandares-minimos", "sg-sst"],
+    "min_sources": 1,
+    "notes": "Debe recuperar la guia curada de estandares minimos."
+  }
+]
