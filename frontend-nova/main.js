@@ -1878,7 +1878,7 @@ function renderReporte(container, payload) {
             dataPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         });
     });
-
+}
 
 // ── PRODUCCIÓN (COLMENA) ─────────────────────────────────────
 async function loadProduccion() {
