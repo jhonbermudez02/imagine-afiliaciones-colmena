@@ -204,22 +204,27 @@ function resolveCase(item) {
 function caseStatusClass(status, finalStatus) {
     const s = normalizeText(status);
     const f = normalizeText(finalStatus);
-    if (s === 'completed' && (f.includes('aprob') || f === 'ok')) return 'ok';
-    if (s === 'stopped_prevalidacion' || f.includes('observ') || f.includes('rechaz')) return 'warn';
-    if (s === 'failed' || f.includes('bloque')) return 'err';
+    if (s === 'stopped_prevalidacion' || f.includes('rechaz')) return 'err';
+    if (s === 'completed' && (f.includes('aprob') || f === 'ok' || f === 'completed' || !f)) return 'ok';
+    if (f.includes('observ')) return 'warn';
+    if (s === 'failed') return 'err';
+    if (s === 'analyzed') return 'warn';
     if (s === 'completed') return 'ok';
-    return 'info';
+    return 'neutral';
 }
 
 function casePillLabel(status, finalStatus) {
     const s = normalizeText(status);
     const f = normalizeText(finalStatus);
-    if (s === 'stopped_prevalidacion') return 'No aprobado';
-    if (f.includes('aprob') || (s === 'completed' && !f)) return 'Aprobable';
+    if (s === 'stopped_prevalidacion') return 'Rechazado';
+    if (f.includes('rechaz')) return 'Rechazado';
+    if (f.includes('aprob') || (s === 'completed' && (f === 'completed' || !f))) return 'Aprobable';
     if (f.includes('observ')) return 'Observado';
     if (f.includes('bloque')) return 'Bloqueado';
     if (s === 'completed') return 'Completado';
-    if (s === 'uploaded' || s === 'pending') return 'En proceso';
+    if (s === 'analyzed') return 'Analizado';
+    if (s === 'failed') return 'Error';
+    if (['uploaded','pending','processing','queued'].includes(s)) return 'En proceso';
     return localizeStatus(status) || 'Pendiente';
 }
 
@@ -1562,11 +1567,13 @@ function renderReporte(container, payload) {
                 <div class="report-empresa">${escapeHtml(empresa)}</div>
                 <div class="report-nit">NIT: ${escapeHtml(nit)} · Procesado: ${escapeHtml(fecha)}</div>
             </div>
-            <div style="margin-left:auto;display:flex;gap:8px">
+            <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
                 <button class="btn-secondary" data-action="clasificacion" data-case="${escapeHtml(caseId)}" type="button">Ver documentos</button>
                 ${has926 ? `<button class="btn-primary" data-action="descargar926" data-case="${escapeHtml(caseId)}" data-file="${escapeHtml(filename926)}" type="button">Descargar 926</button>` : ''}
+                ${!isAprobable ? `<button class="btn-warn" id="reprocesarBtn" data-case="${escapeHtml(caseId)}" type="button" title="Volver a ejecutar la prevalidación">↺ Reprocesar</button>` : ''}
             </div>
         </div>
+        <div id="reprocesarStatus" style="display:none;padding:8px 16px;font-size:12px;background:var(--c-info-bg);color:var(--c-info);border-bottom:1px solid var(--c-border)"></div>
         <div class="report-body">
             <div class="report-section">
                 <div class="report-section-title">Datos del contrato</div>
@@ -1877,6 +1884,35 @@ function renderReporte(container, payload) {
             });
             dataPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         });
+    });
+    // ── Botón Reprocesar ─────────────────────────────────────
+    document.getElementById('reprocesarBtn')?.addEventListener('click', async function() {
+        const btn = this;
+        const statusBar = document.getElementById('reprocesarStatus');
+        const id = btn.dataset.case;
+        if (!id) return;
+        if (!confirm('¿Reprocesar este contrato? Se volverá a ejecutar la prevalidación completa.')) return;
+        btn.disabled = true;
+        btn.textContent = '↺ Enviando...';
+        if (statusBar) { statusBar.style.display = ''; statusBar.textContent = 'Enviando a la cola de procesamiento...'; }
+        try {
+            const r = await fetch(`${API_URL}/api/cases/${encodeURIComponent(id)}/run-workflow`, { method: 'POST' });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            if (statusBar) {
+                statusBar.textContent = '✓ En cola — el contrato será reprocesado automáticamente. Puedes ver el progreso en la Bandeja.';
+                statusBar.style.background = 'var(--c-ok-bg)';
+                statusBar.style.color = 'var(--c-ok)';
+            }
+            btn.textContent = 'En cola ✓';
+            // Actualizar sidebar después de 3s
+            setTimeout(() => loadReporteSidebar(), 3000);
+            // Activar live polling en bandeja
+            startBandejaLivePolling();
+        } catch(e) {
+            if (statusBar) { statusBar.textContent = 'Error: ' + e.message; statusBar.style.background = 'var(--c-err-bg)'; statusBar.style.color = 'var(--c-err)'; }
+            btn.disabled = false;
+            btn.textContent = '↺ Reprocesar';
+        }
     });
 }
 
