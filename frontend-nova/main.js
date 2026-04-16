@@ -1181,6 +1181,9 @@ async function reclassifyDocument(caseId, item, newType) {
 // ── VALIDACIÓN OCR ───────────────────────────────────────────
 function onValidacionCaseChange(caseId) {
     if (!caseId) return;
+    // Ocultar selector al entrar al detalle
+    const selectorRow = document.getElementById('validacionSelectorRow');
+    if (selectorRow) selectorRow.style.display = 'none';
     loadValidacionForCase(caseId);
 }
 
@@ -1203,15 +1206,26 @@ function renderValidacionOCR(container, payload) {
     const checklist = a.checklist || {};
     const validaciones = Array.isArray(a.validacion_resumen) ? a.validacion_resumen :
                          Array.isArray(checklist.validations) ? checklist.validations : [];
-    const docs = Array.isArray(checklist.received_summary) ? checklist.received_summary : [];
+    const docs = Array.isArray(checklist.received_summary) ? checklist.received_summary :
+                 Array.isArray(a.documents_summary) ? a.documents_summary : [];
     const profile = (a.xlsx_profile || {}).profile || {};
     const empresa = profile.empresa || payload.label || 'n/d';
     const nit = profile.nit || 'n/d';
 
+    // Extraer validaciones adicionales de múltiples fuentes
+    const vrMatches = a.validacion_resumen?.matches || a.reporte_ejecutivo?.matches || {};
+    const camara = a.camara_profile || {};
+    const formulario = a.formulario_profile || {};
+
     let html = `<div style="padding:16px">`;
-    html += `<div style="margin-bottom:16px">
-        <div style="font-size:13px;font-weight:700;margin-bottom:4px">${escapeHtml(empresa)}</div>
-        <div style="font-size:12px;color:var(--c-text-2)">NIT: ${escapeHtml(nit)}</div>
+
+    // Header con botón back
+    html += `<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+        <button class="btn-secondary" id="validacionBackBtn" type="button" style="font-size:11px;padding:5px 10px">← Otro contrato</button>
+        <div>
+            <div style="font-size:13px;font-weight:700">${escapeHtml(empresa)}</div>
+            <div style="font-size:12px;color:var(--c-text-2)">NIT: ${escapeHtml(nit)}</div>
+        </div>
     </div>`;
 
     // Documentos recibidos
@@ -1220,15 +1234,46 @@ function renderValidacionOCR(container, payload) {
         html += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:20px">`;
         for (const group of docs) {
             const count = (group.files||[]).length;
-            const label = group.label || group.type || 'Documento';
-            html += `<span class="pill pill-neutral">${escapeHtml(label)} (${count})</span>`;
+            const label = getReviewTypeLabel(group.type || group.label) || group.label || 'Documento';
+            const code = getReviewTypeCode(group.type || group.label);
+            html += `<span class="pill pill-neutral">${escapeHtml(label)}${code?` ·${code}`:''} (${count})</span>`;
         }
         html += `</div>`;
     }
 
-    // Validaciones
+    // Comparaciones de datos cruzados (OCR real)
+    const crossChecks = [];
+    if (vrMatches.empresa_nombre) {
+        const m = vrMatches.empresa_nombre;
+        crossChecks.push({ label: 'Razón social', camara: m.camara||'', formulario: m.formulario||m.xlsx||'', ok: m.match ?? (m.camara===m.formulario) });
+    }
+    if (camara.nit || formulario.nit) {
+        crossChecks.push({ label: 'NIT', camara: camara.nit||'', formulario: formulario.nit||profile.nit||'', ok: camara.nit===formulario.nit });
+    }
+    if (camara.representante_legal || formulario.representante_legal) {
+        crossChecks.push({ label: 'Representante Legal', camara: camara.representante_legal||'', formulario: formulario.representante_legal||'', ok: camara.representante_legal===formulario.representante_legal });
+    }
+
+    if (crossChecks.length) {
+        html += `<div class="report-section-title" style="margin-bottom:8px">Comparación OCR · Cámara vs Formulario</div>`;
+        html += `<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:20px">`;
+        for (const c of crossChecks) {
+            html += `
+                <div class="ocr-field ${c.ok?'match':'mismatch'}">
+                    <div class="ocr-field-label">${escapeHtml(c.label)}</div>
+                    <div class="ocr-field-val">${c.ok ? '✓ Coincide' : '✗ No coincide'}</div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;font-size:11px">
+                        <div><span style="color:var(--c-text-2)">Cámara:</span><br><strong>${escapeHtml(c.camara||'—')}</strong></div>
+                        <div><span style="color:var(--c-text-2)">Formulario/XLSX:</span><br><strong>${escapeHtml(c.formulario||'—')}</strong></div>
+                    </div>
+                </div>`;
+        }
+        html += `</div>`;
+    }
+
+    // Validaciones del checklist
     if (validaciones.length) {
-        html += `<div class="report-section-title" style="margin-bottom:8px">Validaciones OCR</div>`;
+        html += `<div class="report-section-title" style="margin-bottom:8px">Validaciones del sistema</div>`;
         html += `<div style="display:flex;flex-direction:column;gap:8px">`;
         for (const v of validaciones) {
             const ok = Boolean(v.passed || v.ok || v.result === 'ok');
@@ -1247,12 +1292,21 @@ function renderValidacionOCR(container, payload) {
             `;
         }
         html += `</div>`;
-    } else {
+    } else if (!crossChecks.length) {
         html += `<div class="empty-state">No hay validaciones OCR disponibles para este contrato</div>`;
     }
 
     html += `</div>`;
     container.innerHTML = html;
+
+    // Back button — muestra el selector de nuevo
+    container.querySelector('#validacionBackBtn')?.addEventListener('click', () => {
+        container.innerHTML = '<div class="empty-state">Selecciona un contrato para revisar las validaciones OCR</div>';
+        const selectorRow = document.getElementById('validacionSelectorRow');
+        if (selectorRow) selectorRow.style.display = '';
+        const sel = document.getElementById('validacionCaseSelect');
+        if (sel) sel.value = '';
+    });
 }
 
 // ── VISOR DOCUMENTAL ─────────────────────────────────────────
@@ -1458,6 +1512,49 @@ function renderReporte(container, payload) {
     // Documentos del contrato para comparación rápida — todos
     const docItems = buildDocItems(payload);
 
+    // Parser de bloqueantes para detectar fuente y contexto
+    function parseBlocker(b) {
+        const txt = blockerText(b);
+        const lower = txt.toLowerCase();
+        let sourceType = null; // 'xlsx_row', 'pdf_doc', 'cross_compare'
+        let sheetName = '';
+        let rowNum = '';
+        let docType = b?.document_type || b?.tipo_documento || '';
+        let workerDoc = '';
+        let actionLabel = '';
+
+        // XLSX - salario, correo, duplicado, tipo trabajador, AFP, EPS
+        const sheetMatch = txt.match(/Sede\s+\d+\s*[-–]\s*Trabajadores/i) ||
+                           txt.match(/SEDE\s+\d+/i);
+        const filaMatch = txt.match(/fila\s+(\d+)/i);
+        const docMatch = txt.match(/(\d{6,12})/);
+
+        if (sheetMatch || filaMatch || lower.includes('xlsx') || lower.includes('salario') ||
+            lower.includes('correo') || lower.includes('duplicado') || lower.includes('fila') ||
+            lower.includes('tipo de trabajador') || lower.includes('afp') || lower.includes('eps')) {
+            sourceType = 'xlsx_row';
+            sheetName = sheetMatch ? sheetMatch[0] : '';
+            rowNum = filaMatch ? filaMatch[1] : '';
+            workerDoc = docMatch ? docMatch[1] : '';
+            actionLabel = sheetName ? `Ver fila · ${sheetName}` : (rowNum ? `Ver fila ${rowNum}` : 'Ver en XLSX');
+        }
+        // Razón social / cámara / documento
+        else if (lower.includes('razón social') || lower.includes('razon social') ||
+                 lower.includes('cámara') || lower.includes('camara') ||
+                 lower.includes('cedula') || lower.includes('cédula') ||
+                 lower.includes('representante')) {
+            sourceType = 'pdf_doc';
+            docType = docType || (lower.includes('cámara') || lower.includes('camara') ? 'camara_comercio' :
+                                  lower.includes('cedula') || lower.includes('cédula') ? 'cedula' : 'formulario_afiliacion');
+            actionLabel = `Ver ${getReviewTypeLabel(docType)}`;
+        }
+
+        return { sourceType, sheetName, rowNum, workerDoc, docType, actionLabel };
+    }
+
+    // Workers del XLSX para mostrar en panel
+    const xlsxRecords = (a.xlsx_profile?.records || []);
+
     container.innerHTML = `
         <div class="report-header">
             <span class="report-state-badge ${stateClass}">${escapeHtml(estado)}</span>
@@ -1474,10 +1571,22 @@ function renderReporte(container, payload) {
             <div class="report-section">
                 <div class="report-section-title">Datos del contrato</div>
                 <div class="report-grid">
-                    <div class="report-kv"><div class="report-kv-label">Trabajadores</div><div class="report-kv-val">${escapeHtml(String(trabajadores))}</div></div>
-                    <div class="report-kv"><div class="report-kv-label">Sedes</div><div class="report-kv-val">${escapeHtml(String(sedes))}</div></div>
-                    <div class="report-kv"><div class="report-kv-label">Nómina total</div><div class="report-kv-val">${escapeHtml(nomina)}</div></div>
+                    <div class="report-kv clickable" data-panel="workers" role="button" tabindex="0" title="Ver lista de trabajadores">
+                        <div class="report-kv-label">Trabajadores</div>
+                        <div class="report-kv-val">${escapeHtml(String(trabajadores))}</div>
+                        <div class="report-kv-hint">Ver lista →</div>
+                    </div>
+                    <div class="report-kv clickable" data-panel="sedes" role="button" tabindex="0" title="Ver sedes y centros de trabajo">
+                        <div class="report-kv-label">Sedes</div>
+                        <div class="report-kv-val">${escapeHtml(String(sedes))}</div>
+                        <div class="report-kv-hint">Ver sedes →</div>
+                    </div>
+                    <div class="report-kv">
+                        <div class="report-kv-label">Nómina total</div>
+                        <div class="report-kv-val">${escapeHtml(nomina)}</div>
+                    </div>
                 </div>
+                <div id="reportDataPanel" class="report-data-panel hidden"></div>
             </div>
             ${blockers.length ? `
                 <div class="report-section">
@@ -1486,11 +1595,18 @@ function renderReporte(container, payload) {
                         ${blockers.slice(0,10).map((b, i) => {
                             const raw = blockerText(b);
                             const txt = enrichBlockerText(raw);
-                            const docType = b?.document_type || b?.tipo_documento || b?.tipo || '';
-                            const fila = b?.row || b?.fila || b?.field || '';
+                            const parsed = parseBlocker(b);
                             const isMultiLine = txt.includes('\n');
+                            const isClickable = parsed.sourceType !== null;
                             return `
-                                <div class="report-blocker-interactive" data-blocker-idx="${i}">
+                                <div class="report-blocker-interactive ${isClickable?'clickable':''}"
+                                    data-blocker-idx="${i}"
+                                    data-source-type="${escapeHtml(parsed.sourceType||'')}"
+                                    data-sheet="${escapeHtml(parsed.sheetName)}"
+                                    data-row="${escapeHtml(parsed.rowNum)}"
+                                    data-worker-doc="${escapeHtml(parsed.workerDoc)}"
+                                    data-doc-type="${escapeHtml(parsed.docType)}"
+                                    ${isClickable ? 'role="button" tabindex="0"' : ''}>
                                     <div class="report-blocker-main">
                                         <span class="report-blocker-icon">✗</span>
                                         <div class="report-blocker-content">
@@ -1501,14 +1617,14 @@ function renderReporte(container, payload) {
                                                 ).join('')
                                                 : `<div class="report-blocker-text">${escapeHtml(txt)}</div>`
                                             }
-                                            ${fila ? `<div class="report-blocker-meta">Campo / fila: ${escapeHtml(String(fila))}</div>` : ''}
                                         </div>
                                     </div>
-                                    ${docType ? `<button class="btn-link report-blocker-docbtn" data-doc-type="${escapeHtml(docType)}" type="button">Ver ${escapeHtml(docType)} →</button>` : ''}
+                                    ${isClickable ? `<span class="report-blocker-action-hint">${escapeHtml(parsed.actionLabel)} →</span>` : ''}
                                 </div>
                             `;
                         }).join('')}
                     </div>
+                    <div id="reportBlockerPanel" class="report-blocker-panel hidden"></div>
                     ${docItems.length ? `
                         <div class="report-docs-quick">
                             <div class="report-section-title" style="margin-top:14px">Documentos del contrato · abre y compara</div>
@@ -1586,7 +1702,183 @@ function renderReporte(container, payload) {
         document.getElementById('reportDocPreview')?.classList.add('hidden');
         container.querySelectorAll('.doc-chip').forEach(c => c.classList.remove('active'));
     });
-}
+
+    // ── Bloqueantes clickeables ──────────────────────────────
+    container.querySelectorAll('.report-blocker-interactive.clickable').forEach(el => {
+        el.addEventListener('click', () => {
+            const panel = document.getElementById('reportBlockerPanel');
+            if (!panel) return;
+            const sourceType = el.dataset.sourceType;
+            const sheet = el.dataset.sheet;
+            const row = el.dataset.row;
+            const workerDoc = el.dataset.workerDoc;
+            const docType = el.dataset.docType;
+
+            // Toggle si ya está abierto el mismo
+            const alreadyOpen = !panel.classList.contains('hidden') && panel.dataset.activeBlocker === el.dataset.blockerIdx;
+            container.querySelectorAll('.report-blocker-interactive').forEach(b => b.classList.remove('active'));
+            if (alreadyOpen) { panel.classList.add('hidden'); return; }
+            el.classList.add('active');
+            panel.dataset.activeBlocker = el.dataset.blockerIdx;
+            panel.classList.remove('hidden');
+
+            if (sourceType === 'xlsx_row') {
+                // Buscar trabajadores relevantes
+                const rowInt = parseInt(row) || 0;
+                const matches = xlsxRecords.filter(r => {
+                    const rDoc = String(r.documento||r.cedula||r.doc||'');
+                    if (workerDoc && rDoc === workerDoc) return true;
+                    if (sheet && String(r.sede||r.sheet||'').toLowerCase().includes(sheet.toLowerCase())) return true;
+                    return false;
+                }).slice(0, 15);
+
+                if (matches.length) {
+                    panel.innerHTML = `
+                        <div class="blocker-panel-head">
+                            <span class="blocker-panel-title">📋 ${escapeHtml(sheet || 'Trabajadores relevantes')}</span>
+                            ${row ? `<span style="font-size:11px;color:var(--c-text-2)">Fila ${escapeHtml(row)}</span>` : ''}
+                            <button class="btn-icon" id="blockerPanelClose">✕</button>
+                        </div>
+                        <div style="overflow-x:auto">
+                        <table class="blocker-table">
+                            <thead><tr>
+                                <th>Documento</th><th>Nombre</th><th>Sede</th>
+                                <th>Salario</th><th>Correo</th>
+                            </tr></thead>
+                            <tbody>
+                            ${matches.map(r => `<tr class="${workerDoc && String(r.documento||r.cedula||r.doc||'') === workerDoc ? 'blocker-row-highlight' : ''}">
+                                <td>${escapeHtml(String(r.documento||r.cedula||r.doc||''))}</td>
+                                <td>${escapeHtml(String(r.nombre||r.name||[r.primer_nombre,r.segundo_nombre,r.primer_apellido,r.segundo_apellido].filter(Boolean).join(' ')||''))}</td>
+                                <td>${escapeHtml(String(r.sede||r.sheet||''))}</td>
+                                <td>${escapeHtml(String(r.salario||r.salary||''))}</td>
+                                <td>${escapeHtml(String(r.correo||r.email||''))}</td>
+                            </tr>`).join('')}
+                            </tbody>
+                        </table>
+                        </div>
+                    `;
+                } else {
+                    // Sin registros exactos — mostrar contexto del bloqueante
+                    panel.innerHTML = `
+                        <div class="blocker-panel-head">
+                            <span class="blocker-panel-title">📋 ${escapeHtml(sheet || 'XLSX')}</span>
+                            ${row ? `<span style="font-size:11px;color:var(--c-text-2)">Fila ${escapeHtml(row)}</span>` : ''}
+                            <button class="btn-icon" id="blockerPanelClose">✕</button>
+                        </div>
+                        <div style="padding:12px;font-size:12px;color:var(--c-text-2)">
+                            El dato fue tomado del archivo XLSX · hoja <strong>${escapeHtml(sheet||'Trabajadores')}</strong>${row ? `, fila <strong>${escapeHtml(row)}</strong>` : ''}.
+                            ${workerDoc ? `<br>Cédula/Documento: <strong>${escapeHtml(workerDoc)}</strong>` : ''}
+                            <br><br>Abre la vista <strong>Clasificación</strong> y selecciona el XLSX para ver el archivo completo.
+                        </div>
+                    `;
+                }
+            } else if (sourceType === 'pdf_doc') {
+                // Buscar el PDF correspondiente y mostrarlo
+                const doc = docItems.find(d => d.type === docType || d.type?.includes(docType));
+                if (doc) {
+                    panel.innerHTML = `
+                        <div class="blocker-panel-head">
+                            <span class="blocker-panel-title">📄 ${escapeHtml(getReviewTypeLabel(docType))}</span>
+                            <button class="btn-icon" id="blockerPanelClose">✕</button>
+                        </div>
+                        <div id="blockerDocPreview" style="min-height:300px">
+                            <div class="loading-msg">Abriendo documento...</div>
+                        </div>
+                    `;
+                    const previewEl = panel.querySelector('#blockerDocPreview');
+                    if (previewEl) renderDocPreview(previewEl, caseId, doc);
+                } else {
+                    panel.innerHTML = `
+                        <div class="blocker-panel-head">
+                            <span class="blocker-panel-title">📄 ${escapeHtml(getReviewTypeLabel(docType))}</span>
+                            <button class="btn-icon" id="blockerPanelClose">✕</button>
+                        </div>
+                        <div style="padding:12px;font-size:12px;color:var(--c-text-2)">
+                            Documento <strong>${escapeHtml(getReviewTypeLabel(docType))}</strong> no encontrado en este expediente.
+                        </div>
+                    `;
+                }
+            }
+
+            panel.querySelector('#blockerPanelClose')?.addEventListener('click', () => {
+                panel.classList.add('hidden');
+                el.classList.remove('active');
+            });
+            panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+    });
+
+    // ── Tarjetas Trabajadores / Sedes clickeables ────────────
+    container.querySelectorAll('.report-kv.clickable').forEach(kv => {
+        kv.addEventListener('click', () => {
+            const panelType = kv.dataset.panel;
+            const dataPanel = document.getElementById('reportDataPanel');
+            if (!dataPanel) return;
+            const alreadyOpen = !dataPanel.classList.contains('hidden') && dataPanel.dataset.panel === panelType;
+            container.querySelectorAll('.report-kv.clickable').forEach(k => k.classList.remove('active'));
+            if (alreadyOpen) { dataPanel.classList.add('hidden'); return; }
+            kv.classList.add('active');
+            dataPanel.dataset.panel = panelType;
+            dataPanel.classList.remove('hidden');
+
+            if (panelType === 'workers') {
+                const workers = xlsxRecords.slice(0, 100);
+                if (!workers.length) {
+                    dataPanel.innerHTML = `<div style="padding:12px;font-size:12px;color:var(--c-text-2)">No hay registros de trabajadores disponibles.</div>`;
+                } else {
+                    dataPanel.innerHTML = `
+                        <div class="blocker-panel-head">
+                            <span class="blocker-panel-title">👷 Trabajadores (${workers.length}${xlsxRecords.length>100?' de '+xlsxRecords.length:''})</span>
+                            <button class="btn-icon" id="dataPanelClose">✕</button>
+                        </div>
+                        <div style="overflow-x:auto;max-height:300px;overflow-y:auto">
+                        <table class="blocker-table">
+                            <thead><tr><th>Documento</th><th>Nombre</th><th>Sede</th><th>Salario</th><th>AFP</th><th>EPS</th></tr></thead>
+                            <tbody>${workers.map(r => `<tr>
+                                <td>${escapeHtml(String(r.documento||r.cedula||r.doc||''))}</td>
+                                <td>${escapeHtml(String(r.nombre||r.name||[r.primer_nombre,r.segundo_nombre,r.primer_apellido,r.segundo_apellido].filter(Boolean).join(' ')||''))}</td>
+                                <td>${escapeHtml(String(r.sede||r.sheet||''))}</td>
+                                <td>${escapeHtml(String(r.salario||r.salary||''))}</td>
+                                <td>${escapeHtml(String(r.afp||''))}</td>
+                                <td>${escapeHtml(String(r.eps||''))}</td>
+                            </tr>`).join('')}</tbody>
+                        </table>
+                        </div>
+                    `;
+                }
+            } else if (panelType === 'sedes') {
+                const sedesData = a.xlsx_profile?.sedes || a.sedes || [];
+                if (!sedesData.length) {
+                    dataPanel.innerHTML = `<div style="padding:12px;font-size:12px;color:var(--c-text-2)">No hay información de sedes disponible.</div>`;
+                } else {
+                    dataPanel.innerHTML = `
+                        <div class="blocker-panel-head">
+                            <span class="blocker-panel-title">🏢 Sedes (${sedesData.length})</span>
+                            <button class="btn-icon" id="dataPanelClose">✕</button>
+                        </div>
+                        <div style="overflow-x:auto">
+                        <table class="blocker-table">
+                            <thead><tr><th>Código</th><th>Nombre</th><th>Dirección</th><th>Ciudad</th><th>Trabajadores</th></tr></thead>
+                            <tbody>${sedesData.map(s => `<tr>
+                                <td>${escapeHtml(String(s.codigo||s.code||s.id||''))}</td>
+                                <td>${escapeHtml(String(s.nombre||s.name||''))}</td>
+                                <td>${escapeHtml(String(s.direccion||s.address||''))}</td>
+                                <td>${escapeHtml(String(s.ciudad||s.city||''))}</td>
+                                <td>${escapeHtml(String(s.trabajadores||s.workers||''))}</td>
+                            </tr>`).join('')}</tbody>
+                        </table>
+                        </div>
+                    `;
+                }
+            }
+            dataPanel.querySelector('#dataPanelClose')?.addEventListener('click', () => {
+                dataPanel.classList.add('hidden');
+                kv.classList.remove('active');
+            });
+            dataPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+    });
+
 
 // ── PRODUCCIÓN (COLMENA) ─────────────────────────────────────
 async function loadProduccion() {
