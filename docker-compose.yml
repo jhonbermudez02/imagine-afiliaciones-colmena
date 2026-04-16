@@ -22,10 +22,8 @@ services:
     volumes:
       - ./frontend-nova:/app
     ports:
-      - "3000:5173"
-    command: sh -c "npm install && npx vite --host 0.0.0.0"
-    environment:
-      - VITE_API_URL=http://localhost:8000
+      - "8105:8105"
+    command: sh -c "npm install && npx vite --host 0.0.0.0 --port 8105 --strictPort"
     restart: unless-stopped
     networks:                 # ← AGREGAR
       - afi_network           # ← AGREGAR
@@ -73,7 +71,16 @@ services:
       - OLLAMA_URL=http://ollama:11434
       - MODEL_NAME=llama3.2:1b
       - EMBEDDING_MODEL=nomic-embed-text
+      - RERANKER_ENABLED=false
       - KNOWLEDGE_DIR=/data/knowledge
+      - NOTIFICATION_ENABLED=${NOTIFICATION_ENABLED:-true}
+      - NOTIFICATION_SENDER_EMAIL=${NOTIFICATION_SENDER_EMAIL:-hdescobarmesa@gmail.com}
+      - NOTIFICATION_SENDER_NAME=${NOTIFICATION_SENDER_NAME:-Imagine S.A.S.}
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
     volumes:
       - ./backend:/app
       - ./data:/data

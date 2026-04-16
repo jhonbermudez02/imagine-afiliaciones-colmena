@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Imagine S.A.S. - Sistema de Afiliaciones</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="app-shell">
+        <header class="global-topbar">
+            <div class="topbar-brand">
+                <img class="topbar-logo" src="/imagine-logo.svg" alt="Imagine S.A.S.">
+                <div class="topbar-brand-text">
+                    <span class="topbar-kicker">IMAGINE S.A.S.</span>
+                    <span class="topbar-title">Portal ARL · Afiliaciones</span>
+                </div>
+            </div>
+            <nav class="topbar-nav">
+                <div class="mode-pills hidden" id="modeSwitcher"></div>
+                <div class="view-pills" id="viewSwitcher">
+                    <button class="view-pill active" type="button" data-view="processView">Operación</button>
+                    <button class="view-pill" type="button" data-view="productionView">Producción</button>
+                    <button class="view-pill" type="button" data-view="reviewView">Revisión</button>
+                    <button class="view-pill" type="button" data-view="classificationView">Clasificación</button>
+                    <button class="view-pill" type="button" data-view="searchView">Búsqueda</button>
+                    <button class="view-pill" type="button" data-view="reportView">Reporte</button>
+                    <button class="view-pill" type="button" data-view="adminView">Admin</button>
+                </div>
+            </nav>
+            <div class="topbar-right">
+                <button class="nova-trigger" id="novaToggleBtn" type="button" title="Abrir NOVA (Alt+N)">
+                    <span class="nova-trigger-icon">✦</span>
+                    <span class="nova-trigger-label">NOVA</span>
+                    <span class="nova-trigger-status" id="novaTriggerStatus"></span>
+                </button>
+                <div class="tester-toolbar">
+                    <div class="tester-session-meta">
+                        <div class="tester-toolbar-line hidden">
+                            <span class="tester-toolbar-label">Perfil</span>
+                            <span class="tester-toolbar-status" id="profileStatus">Sin perfil</span>
+                        </div>
+                        <div class="tester-toolbar-line tester-toolbar-user-line">
+                            <span class="tester-toolbar-label">Usuario</span>
+                            <span class="tester-toolbar-status" id="testerStatus">Sin identificar</span>
+                        </div>
+                        <div class="tester-toolbar-line hidden">
+                            <span class="tester-toolbar-label">Build</span>
+                            <span class="tester-toolbar-status" id="buildStatus">web-pendiente</span>
+                        </div>
+                    </div>
+                    <div class="tester-toolbar-actions">
+                        <button class="tester-toolbar-button" id="changeTesterButton" type="button">Cambiar sesión</button>
+                        <button class="tester-toolbar-button" id="logoutButton" type="button">Salir</button>
+                    </div>
+                    <select class="tester-select hidden" id="testerSelect">
+                        <option value="">Selecciona tu nombre</option>
+                    </select>
+                </div>
+            </div>
+        </header>
+
+        <section class="tester-login-screen hidden" id="testerLoginScreen" aria-label="Ingreso de testers">
+            <div class="tester-login-card">
+                <div class="panel-label">Control de pruebas</div>
+                <h1>Selecciona tu tarjeta para entrar</h1>
+                <p class="service-role">Cada prueba quedará atribuida al tester activo y al perfil operativo. Primero elige el perfil y luego el nombre.</p>
+                <div class="tester-login-note" id="testerLoginNote">Paso 1: selecciona el perfil con el que vas a trabajar.</div>
+                <div class="tester-role-grid" id="testerRoleGrid">
+                    <button class="tester-role-option" type="button" data-profile="imagine">
+                        <strong>Perfil Imagine</strong>
+                        <span>Sube contrato, valida expediente y deja lista la clasificación.</span>
+                    </button>
+                    <button class="tester-role-option" type="button" data-profile="colmena">
+                        <strong>Perfil Colmena</strong>
+                        <span>Revisa lo capturado por Imagine, valida imágenes y genera el plano.</span>
+                    </button>
+                </div>
+                <div class="tester-login-grid hidden" id="testerLoginGrid"></div>
+                <div class="tester-login-actions">
+                    <button class="search-button secondary" id="testerKeepSessionButton" type="button">Seguir con la sesión actual</button>
+                    <button class="search-button secondary" id="testerResetButton" type="button">Limpiar selección</button>
+                </div>
+            </div>
+        </section>
+
+        <main class="workspace">
+            <section class="workspace-view active" id="processView">
+                <section class="chat-stage">
+                    <section class="portal-band">
+                        <article class="portal-band-card portal-band-summary">
+                            <div class="panel-label">Flujo automático</div>
+                            <strong>La prevalidación corre completa en una sola ejecución</strong>
+                            <p class="service-role">Primero selecciona los archivos del contrato. Luego ejecuta el proceso. El sistema clasifica, cruza y valida. Si la prevalidación aprueba, continúa automáticamente hasta generar el archivo de carga al CORE.</p>
+                            <div class="dossier-actions">
+                                <button class="card-link-button" type="button" data-flow-action="focus-package-upload">Seleccionar archivos</button>
+                                <button class="card-link-button" id="runWorkflowInlineButton" type="button">Ejecutar proceso</button>
+                                <button class="card-link-button" type="button" data-flow-action="open-recover-926">Ir al CORE</button>
+                            </div>
+                        </article>
+                    </section>
+                    <section class="sources-section expanded workflow-section hidden" id="caseDossierSection">
+                        <div class="sources-header"><span>Contrato activo</span></div>
+                        <div class="workflow-content" id="caseDossierContent"></div>
+                    </section>
+                    <div class="case-uploader">
+                        <div class="case-form-grid compact-upload-grid">
+                            <label class="upload-pill upload-pill-wide">
+                                <span>Seleccionar paquete del contrato</span>
+                                <input type="file" id="packageFilesInput" multiple accept=".xlsx,.xls,.xlsm,.pdf,.zip,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp">
+                            </label>
+                        </div>
+                        <div class="service-role" id="packageFilesLabel">Ningún archivo seleccionado.</div>
+                        <div class="service-role">Aquí eliges el paquete del contrato. Mínimo requerido: un XLSX en el formato de Colmena Afiliaciones y mínimo un PDF.</div>
+                        <div class="case-status-line" id="caseStatusLine">Carga el paquete completo y ejecuta el proceso. Imagine hará la prevalidación y, si pasa, continuará hasta el 926.</div>
+                        <div class="process-checklist hidden" id="processChecklist"></div>
+                    </div>
+                    <section class="sources-section expanded workflow-section" id="queueSection">
+                        <div class="sources-header">
+                            <div class="sources-heading-group">
+                                <span>Cola de ejecución</span>
+                                <span class="service-role">Muestra el contrato en proceso y los contratos en espera.</span>
+                            </div>
+                        </div>
+                        <div class="workflow-content" id="queueContent"></div>
+                    </section>
+                    <section class="sources-section expanded workflow-section" id="recover926Section">
+                        <div class="sources-header">
+                            <div class="sources-heading-group">
+                                <span>Archivo de carga al CORE</span>
+                                <span class="service-role">Recupera, abre o descarga archivos de carga al CORE de procesos terminados.</span>
+                            </div>
+                            <div class="case-head-actions">
+                                <button class="search-button secondary compact-button" id="toggleRecover926Button" type="button">Mostrar</button>
+                                <button class="search-button secondary compact-button" type="button" data-flow-action="open-compare-926">Comparar archivos</button>
+                            </div>
+                        </div>
+                        <div class="workflow-content hidden" id="recover926Content"></div>
+                    </section>
+                    <section class="sources-section expanded workflow-section" id="failedPrecheckSection">
+                        <div class="sources-header">
+                            <div class="sources-heading-group">
+                                <span>Prevalidación no aprobada</span>
+                                <span class="service-role">Consulta contratos rechazados u observados y abre su resumen ejecutivo.</span>
+                            </div>
+                            <div class="case-head-actions">
+                                <button class="search-button secondary compact-button" id="toggleFailedPrecheckButton" type="button">Mostrar</button>
+                            </div>
+                        </div>
+                        <div class="workflow-content hidden" id="failedPrecheckContent"></div>
+                    </section>
+                    <section class="sources-section expanded workflow-section hidden" id="workflowSection">
+                        <div class="sources-header"><span>Resumen operativo</span></div>
+                        <div class="workflow-content" id="workflowContent"></div>
+                    </section>
+                    <section class="sources-section expanded workflow-section hidden" id="precheckSection">
+                        <div class="sources-header"><span>Reporte ejecutivo de prevalidación</span></div>
+                        <div class="workflow-content" id="precheckReportContent"></div>
+                    </section>
+                    <section class="sources-section expanded workflow-section hidden" id="executiveSection">
+                        <div class="sources-header"><span>Reporte ejecutivo final</span></div>
+                        <div class="workflow-content" id="executiveReportContent"></div>
+                    </section>
+                    <section class="sources-section expanded workflow-section hidden" id="workflowRunSection">
+                        <div class="sources-header"><span>Flujo automático</span></div>
+                        <div class="workflow-content" id="workflowRunContent"></div>
+                    </section>
+                    <section class="sources-section expanded workflow-section hidden" id="compareCoreSection">
+                        <div class="sources-header"><span>Comparación del archivo para el CORE</span></div>
+                        <div class="workflow-content">
+                            <article class="workflow-card">
+                                <p class="workflow-summary">Compara el archivo de carga generado por este sistema contra el archivo del sistema anterior.</p>
+                                <div class="workflow-content">
+                                    <label class="upload-pill upload-pill-wide">Archivo del sistema nuevo<input type="file" id="compareLeftFile" accept=".txt,.926,text/plain"></label>
+                                    <label class="upload-pill upload-pill-wide">Archivo del sistema anterior<input type="file" id="compareRightFile" accept=".txt,.926,text/plain"></label>
+                                    <div class="case-head-actions">
+                                        <button class="search-button" id="compare926Button" type="button">Comparar archivos</button>
+                                    </div>
+                                    <div id="compare926Content" class="workflow-content"></div>
+                                </div>
+                            </article>
+                        </div>
+                    </section>
+                </section>
+            </section>
+
+            <section class="workspace-view" id="productionView">
+                <section class="chat-stage">
+                    <section class="sources-section expanded workflow-section hidden" id="colmenaBatchSection">
+                        <div class="sources-header">
+                            <div class="sources-heading-group">
+                                <span>Lote consolidado CORE</span>
+                                <span class="service-role">Selecciona contratos con 926 listo y genera un solo plano consolidado para carga principal.</span>
+                            </div>
+                            <div class="case-head-actions">
+                                <button class="search-button secondary compact-button" id="clearColmenaSelectionButton" type="button">Limpiar selección</button>
+                                <button class="search-button compact-button" id="downloadColmenaBatchButton" type="button">Descargar lote consolidado</button>
+                            </div>
+                        </div>
+                        <div class="workflow-content" id="colmenaBatchContent"></div>
+                    </section>
+                    <section class="sources-section expanded workflow-section hidden" id="colmenaWorkbenchSection">
+                        <div class="sources-header">
+                            <div class="sources-heading-group">
+                                <span>Mesa Colmena</span>
+                                <span class="service-role">Vista de trabajo para validar la información capturada por Imagine, revisar documentos y generar el plano.</span>
+                            </div>
+                        </div>
+                        <div class="workflow-content" id="colmenaWorkbenchContent"></div>
+                    </section>
+                    <section class="sources-section expanded workflow-section">
+                        <div class="sources-header">
+                            <div class="sources-heading-group">
+                                <span>Producción</span>
+                                <span class="service-role">Consulta todos los contratos, abre documentos, descarga el archivo para el CORE o baja el paquete completo.</span>
+                            </div>
+                            <div class="case-head-actions">
+                                <button class="search-button secondary compact-button" id="refreshProductionButton" type="button">Actualizar</button>
+                            </div>
+                        </div>
+                        <div class="workflow-content" id="productionCasesContent"></div>
+                    </section>
+                </section>
+            </section>
+
+            <section class="workspace-view" id="reviewView">
+                <section class="chat-stage">
+                    <section class="sources-section expanded workflow-section" id="reviewGuideSection">
+                        <div class="sources-header"><span>Revisión manual</span></div>
+                        <div class="workflow-content">
+                            <article class="workflow-card">
+                                <p class="workflow-summary" id="reviewGuideSummary">Si hay documentos pendientes, desde aquí puedes abrir la bandeja de revisión y validarlos.</p>
+                                <div class="review-guide-grid">
+                                    <div class="workflow-block actionable-card" data-flow-action="open-review-checklist" tabindex="0">
+                                        <div class="panel-label">Documentos pendientes</div>
+                                        <p class="workflow-summary" id="reviewGuideCardSummary">Abre la bandeja de revisión y muestra los documentos pendientes del lote activo.</p>
+                                        <button class="card-link-button" id="reviewGuidePrimaryButton" type="button" data-flow-action="open-review-checklist">Validar documentos</button>
+                                    </div>
+                                </div>
+                                <div class="review-guide-note hidden" id="reviewGuideNote"></div>
+                                <div class="workflow-block">
+                                    <div class="panel-label">Uso recomendado</div>
+                                    <ul class="workflow-bullets">
+                                        <li>Revisa clasificación documental, XLSX y cruces.</li>
+                                        <li>Si el documento está mal clasificado, elige el tipo correcto.</li>
+                                        <li>Las correcciones quedan listas para dataset y mejora continua.</li>
+                                    </ul>
+                                </div>
+                            </article>
+                        </div>
+                    </section>
+                    <section class="sources-section expanded workflow-section hidden" id="checklistSection">
+                        <div class="sources-header"><span>Checklist documental</span></div>
+                        <div class="workflow-content" id="caseChecklistContent"></div>
+                    </section>
+                </section>
+            </section>
+
+            <section class="workspace-view" id="classificationView">
+                <section class="chat-stage">
+                    <section class="sources-section expanded workflow-section">
+                        <div class="sources-header">
+                            <div class="sources-heading-group">
+                                <span>Clasificación documental</span>
+                                <span class="service-role">Revisa el documento en visor, corrige el tipo y ajusta el orden operativo del contrato.</span>
+                            </div>
+                        </div>
+                        <div class="workflow-content" id="classificationContent"></div>
+                    </section>
+                </section>
+            </section>
+
+            <section class="workspace-view" id="searchView">
+                <section class="chat-stage search-stage">
+                    <section class="search-archive-intro actionable-card" data-flow-action="focus-search" tabindex="0">
+                        <div>
+                            <div class="panel-label">Archivo operativo</div>
+                            <strong>Consulta contratos como si fuera una mesa documental</strong>
+                            <p class="service-role">Pregunta por estado, bloqueantes, representantes, cédulas, RUT, cámara, formularios y hallazgos en lenguaje libre.</p>
+                        </div>
+                        <button class="card-link-button" type="button" data-flow-action="focus-search">Consultar ahora</button>
+                    </section>
+                    <div class="chat-container" id="chatContainer"></div>
+                    <div class="composer-shell">
+                        <div class="search-container">
+                            <input type="text" class="search-input" id="searchInput" placeholder="Ejemplo: cédula representante protegemos, puerto gaitan, cámara monca...">
+                            <button class="search-button" id="sendButton" type="button">Enviar</button>
+                        </div>
+                        <div class="search-activity hidden" id="searchActivity">
+                            <span id="searchActivityLabel">Consultando contrato y documentos...</span>
+                            <span class="search-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+                        </div>
+                    </div>
+                </section>
+                <section class="sources-section expanded workflow-section hidden" id="caseSearchSection">
+                    <div class="sources-header"><span>Búsqueda en contratos</span></div>
+                    <div class="workflow-content" id="caseSearchContent"></div>
+                </section>
+            </section>
+
+            <section class="workspace-view" id="reportView">
+                <section class="chat-stage">
+                    <section class="sources-section expanded workflow-section">
+                        <div class="sources-header"><span>Reporte: Cambios/Mejoras</span></div>
+                        <div class="workflow-content">
+                            <article class="workflow-card">
+                                <p class="workflow-summary">Este sistema es propiedad de Imagine S.A.S. Favor reportar aquí los ajustes y/o mejoras.</p>
+                                <form class="report-note-form" id="feedbackNoteForm">
+                                    <input class="search-input" id="feedbackNameInput" type="text" placeholder="Nombre">
+                                    <textarea class="compare-textarea" id="feedbackNoteInput" placeholder="Escribe aquí el cambio, mejora o problema detectado..."></textarea>
+                                    <div class="report-feedback-status hidden" id="feedbackSaveStatus"></div>
+                                    <div class="case-head-actions">
+                                        <button class="search-button" id="feedbackNoteButton" type="submit">Guardar comentario</button>
+                                    </div>
+                                </form>
+                            </article>
+                        </div>
+                    </section>
+                    <section class="sources-section expanded workflow-section">
+                        <div class="sources-header"><span>Comentarios registrados</span></div>
+                        <div class="workflow-content" id="feedbackNotesContent"></div>
+                    </section>
+                </section>
+            </section>
+
+            <section class="workspace-view" id="adminView">
+                <div class="admin-command">
+
+                    <!-- FILA 1: Semáforo de salud + Conocimiento -->
+                    <div class="admin-row admin-row-top">
+
+                        <!-- SALUD DEL SISTEMA -->
+                        <section class="admin-health-card sidebar-card" id="adminStatusCard" data-flow-action="refresh-status" tabindex="0">
+                            <div class="panel-label">Estado del sistema</div>
+                            <div class="health-semaforo">
+                                <div class="health-dot" id="healthDot"></div>
+                                <div class="health-text">
+                                    <strong id="overallStatusText">Verificando...</strong>
+                                    <span class="health-sub" id="modelsText">Sincronizando</span>
+                                </div>
+                                <div class="status-badge" id="overallStatusBadge">—</div>
+                            </div>
+                            <div class="health-services" id="servicesGrid"></div>
+                            <button class="admin-refresh-btn" type="button" data-flow-action="refresh-status">↻ Actualizar</button>
+                        </section>
+
+                        <!-- CONOCIMIENTO / RAG -->
+                        <section class="admin-knowledge-card sidebar-card" id="adminIngestionCard" data-flow-action="refresh-status" tabindex="0">
+                            <div class="panel-label">Base de conocimiento</div>
+                            <div class="knowledge-stats">
+                                <div class="kstat">
+                                    <div class="kstat-num" id="knowledgeDocsChip">—</div>
+                                    <div class="kstat-label">Documentos</div>
+                                </div>
+                                <div class="kstat">
+                                    <div class="kstat-num" id="knowledgeChunksChip">—</div>
+                                    <div class="kstat-label">Fragmentos</div>
+                                </div>
+                                <div class="kstat">
+                                    <div class="kstat-num" id="feedProcessedChip">—</div>
+                                    <div class="kstat-label">Procesados</div>
+                                </div>
+                                <div class="kstat">
+                                    <div class="kstat-num" id="feedOcrChip">—</div>
+                                    <div class="kstat-label">Con OCR</div>
+                                </div>
+                            </div>
+                            <div class="knowledge-topics" id="feedTypes"></div>
+                            <!-- chips ocultos que el JS necesita -->
+                            <span class="hidden" id="feedSkippedChip"></span>
+                            <span class="hidden" id="feedFailedChip"></span>
+                            <span class="hidden" id="ocrStrategies"></span>
+                            <span class="hidden" id="feedErrors"></span>
+                        </section>
+
+                        <!-- CALIDAD NOVA -->
+                        <section class="admin-quality-card sidebar-card" id="adminEvalCard" data-flow-action="show-evaluation-card" tabindex="0">
+                            <div class="panel-label">Calidad de NOVA</div>
+                            <div class="quality-ring-wrap">
+                                <div class="quality-ring" id="qualityRing">
+                                    <div class="quality-ring-num" id="evalAverageChip">—</div>
+                                    <div class="quality-ring-label">Score</div>
+                                </div>
+                                <div class="quality-meta">
+                                    <div class="qmeta-item">
+                                        <span id="evalCasesChip">—</span>
+                                        <span>casos evaluados</span>
+                                    </div>
+                                    <div class="qmeta-item">
+                                        <span id="evalWeakChip">—</span>
+                                        <span>respuestas débiles</span>
+                                    </div>
+                                    <div class="qmeta-item">
+                                        <span id="evalPassChip">—</span>
+                                        <span>tasa aprobación</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="hidden" id="evalTopics"></div>
+                            <div class="hidden" id="evalLowest"></div>
+                        </section>
+                    </div>
+
+                    <!-- FILA 2: Comparación 926 + Acciones -->
+                    <div class="admin-row admin-row-bottom">
+
+                        <!-- COMPARACIÓN 926 -->
+                        <section class="admin-compare-card sidebar-card" id="adminCompareSummaryCard" data-flow-action="open-compare-926" tabindex="0">
+                            <div class="panel-label">Comparación archivo 926</div>
+                            <div class="compare-stats">
+                                <div class="cstat">
+                                    <div class="cstat-num" id="compareTotalChip">—</div>
+                                    <div class="cstat-label">Comparaciones</div>
+                                </div>
+                                <div class="cstat">
+                                    <div class="cstat-num" id="compareExactChip">—</div>
+                                    <div class="cstat-label">Exactas</div>
+                                </div>
+                                <div class="cstat">
+                                    <div class="cstat-num" id="compareSimilarityChip">—</div>
+                                    <div class="cstat-label">Similitud</div>
+                                </div>
+                            </div>
+                            <div class="compare-latest" id="compareLatest"></div>
+                            <button class="card-link-button" type="button" data-flow-action="open-compare-926">Abrir comparación →</button>
+                        </section>
+
+                        <!-- ACCIONES TÉCNICAS -->
+                        <section class="admin-actions-card sidebar-card">
+                            <div class="panel-label">Acciones técnicas</div>
+                            <div class="actions-list" id="actionsList"></div>
+                            <div class="actions-buttons">
+                                <button class="action-btn action-btn-secondary" id="exportReviewsButton" type="button">
+                                    <span class="action-btn-icon">⬇</span>
+                                    <div>
+                                        <div class="action-btn-title">Exportar revisiones</div>
+                                        <div class="action-btn-sub">Dataset de correcciones manuales</div>
+                                    </div>
+                                </button>
+                                <button class="action-btn action-btn-primary" id="reindexButton" type="button">
+                                    <span class="action-btn-icon">⟳</span>
+                                    <div>
+                                        <div class="action-btn-title">Reindexar conocimiento</div>
+                                        <div class="action-btn-sub">Actualiza el corpus de NOVA</div>
+                                    </div>
+                                </button>
+                            </div>
+                        </section>
+                    </div>
+
+                    <div class="admin-row">
+                        <section class="sources-section expanded workflow-section">
+                            <div class="sources-header">
+                                <div class="sources-heading-group">
+                                    <span>Actividad de pruebas</span>
+                                    <span class="service-role">Mide actividad diaria, ranking e inactividad del equipo de pruebas.</span>
+                                </div>
+                                <div class="case-head-actions">
+                                    <button class="search-button secondary compact-button" id="refreshTesterSummaryButton" type="button">Actualizar</button>
+                                    <button class="search-button compact-button" id="sendTesterSummaryButton" type="button">Enviar resumen diario</button>
+                                </div>
+                            </div>
+                            <div class="workflow-content" id="testerSummaryContent"></div>
+                        </section>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- PANEL NOVA FLOTANTE -->
+    <div class="nova-panel" id="novaPanel">
+        <div class="nova-panel-header">
+            <div class="nova-panel-identity">
+                <span class="nova-panel-icon">✦</span>
+                <div>
+                    <div class="nova-panel-name">NOVA</div>
+                    <div class="nova-panel-desc">Asistente inteligente · Imagine ARL</div>
+                </div>
+            </div>
+            <div class="nova-panel-controls">
+                <button class="nova-ctrl-btn" id="novaMinimizeBtn" type="button" title="Minimizar">−</button>
+                <button class="nova-ctrl-btn nova-ctrl-close" id="novaCloseBtn" type="button" title="Cerrar">×</button>
+            </div>
+        </div>
+        <div class="nova-panel-body" id="novaPanelBody">
+            <div class="nova-chat" id="novaChatContainer">
+                <div class="nova-welcome">
+                    <div class="nova-welcome-icon">✦</div>
+                    <p>Hola. Soy <strong>NOVA</strong>, el asistente de Imagine ARL.</p>
+                    <p class="nova-welcome-sub">Puedo consultarte sobre contratos, documentos, reglas operativas y todo el archivo de afiliaciones.</p>
+                </div>
+            </div>
+            <div class="nova-composer">
+                <textarea class="nova-input" id="novaInput" rows="1" placeholder="Pregunta sobre contratos, documentos, reglas..."></textarea>
+                <button class="nova-send-btn" id="novaSendBtn" type="button">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                </button>
+            </div>
+            <div class="nova-activity hidden" id="novaActivity">
+                <span class="nova-dots"><span></span><span></span><span></span></span>
+                <span>Consultando base de conocimiento...</span>
+            </div>
+        </div>
+    </div>
+
+    <button class="nova-minimized-tab hidden" id="novaMinimizedTab" type="button">
+        <span>✦</span> NOVA
+    </button>
+
+    <div class="document-modal hidden" id="documentModal">
+        <div class="document-modal-backdrop" id="documentModalBackdrop"></div>
+        <div class="document-modal-panel">
+            <div class="document-modal-head">
+                <strong id="documentModalTitle">Visor documental</strong>
+                <button class="search-button secondary" id="documentModalClose" type="button">Cerrar</button>
+            </div>
+            <div class="document-modal-body" id="documentModalBody"></div>
+        </div>
+    </div>
+
+    <script type="module" src="/main.js"></script>
+    <script type="module" src="/nova-panel.js"></script>
+</body>
+</html>

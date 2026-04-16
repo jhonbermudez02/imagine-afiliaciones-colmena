@@ -33,21 +33,37 @@ Al levantar el stack completo se crean estos servicios:
 
 ## Estructura del repo
 
-- [`backend`](/Users/escobar/Desktop/afi-nueva/backend): backend principal
-- [`frontend-nova`](/Users/escobar/Desktop/afi-nueva/frontend-nova): frontend operativo
-- [`compat-backend`](/Users/escobar/Desktop/afi-nueva/compat-backend): motor de compatibilidad del flujo `926`
-- [`compat-db/init`](/Users/escobar/Desktop/afi-nueva/compat-db/init): esquema inicial de la base de compatibilidad
-- [`data/knowledge`](/Users/escobar/Desktop/afi-nueva/data/knowledge): conocimiento operativo
-- [`docker-compose.github.yml`](/Users/escobar/Desktop/afi-nueva/docker-compose.github.yml): compose recomendado para otro equipo
+- `backend`: backend principal
+- `frontend-nova`: frontend operativo
+- `compat-backend`: motor de compatibilidad del flujo `926`
+- `compat-db/init`: esquema inicial de la base de compatibilidad
+- `data/knowledge`: conocimiento operativo
+- `docker-compose.github.yml`: compose interno de desarrollo y pruebas
+- `docker-compose.deploy.yml`: compose oficial de entrega portable
 
 ## Levantar el sistema
 
 1. Clona el repositorio.
 2. Copia `.env.example` a `.env` si quieres cambiar credenciales o modelos.
-3. Desde la raiz del repo ejecuta:
+3. Crea la carpeta `shared_downloads` en la raiz del repo si no existe.
+4. Desde la raiz del repo ejecuta una de estas dos opciones:
+
+Para desarrollo y pruebas internas:
 
 ```bash
 docker compose -f docker-compose.github.yml up --build -d
+```
+
+Para entrega portable en Linux o Windows con Docker Desktop:
+
+```bash
+docker compose -f docker-compose.deploy.yml up --build -d
+```
+
+O usa el chequeo automático:
+
+```bash
+bash scripts/check_or_start_stack.sh
 ```
 
 4. Verifica salud:
@@ -64,8 +80,9 @@ Debe responder algo como:
 
 5. Abre la aplicacion:
 
-- frontend: [http://localhost:3000](http://localhost:3000)
+- frontend: [http://127.0.0.1:8105](http://127.0.0.1:8105)
 - backend: [http://localhost:8000](http://localhost:8000)
+- compat backend: [http://localhost:8011/health](http://localhost:8011/health)
 
 ## Primer arranque
 
@@ -95,6 +112,12 @@ Levantar:
 docker compose -f docker-compose.github.yml up --build -d
 ```
 
+Verificar y levantar si está caído:
+
+```bash
+bash scripts/check_or_start_stack.sh
+```
+
 Apagar:
 
 ```bash
@@ -108,11 +131,80 @@ docker compose -f docker-compose.github.yml logs -f imagine_backend
 docker compose -f docker-compose.github.yml logs -f imagine_compat_backend
 ```
 
+Prueba rápida de entrega:
+
+```bash
+curl http://localhost:8000/health
+curl http://localhost:8011/health
+curl http://localhost:8105/health
+```
+
+Smoke test operativo:
+
+1. abrir el frontend
+2. entrar a `Producción`
+3. recuperar un contrato
+4. reprocesarlo
+5. confirmar que la prevalidación termina y que los casos aprobables intentan continuar a `926`
+
 Recrear backend principal:
 
 ```bash
 docker compose -f docker-compose.github.yml up -d --build imagine_backend
 ```
+
+## Pipeline de aprendizaje
+
+El proyecto ya puede exportar un banco de aprendizaje a partir de los contratos procesados y las correcciones humanas.
+
+Ejecuta:
+
+```bash
+python3 scripts/export_learning_pipeline.py
+```
+
+Esto genera:
+
+- `data/evals/learning/case_outcomes.jsonl`
+  - verdad operativa por expediente
+- `data/evals/learning/document_supervision.jsonl`
+  - supervisión para clasificación documental
+- `data/evals/learning/search_supervision.jsonl`
+  - casos de búsqueda/intents para evaluación y ranking
+- `data/evals/learning/flatfile_926_parity.jsonl`
+  - inventario de casos con 926 disponible
+- `data/evals/learning/document_calibration.json`
+  - remapeos aprendidos confirmados para apoyo seguro de clasificación
+- `data/evals/learning/search_calibration.json`
+  - frases de disparo aprendidas para apoyar detección de intent en búsqueda
+- `data/evals/learning/manifest.json`
+  - resumen del pipeline exportado
+
+Uso recomendado:
+
+1. recalibrar clasificación documental con `document_supervision.jsonl`
+2. usar `document_calibration.json` como capa segura de apoyo sobre errores ya confirmados
+3. medir y afinar búsqueda con `search_supervision.jsonl`
+4. usar `search_calibration.json` para reforzar detección de intent y grounding
+5. usar `case_outcomes.jsonl` como banco patrón oro por expediente
+6. usar `flatfile_926_parity.jsonl` para control de paridad contra legacy
+
+Para medir la búsqueda libre contra ese banco:
+
+```bash
+python3 scripts/run_search_supervision_eval.py --api-url http://127.0.0.1:8000
+```
+
+Eso genera:
+
+- `data/evals/learning/search_eval_report.json`
+
+Úsalo para detectar:
+
+- intents flojos
+- expedientes mal seleccionados
+- respuestas incoherentes
+- queries que todavía caen en la plantilla genérica
 
 ## Publicar en GitHub
 

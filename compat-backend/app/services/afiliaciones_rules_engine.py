@@ -204,7 +204,7 @@ class AfiliacionesRulesEngine:
         for row in wh_rows:
             sr = self._pick(row, "sr")
             tipoempresa = self._pick(row, "tipoempresa")
-            if not tipoempresa or tipoempresa not in {"1", "2", "3"}:
+            if not tipoempresa or tipoempresa not in {"1", "2", "3", "8", "9"}:
                 errors.append(
                     {
                         "table": "wh",

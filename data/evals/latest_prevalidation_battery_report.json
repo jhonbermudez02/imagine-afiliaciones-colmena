@@ -1,0 +1,799 @@
+{
+  "generated_at": "2026-04-14T02:04:31.813259+00:00",
+  "cases_total": 33,
+  "summary": {
+    "total": 33,
+    "passed": 33,
+    "failed": 0,
+    "pass_rate": 1.0,
+    "failed_cases": []
+  },
+  "results": [
+    {
+      "id": "ok_basico",
+      "description": "Caso base válido de afiliación con un trabajador correcto.",
+      "passed": true,
+      "expected_approved": true,
+      "actual_approved": true,
+      "expected_blocker_codes": [],
+      "actual_blocker_codes": [],
+      "missing_expected_codes": [],
+      "messages": []
+    },
+    {
+      "id": "salario_bajo_smmlv",
+      "description": "Debe rechazar salario inferior al mínimo configurado por año.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "XLSX_SECONDARY_SMMLV_BLOCKER"
+      ],
+      "actual_blocker_codes": [
+        "XLSX_SECONDARY_SMMLV_BLOCKER",
+        "TIPO_DOCUMENTO_VACIO",
+        "ZONA_VACIA",
+        "MODALIDAD_VACIA",
+        "JORNADA_VACIA",
+        "TIPO_TRABAJADOR_VACIO",
+        "TIPO_SALARIO_VACIO",
+        "CENTRO_TRABAJO_CODIGO_VACIO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Se detectaron trabajadores con salario inferior al salario mínimo configurado para 2026 (1750905): 11032446 | 10000 | Sede 01 - Trabajadores | fila 2.",
+        "Tipo de documento vacío en fila 1.",
+        "Zona vacía en fila 1.",
+        "Modalidad vacía en fila 1.",
+        "Jornada vacía en fila 1.",
+        "Tipo de trabajador vacío en fila 1.",
+        "Tipo de salario vacío en fila 1.",
+        "El código del centro de trabajo es obligatorio en fila 1."
+      ]
+    },
+    {
+      "id": "eps_invalida",
+      "description": "Debe rechazar EPS no encontrada en catálogo mostrando cédula.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "XLSX_SECONDARY_EPS_INVALID"
+      ],
+      "actual_blocker_codes": [
+        "XLSX_SECONDARY_EPS_INVALID",
+        "TIPO_DOCUMENTO_VACIO",
+        "ZONA_VACIA",
+        "MODALIDAD_VACIA",
+        "JORNADA_VACIA",
+        "TIPO_TRABAJADOR_VACIO",
+        "TIPO_SALARIO_VACIO",
+        "CENTRO_TRABAJO_CODIGO_VACIO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Se detectaron trabajadores con EPS que no cruza contra la tabla paramétrica: 11032446 | EPS INVENTADA | Sede 01 - Trabajadores | fila 2.",
+        "Tipo de documento vacío en fila 1.",
+        "Zona vacía en fila 1.",
+        "Modalidad vacía en fila 1.",
+        "Jornada vacía en fila 1.",
+        "Tipo de trabajador vacío en fila 1.",
+        "Tipo de salario vacío en fila 1.",
+        "El código del centro de trabajo es obligatorio en fila 1."
+      ]
+    },
+    {
+      "id": "afp_invalida",
+      "description": "Debe rechazar AFP no encontrada en catálogo mostrando cédula.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "XLSX_SECONDARY_AFP_INVALID"
+      ],
+      "actual_blocker_codes": [
+        "XLSX_SECONDARY_AFP_INVALID",
+        "TIPO_DOCUMENTO_VACIO",
+        "ZONA_VACIA",
+        "MODALIDAD_VACIA",
+        "JORNADA_VACIA",
+        "TIPO_TRABAJADOR_VACIO",
+        "TIPO_SALARIO_VACIO",
+        "CENTRO_TRABAJO_CODIGO_VACIO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Se detectaron trabajadores con AFP que no cruza contra la tabla paramétrica: 11032446 | AFP INVENTADA | Sede 01 - Trabajadores | fila 2.",
+        "Tipo de documento vacío en fila 1.",
+        "Zona vacía en fila 1.",
+        "Modalidad vacía en fila 1.",
+        "Jornada vacía en fila 1.",
+        "Tipo de trabajador vacío en fila 1.",
+        "Tipo de salario vacío en fila 1.",
+        "El código del centro de trabajo es obligatorio en fila 1."
+      ]
+    },
+    {
+      "id": "documento_no_numerico",
+      "description": "Debe rechazar documento con letras.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "DOCUMENTO_NO_NUMERICO"
+      ],
+      "actual_blocker_codes": [
+        "DOCUMENTO_NO_NUMERICO",
+        "TIPO_DOCUMENTO_VACIO",
+        "ZONA_VACIA",
+        "MODALIDAD_VACIA",
+        "JORNADA_VACIA",
+        "TIPO_TRABAJADOR_VACIO",
+        "TIPO_SALARIO_VACIO",
+        "CENTRO_TRABAJO_CODIGO_VACIO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "El número de identificación debe ser numérico en fila 1 (11032446ffff).",
+        "Tipo de documento vacío en fila 1.",
+        "Zona vacía en fila 1.",
+        "Modalidad vacía en fila 1.",
+        "Jornada vacía en fila 1.",
+        "Tipo de trabajador vacío en fila 1.",
+        "Tipo de salario vacío en fila 1.",
+        "El código del centro de trabajo es obligatorio en fila 1."
+      ]
+    },
+    {
+      "id": "edad_menor_17",
+      "description": "Debe rechazar fecha de nacimiento que deje edad menor a 17.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "EDAD_MINIMA_INVALIDA"
+      ],
+      "actual_blocker_codes": [
+        "TIPO_DOCUMENTO_VACIO",
+        "EDAD_MINIMA_INVALIDA",
+        "ZONA_VACIA",
+        "MODALIDAD_VACIA",
+        "JORNADA_VACIA",
+        "TIPO_TRABAJADOR_VACIO",
+        "TIPO_SALARIO_VACIO",
+        "CENTRO_TRABAJO_CODIGO_VACIO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Tipo de documento vacío en fila 1.",
+        "La fecha de nacimiento en fila 1 deja una edad menor a 17 años (22/11/2030).",
+        "Zona vacía en fila 1.",
+        "Modalidad vacía en fila 1.",
+        "Jornada vacía en fila 1.",
+        "Tipo de trabajador vacío en fila 1.",
+        "Tipo de salario vacío en fila 1.",
+        "El código del centro de trabajo es obligatorio en fila 1."
+      ]
+    },
+    {
+      "id": "fecha_nacimiento_menor_1905",
+      "description": "Debe rechazar año de nacimiento inferior a 1905.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "FECHA_NACIMIENTO_ANTIGUA_INVALIDA"
+      ],
+      "actual_blocker_codes": [
+        "TIPO_DOCUMENTO_VACIO",
+        "FECHA_NACIMIENTO_ANTIGUA_INVALIDA",
+        "ZONA_VACIA",
+        "MODALIDAD_VACIA",
+        "JORNADA_VACIA",
+        "TIPO_TRABAJADOR_VACIO",
+        "TIPO_SALARIO_VACIO",
+        "CENTRO_TRABAJO_CODIGO_VACIO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Tipo de documento vacío en fila 1.",
+        "El año de nacimiento no puede ser inferior a 1905 en fila 1 (1900).",
+        "Zona vacía en fila 1.",
+        "Modalidad vacía en fila 1.",
+        "Jornada vacía en fila 1.",
+        "Tipo de trabajador vacío en fila 1.",
+        "Tipo de salario vacío en fila 1.",
+        "El código del centro de trabajo es obligatorio en fila 1."
+      ]
+    },
+    {
+      "id": "telefono_invalido",
+      "description": "Debe rechazar teléfono fijo con cero inicial o longitud distinta de 7.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "TELEFONO_FORMATO_INVALIDO"
+      ],
+      "actual_blocker_codes": [
+        "TIPO_DOCUMENTO_VACIO",
+        "ZONA_VACIA",
+        "MODALIDAD_VACIA",
+        "JORNADA_VACIA",
+        "TIPO_TRABAJADOR_VACIO",
+        "TIPO_SALARIO_VACIO",
+        "CENTRO_TRABAJO_CODIGO_VACIO",
+        "TELEFONO_FORMATO_INVALIDO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Tipo de documento vacío en fila 1.",
+        "Zona vacía en fila 1.",
+        "Modalidad vacía en fila 1.",
+        "Jornada vacía en fila 1.",
+        "Tipo de trabajador vacío en fila 1.",
+        "Tipo de salario vacío en fila 1.",
+        "El código del centro de trabajo es obligatorio en fila 1.",
+        "El teléfono no puede iniciar en 0 en fila 1 (0123456)."
+      ]
+    },
+    {
+      "id": "celular_invalido",
+      "description": "Debe rechazar celular con cero inicial o longitud distinta de 10.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "CELULAR_FORMATO_INVALIDO"
+      ],
+      "actual_blocker_codes": [
+        "TIPO_DOCUMENTO_VACIO",
+        "ZONA_VACIA",
+        "MODALIDAD_VACIA",
+        "JORNADA_VACIA",
+        "TIPO_TRABAJADOR_VACIO",
+        "TIPO_SALARIO_VACIO",
+        "CENTRO_TRABAJO_CODIGO_VACIO",
+        "CELULAR_FORMATO_INVALIDO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Tipo de documento vacío en fila 1.",
+        "Zona vacía en fila 1.",
+        "Modalidad vacía en fila 1.",
+        "Jornada vacía en fila 1.",
+        "Tipo de trabajador vacío en fila 1.",
+        "Tipo de salario vacío en fila 1.",
+        "El código del centro de trabajo es obligatorio en fila 1.",
+        "El celular no puede iniciar en 0 en fila 1 (0123456789)."
+      ]
+    },
+    {
+      "id": "responsable_sede_sin_documento",
+      "description": "Debe rechazar cuando falta la cédula del responsable del centro de trabajo.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "RESPONSABLE_SEDE_DOCUMENTO_VACIO"
+      ],
+      "actual_blocker_codes": [
+        "RESPONSABLE_SEDE_DOCUMENTO_VACIO",
+        "XLSX_PRIMARY_REQUIRED_FIELDS_MISSING"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "La cédula del responsable del centro de trabajo es obligatoria.",
+        "El XLSX no trae completos estos campos obligatorios del formulario: responsable_sede_principal_numero_documento."
+      ]
+    },
+    {
+      "id": "telefono_sede_principal_invalido",
+      "description": "Debe rechazar teléfono de sede principal con cero inicial o longitud distinta de 7.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "SEDE_PRINCIPAL_TELEFONO_INVALIDO"
+      ],
+      "actual_blocker_codes": [
+        "SEDE_PRINCIPAL_TELEFONO_INVALIDO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "El teléfono de la sede principal no puede iniciar en 0 (0123456)."
+      ]
+    },
+    {
+      "id": "correo_formulario_invalido",
+      "description": "Debe rechazar correos inválidos en el bloque principal del formulario.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "FORMULARIO_CORREO_INVALIDO"
+      ],
+      "actual_blocker_codes": [
+        "FORMULARIO_CORREO_INVALIDO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "El correo del representante legal no tiene un formato válido (correo-invalido)."
+      ]
+    },
+    {
+      "id": "sexo_vacio",
+      "description": "Debe rechazar sexo identificación vacío.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "SEXO_VACIO"
+      ],
+      "actual_blocker_codes": [
+        "TIPO_DOCUMENTO_VACIO",
+        "SEXO_VACIO",
+        "ZONA_VACIA",
+        "MODALIDAD_VACIA",
+        "JORNADA_VACIA",
+        "TIPO_TRABAJADOR_VACIO",
+        "TIPO_SALARIO_VACIO",
+        "CENTRO_TRABAJO_CODIGO_VACIO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Tipo de documento vacío en fila 1.",
+        "Sexo identificación vacío en fila 1.",
+        "Zona vacía en fila 1.",
+        "Modalidad vacía en fila 1.",
+        "Jornada vacía en fila 1.",
+        "Tipo de trabajador vacío en fila 1.",
+        "Tipo de salario vacío en fila 1.",
+        "El código del centro de trabajo es obligatorio en fila 1."
+      ]
+    },
+    {
+      "id": "sexo_invalido",
+      "description": "Debe rechazar sexo identificación fuera del catálogo.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "SEXO_INVALIDO"
+      ],
+      "actual_blocker_codes": [
+        "TIPO_DOCUMENTO_VACIO",
+        "SEXO_INVALIDO",
+        "ZONA_VACIA",
+        "MODALIDAD_VACIA",
+        "JORNADA_VACIA",
+        "TIPO_TRABAJADOR_VACIO",
+        "TIPO_SALARIO_VACIO",
+        "CENTRO_TRABAJO_CODIGO_VACIO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Tipo de documento vacío en fila 1.",
+        "Sexo identificación inválido en fila 1 (XYZ). Usa solo M, F, T, NB u O.",
+        "Zona vacía en fila 1.",
+        "Modalidad vacía en fila 1.",
+        "Jornada vacía en fila 1.",
+        "Tipo de trabajador vacío en fila 1.",
+        "Tipo de salario vacío en fila 1.",
+        "El código del centro de trabajo es obligatorio en fila 1."
+      ]
+    },
+    {
+      "id": "estudiante_sin_codigo_actividad",
+      "description": "Debe rechazar estudiante sin código de actividad económica diligenciado.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "ESTUDIANTE_ACTIVIDAD_ECONOMICA_VACIA"
+      ],
+      "actual_blocker_codes": [
+        "ESTUDIANTE_ACTIVIDAD_ECONOMICA_VACIA",
+        "CENTRO_TRABAJO_CODIGO_VACIO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Para tipo de trabajador estudiante, el código de actividad económica es obligatorio en fila 1.",
+        "El código del centro de trabajo es obligatorio en fila 1."
+      ]
+    },
+    {
+      "id": "estudiante_cobertura_antes_de_afiliacion",
+      "description": "Debe rechazar estudiante con fecha de cobertura inferior a la de afiliación.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "ESTUDIANTE_COBERTURA_INVALIDA"
+      ],
+      "actual_blocker_codes": [
+        "ESTUDIANTE_COBERTURA_INVALIDA",
+        "CENTRO_TRABAJO_CODIGO_VACIO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "La fecha de inicio de cobertura del estudiante no puede ser inferior a la fecha de inicio de cobertura de la afiliación en fila 1. Estudiante: 10/04/2026 · Afiliación: 11/04/2026.",
+        "El código del centro de trabajo es obligatorio en fila 1."
+      ]
+    },
+    {
+      "id": "ce_longitud_invalida",
+      "description": "Debe rechazar CE mayor a 7 dígitos.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "DOCUMENTO_LONGITUD_INVALIDA"
+      ],
+      "actual_blocker_codes": [
+        "DOCUMENTO_LONGITUD_INVALIDA"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "El documento tipo CE no puede tener más de 7 dígitos en fila 1 (12345678)."
+      ]
+    },
+    {
+      "id": "independiente_campos_contractuales_faltantes",
+      "description": "Debe rechazar independiente sin campos contractuales obligatorios.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "INDEPENDIENTE_TIPO_COTIZANTE_VACIO",
+        "INDEPENDIENTE_TIPO_CONTRATO_VACIO",
+        "INDEPENDIENTE_FECHA_INICIO_CONTRATO_VACIA",
+        "INDEPENDIENTE_FECHA_FIN_CONTRATO_VACIA",
+        "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_VACIA",
+        "INDEPENDIENTE_VALOR_CONTRATO_VACIO",
+        "INDEPENDIENTE_VALOR_MENSUAL_VACIO",
+        "INDEPENDIENTE_IBC_VACIO"
+      ],
+      "actual_blocker_codes": [
+        "INDEPENDIENTE_TIPO_COTIZANTE_VACIO",
+        "INDEPENDIENTE_TIPO_CONTRATO_VACIO",
+        "INDEPENDIENTE_FECHA_INICIO_CONTRATO_VACIA",
+        "INDEPENDIENTE_FECHA_FIN_CONTRATO_VACIA",
+        "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_VACIA",
+        "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_CT_VACIA",
+        "INDEPENDIENTE_ZONA_CT_VACIA",
+        "INDEPENDIENTE_VALOR_CONTRATO_VACIO",
+        "INDEPENDIENTE_VALOR_MENSUAL_VACIO",
+        "INDEPENDIENTE_IBC_VACIO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Para independientes, el tipo de cotizante es obligatorio en fila 1.",
+        "Para independientes, el tipo de contrato es obligatorio en fila 1.",
+        "Para independientes, la fecha de inicio del contrato es obligatoria en fila 1.",
+        "Para independientes, la fecha de fin del contrato es obligatoria en fila 1.",
+        "Para independientes, la actividad económica es obligatoria en fila 1.",
+        "Para independientes, la actividad económica del centro de trabajo es obligatoria en fila 1.",
+        "Para independientes, la zona del centro de trabajo es obligatoria en fila 1.",
+        "Para independientes, el valor del contrato es obligatorio en fila 1.",
+        "Para independientes, el valor mensual es obligatorio en fila 1.",
+        "Para independientes, el IBC es obligatorio en fila 1."
+      ]
+    },
+    {
+      "id": "independiente_fecha_fin_contrato_invalida",
+      "description": "Debe rechazar independiente con fecha fin contrato inferior al inicio de cobertura.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "INDEPENDIENTE_FECHA_FIN_CONTRATO_INVALIDA"
+      ],
+      "actual_blocker_codes": [
+        "INDEPENDIENTE_FECHA_FIN_CONTRATO_INVALIDA",
+        "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_CT_VACIA",
+        "INDEPENDIENTE_ZONA_CT_VACIA"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Para independientes, la fecha de fin del contrato no puede ser inferior a la fecha de inicio de cobertura de la afiliación en fila 1. Fin contrato: 10/04/2026 · Afiliación: 11/04/2026.",
+        "Para independientes, la actividad económica del centro de trabajo es obligatoria en fila 1.",
+        "Para independientes, la zona del centro de trabajo es obligatoria en fila 1."
+      ]
+    },
+    {
+      "id": "independiente_ibc_bajo_minimo",
+      "description": "Debe rechazar independiente con IBC inferior al mínimo configurado.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "INDEPENDIENTE_IBC_INVALIDO"
+      ],
+      "actual_blocker_codes": [
+        "XLSX_SECONDARY_SMMLV_BLOCKER",
+        "INDEPENDIENTE_IBC_INVALIDO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Se detectaron trabajadores con salario inferior al salario mínimo configurado para 2026 (1750905): 11032446 | 1000000 | Sede 01 - Trabajadores | fila 2.",
+        "Para independientes, el IBC no puede ser inferior al mínimo configurado (1750905) en fila 1."
+      ]
+    },
+    {
+      "id": "independiente_ct_faltante",
+      "description": "Debe rechazar independiente sin actividad económica o zona del centro de trabajo.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_CT_VACIA",
+        "INDEPENDIENTE_ZONA_CT_VACIA"
+      ],
+      "actual_blocker_codes": [
+        "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_CT_VACIA",
+        "INDEPENDIENTE_ZONA_CT_VACIA"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Para independientes, la actividad económica del centro de trabajo es obligatoria en fila 1.",
+        "Para independientes, la zona del centro de trabajo es obligatoria en fila 1."
+      ]
+    },
+    {
+      "id": "formulario_actividad_fuera_catalogo",
+      "description": "Debe rechazar código de actividad económica del formulario fuera del catálogo del XLSX.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "FORMULARIO_ACTIVIDAD_ECONOMICA_INVALIDA"
+      ],
+      "actual_blocker_codes": [
+        "FORMULARIO_ACTIVIDAD_ECONOMICA_INVALIDA"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "El código de actividad económica del formulario no existe en el listado de actividades económicas del XLSX (9999999)."
+      ]
+    },
+    {
+      "id": "independiente_actividad_fuera_catalogo",
+      "description": "Debe rechazar actividad económica de independiente fuera del catálogo del XLSX.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_INVALIDA"
+      ],
+      "actual_blocker_codes": [
+        "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_INVALIDA"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Para independientes, la actividad económica no existe en el catálogo del XLSX en fila 1 (9999999)."
+      ]
+    },
+    {
+      "id": "correo_invalido",
+      "description": "Debe rechazar correo con formato inválido cuando venga informado.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "CORREO_FORMATO_INVALIDO"
+      ],
+      "actual_blocker_codes": [
+        "CORREO_FORMATO_INVALIDO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Correo con formato no válido en fila 1 (correo-invalido)."
+      ]
+    },
+    {
+      "id": "tipo_documento_invalido",
+      "description": "Debe rechazar tipo de documento fuera del catálogo.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "TIPO_DOCUMENTO_INVALIDO"
+      ],
+      "actual_blocker_codes": [
+        "TIPO_DOCUMENTO_INVALIDO",
+        "CENTRO_TRABAJO_CODIGO_VACIO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Tipo de documento inválido en fila 1 (XX).",
+        "El código del centro de trabajo es obligatorio en fila 1."
+      ]
+    },
+    {
+      "id": "jornada_vacia",
+      "description": "Debe rechazar jornada vacía.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "JORNADA_VACIA"
+      ],
+      "actual_blocker_codes": [
+        "TIPO_DOCUMENTO_VACIO",
+        "JORNADA_VACIA",
+        "CENTRO_TRABAJO_CODIGO_VACIO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Tipo de documento vacío en fila 1.",
+        "Jornada vacía en fila 1.",
+        "El código del centro de trabajo es obligatorio en fila 1."
+      ]
+    },
+    {
+      "id": "modalidad_invalida",
+      "description": "Debe rechazar modalidad fuera del catálogo.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "MODALIDAD_INVALIDA"
+      ],
+      "actual_blocker_codes": [
+        "TIPO_DOCUMENTO_VACIO",
+        "MODALIDAD_INVALIDA",
+        "CENTRO_TRABAJO_CODIGO_VACIO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Tipo de documento vacío en fila 1.",
+        "Modalidad inválida en fila 1 (HIBRIDO).",
+        "El código del centro de trabajo es obligatorio en fila 1."
+      ]
+    },
+    {
+      "id": "tipo_salario_invalido",
+      "description": "Debe rechazar tipo de salario fuera del catálogo.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "TIPO_SALARIO_INVALIDO"
+      ],
+      "actual_blocker_codes": [
+        "TIPO_DOCUMENTO_VACIO",
+        "TIPO_SALARIO_INVALIDO",
+        "CENTRO_TRABAJO_CODIGO_VACIO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Tipo de documento vacío en fila 1.",
+        "Tipo de salario inválido en fila 1 (99-Otro).",
+        "El código del centro de trabajo es obligatorio en fila 1."
+      ]
+    },
+    {
+      "id": "zona_vacia",
+      "description": "Debe rechazar zona vacía.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "ZONA_VACIA"
+      ],
+      "actual_blocker_codes": [
+        "TIPO_DOCUMENTO_VACIO",
+        "ZONA_VACIA",
+        "CENTRO_TRABAJO_CODIGO_VACIO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Tipo de documento vacío en fila 1.",
+        "Zona vacía en fila 1.",
+        "El código del centro de trabajo es obligatorio en fila 1."
+      ]
+    },
+    {
+      "id": "afiliacion_fecha_cobertura_mala",
+      "description": "Debe rechazar afiliación cuando cobertura no es radicación + 1 día.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "XLSX_PRIMARY_FECHA_COBERTURA_INVALIDA"
+      ],
+      "actual_blocker_codes": [
+        "XLSX_PRIMARY_FECHA_COBERTURA_INVALIDA"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Para afiliaciones de primera vez, la fecha inicio de cobertura debe ser exactamente un día posterior a la fecha de radicación. Radicación: 25/03/2025 · Inicio de cobertura: 26/03/2026 · Diferencia detectada: 366 día(s)."
+      ]
+    },
+    {
+      "id": "traslado_fecha_mala",
+      "description": "Debe rechazar traslado cuando la fecha de radicación no queda dos meses antes de la fecha de inicio de cobertura.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "XLSX_PRIMARY_FECHA_TRASLADO_INVALIDA"
+      ],
+      "actual_blocker_codes": [
+        "XLSX_PRIMARY_FECHA_TRASLADO_INVALIDA",
+        "XLSX_PRIMARY_REQUIRED_FIELDS_MISSING"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "Para afiliaciones de traslado, la fecha de radicación debe quedar dos meses antes a la fecha de inicio de cobertura. Inicio de cobertura: 01/04/2026 · Radicación: 27/03/2026.",
+        "El XLSX no trae completos estos campos obligatorios del formulario: b_arl_de_la_cual_se_traslada, b_clase_riesgo, b_codigo_actividad_economica_principal, b_numero_centros_trabajo, estado_cuenta_empleador."
+      ]
+    },
+    {
+      "id": "sin_hoja_sede",
+      "description": "Debe rechazar cuando no hay hojas de sede/trabajadores válidas.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "XLSX_PRIMARY_SEDE_SHEETS_MISSING",
+        "XLSX_PRIMARY_WORKERS_MISSING"
+      ],
+      "actual_blocker_codes": [
+        "XLSX_PRIMARY_SEDE_SHEETS_MISSING",
+        "XLSX_PRIMARY_WORKERS_MISSING"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "El XLSX no trae al menos una hoja de sede/trabajadores para validar el contrato.",
+        "El XLSX no trae filas válidas de trabajadores en las hojas de sede."
+      ]
+    },
+    {
+      "id": "trabajadores_duplicados",
+      "description": "Debe rechazar documentos repetidos entre trabajadores.",
+      "passed": true,
+      "expected_approved": false,
+      "actual_approved": false,
+      "expected_blocker_codes": [
+        "DUPLICATE_WORKER_DOCUMENTS"
+      ],
+      "actual_blocker_codes": [
+        "DUPLICATE_WORKER_DOCUMENTS",
+        "TIPO_DOCUMENTO_VACIO",
+        "ZONA_VACIA",
+        "MODALIDAD_VACIA",
+        "JORNADA_VACIA",
+        "TIPO_TRABAJADOR_VACIO",
+        "TIPO_SALARIO_VACIO",
+        "CENTRO_TRABAJO_CODIGO_VACIO",
+        "TIPO_DOCUMENTO_VACIO",
+        "ZONA_VACIA",
+        "MODALIDAD_VACIA",
+        "JORNADA_VACIA",
+        "TIPO_TRABAJADOR_VACIO",
+        "TIPO_SALARIO_VACIO",
+        "CENTRO_TRABAJO_CODIGO_VACIO"
+      ],
+      "missing_expected_codes": [],
+      "messages": [
+        "El XLSX trae trabajadores duplicados por documento: 11032446 | ANA LOPEZ | Sede 01 - Trabajadores · fila 2; 11032446 | ANA LOPEZ | Sede 02 - Trabajadores · fila 2.",
+        "Tipo de documento vacío en fila 1.",
+        "Zona vacía en fila 1.",
+        "Modalidad vacía en fila 1.",
+        "Jornada vacía en fila 1.",
+        "Tipo de trabajador vacío en fila 1.",
+        "Tipo de salario vacío en fila 1.",
+        "El código del centro de trabajo es obligatorio en fila 1.",
+        "Tipo de documento vacío en fila 2.",
+        "Zona vacía en fila 2.",
+        "Modalidad vacía en fila 2.",
+        "Jornada vacía en fila 2.",
+        "Tipo de trabajador vacío en fila 2.",
+        "Tipo de salario vacío en fila 2.",
+        "El código del centro de trabajo es obligatorio en fila 2."
+      ]
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "🚀 Iniciando NOVA en Apple M5"
+echo "🚀 Iniciando NOVA"
 
 docker-compose up -d
 

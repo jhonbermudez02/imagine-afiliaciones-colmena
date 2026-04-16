@@ -6,6 +6,7 @@ import io
 import json
 import re
 import shutil
+import time
 import unicodedata
 import uuid
 import zipfile
@@ -25,6 +26,7 @@ from pypdf import PdfReader, PdfWriter
 
 from .config import settings
 from .legacy_bridge import generate_legacy_flatfile_926, generate_legacy_flatfile_926_http
+from .xlsx_rules import _format_date_value, _parse_date_value, _resolve_smmlv_value, run_xlsx_primary_validations, run_xlsx_secondary_validations
 
 LEGACY_CODE_TO_TYPE = {
     0: "formulario_afiliacion",
@@ -97,9 +99,182 @@ LEGACY_INDEPENDIENTES_FIELDS = [
     "tipo_salario",
 ]
 
+DOCUMENT_CALIBRATION_PATH = Path(settings.cases_dir).parent / "evals" / "learning" / "document_calibration.json"
+DOCUMENT_SUPERVISION_PATH = Path(settings.cases_dir).parent / "evals" / "learning" / "document_supervision.jsonl"
+LEARNING_MANIFEST_PATH = Path(settings.cases_dir).parent / "evals" / "learning" / "manifest.json"
+_DOCUMENT_CALIBRATION_CACHE: Optional[Dict[str, Any]] = None
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _load_document_calibration() -> Dict[str, Any]:
+    global _DOCUMENT_CALIBRATION_CACHE
+    if _DOCUMENT_CALIBRATION_CACHE is not None:
+        return _DOCUMENT_CALIBRATION_CACHE
+    try:
+        _DOCUMENT_CALIBRATION_CACHE = json.loads(DOCUMENT_CALIBRATION_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        _DOCUMENT_CALIBRATION_CACHE = {}
+    return _DOCUMENT_CALIBRATION_CACHE
+
+
+def _refresh_learning_artifacts() -> None:
+    global _DOCUMENT_CALIBRATION_CACHE
+    try:
+        payloads: List[Dict[str, Any]] = []
+        for case_dir in sorted(get_cases_root().iterdir()):
+            if not case_dir.is_dir():
+                continue
+            metadata_path = case_dir / "case.json"
+            if not metadata_path.exists():
+                continue
+            try:
+                payloads.append(json.loads(metadata_path.read_text(encoding="utf-8")))
+            except Exception:
+                continue
+
+        rows: List[Dict[str, Any]] = []
+        for payload in payloads:
+            analysis = payload.get("analysis") or {}
+            manual_review = analysis.get("manual_review") or {}
+            if not manual_review:
+                continue
+            profile = ((analysis.get("xlsx_profile") or {}).get("profile") or {})
+            docs = analysis.get("documents") or []
+            docs_by_filename = {str(doc.get("filename") or ""): doc for doc in docs}
+            for bucket_name, entries in (manual_review or {}).items():
+                if not isinstance(entries, dict):
+                    continue
+                for filename, review in entries.items():
+                    verdict = str((review or {}).get("verdict") or "")
+                    if verdict not in {"si", "no"}:
+                        continue
+                    expected_type = str((review or {}).get("expected_type") or "")
+                    if bucket_name == "xlsx":
+                        continue
+                    doc = docs_by_filename.get(str(filename)) or {}
+                    predicted_type = str(doc.get("document_type") or "")
+                    ground_truth_type = expected_type or (predicted_type if verdict == "si" else "")
+                    rows.append(
+                        {
+                            "case_id": payload.get("id"),
+                            "empresa": profile.get("empresa") or "",
+                            "nit": profile.get("nit") or "",
+                            "documento": profile.get("documento") or "",
+                            "filename": filename,
+                            "bucket": "documents",
+                            "review_verdict": verdict,
+                            "predicted_type": predicted_type,
+                            "ground_truth_type": ground_truth_type,
+                            "predicted_code": doc.get("legacy_code"),
+                            "ground_truth_code": DOC_TYPE_TO_PRIMARY_CODE.get(ground_truth_type) if ground_truth_type else None,
+                            "supervision_status": "confirmed" if ground_truth_type else "pending_correction",
+                            "classification_confidence": doc.get("classification_confidence"),
+                            "ocr_quality_score": doc.get("ocr_quality_score"),
+                            "signals_detected": doc.get("signals_detected") or [],
+                            "text_preview": str(doc.get("text_preview") or doc.get("ocr_text") or "")[:800],
+                        }
+                    )
+
+        signal_hints_library = {
+            "cedula": [
+                "cedula de ciudadania",
+                "cedula de ciudadanía",
+                "lugar de nacimiento",
+                "fecha y lugar de expedicion",
+                "fecha y lugar de expedición",
+                "indice derecho",
+                "índice derecho",
+                "registrador nacional",
+            ],
+            "soporte_ingresos": [
+                "planilla resumen",
+                "resumen general de pago",
+                "resumen de pago a salud",
+                "informe consolidado de pagos por empresas",
+                "datos generales del aportante",
+                "valor a pagar",
+                "ibc salud",
+                "ibc pension",
+                "ibc pensión",
+            ],
+            "carta": [
+                "se adjuntan los siguientes documentos",
+                "cordialmente",
+                "representante legal",
+                "por medio de la presente",
+                "desvinculacion de empresa",
+                "desvinculación de empresa",
+                "agradeciendo su colaboracion",
+                "agradeciendo su colaboración",
+            ],
+        }
+        confirmed_rows = [row for row in rows if row.get("supervision_status") == "confirmed"]
+        remap_groups: Dict[tuple[str, str], List[Dict[str, Any]]] = {}
+        stable_counts: Dict[str, int] = {}
+        for row in confirmed_rows:
+            predicted_type = str(row.get("predicted_type") or "")
+            ground_truth_type = str(row.get("ground_truth_type") or "")
+            if predicted_type and predicted_type == ground_truth_type:
+                stable_counts[predicted_type] = stable_counts.get(predicted_type, 0) + 1
+            if predicted_type and ground_truth_type and predicted_type != ground_truth_type:
+                remap_groups.setdefault((predicted_type, ground_truth_type), []).append(row)
+
+        remaps: List[Dict[str, Any]] = []
+        for (predicted_type, ground_truth_type), group in sorted(remap_groups.items(), key=lambda item: len(item[1]), reverse=True):
+            signal_counts: Dict[str, int] = {}
+            matched_hints: Dict[str, int] = {}
+            for row in group:
+                for signal in row.get("signals_detected") or []:
+                    normalized = normalize_text(signal)
+                    if normalized:
+                        signal_counts[normalized] = signal_counts.get(normalized, 0) + 1
+                haystack = normalize_haystack(row.get("text_preview") or "")
+                for hint in signal_hints_library.get(ground_truth_type, []):
+                    if normalize_haystack(hint) in haystack:
+                        matched_hints[hint] = matched_hints.get(hint, 0) + 1
+            remaps.append(
+                {
+                    "from_type": predicted_type,
+                    "to_type": ground_truth_type,
+                    "count": len(group),
+                    "signal_hints": [
+                        signal for signal, _ in sorted(signal_counts.items(), key=lambda item: (-item[1], item[0]))[:6]
+                    ],
+                    "text_hints": [
+                        hint for hint, _ in sorted(matched_hints.items(), key=lambda item: (-item[1], item[0]))[:6]
+                    ],
+                    "sample_filenames": [str(row.get("filename") or "") for row in group[:3]],
+                }
+            )
+
+        DOCUMENT_SUPERVISION_PATH.parent.mkdir(parents=True, exist_ok=True)
+        payload = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
+        DOCUMENT_SUPERVISION_PATH.write_text(payload + ("\n" if payload else ""), encoding="utf-8")
+        DOCUMENT_CALIBRATION_PATH.write_text(
+            json.dumps(
+                {
+                    "generated_at": utc_now(),
+                    "confirmed_rows_total": len(confirmed_rows),
+                    "confirmed_mismatch_rows_total": sum(len(items) for items in remap_groups.values()),
+                    "stable_counts": dict(sorted(stable_counts.items(), key=lambda item: (-item[1], item[0]))),
+                    "remaps": remaps,
+                    "notes": [
+                        "Calibración documental regenerada automáticamente a partir de revisiones manuales.",
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        _DOCUMENT_CALIBRATION_CACHE = None
+    except Exception:
+        # La revisión manual no debe fallar por un refresco de aprendizaje.
+        return
 
 
 def _format_date_es(dt: datetime) -> str:
@@ -193,6 +368,161 @@ def slugify(value: str) -> str:
 
 def only_digits(value: Any) -> str:
     return re.sub(r"\D+", "", str(value or ""))
+
+
+def _is_strict_numeric_value(value: Any) -> bool:
+    text = normalize_text(value)
+    if not text:
+        return False
+    return bool(re.fullmatch(r"\d+", text))
+
+
+def _parse_birthdate_from_record(record: Dict[str, Any]) -> Optional[datetime]:
+    combined = normalize_text(record.get("fecha_de_nacimiento", ""))
+    candidates = [combined]
+    day = only_digits(record.get("fecha_nacimiento_dia", ""))
+    month = only_digits(record.get("fecha_nacimiento_mes", ""))
+    year = only_digits(record.get("fecha_nacimiento_ano", ""))
+    if day and month and year:
+        if len(year) == 2:
+            year = f"19{year}"
+        candidates.append(f"{day}/{month}/{year}")
+    for value in candidates:
+        if not value:
+            continue
+        for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+            try:
+                return datetime.strptime(value, fmt)
+            except ValueError:
+                continue
+    return None
+
+
+def _age_years(birthdate: datetime, today: Optional[datetime] = None) -> int:
+    base = (today or datetime.now()).date()
+    born = birthdate.date()
+    return base.year - born.year - ((base.month, base.day) < (born.month, born.day))
+
+
+def _normalize_sexo_identificacion(value: Any) -> str:
+    text = normalize_haystack(value).upper()
+    text = re.sub(r"[^A-Z0-9]+", "", text)
+    aliases = {
+        "M": "M",
+        "MASCULINO": "M",
+        "F": "F",
+        "FEMENINO": "F",
+        "T": "T",
+        "TRANSGENERO": "T",
+        "TRANSGÉNERO": "T",
+        "NB": "NB",
+        "NOBINARIO": "NB",
+        "NOBINARIA": "NB",
+        "O": "O",
+        "OTRO": "O",
+    }
+    return aliases.get(text, text)
+
+
+def _normalize_tipo_trabajador(value: Any) -> str:
+    text = normalize_haystack(value).upper()
+    text = re.sub(r"[^A-Z0-9]+", "", text)
+    aliases = {
+        "DEPENDIENTE": "DEPENDIENTE",
+        "INDEPENDIENTE": "INDEPENDIENTE",
+        "ESTUDIANTE": "ESTUDIANTE",
+        "ESTUDIANTESDECRETO055DE2015": "ESTUDIANTE",
+        "23": "ESTUDIANTE",
+        "PENSIONADO": "PENSIONADO",
+        "APRENDIZ": "APRENDIZ",
+        "APRENDIZENETAPALECTIVA": "APRENDIZ",
+        "APRENDIZENETAPAPRACTICA": "APRENDIZ",
+        "COOPERADO": "COOPERADO",
+    }
+    return aliases.get(text, text)
+
+
+def _normalize_tipo_salario(value: Any) -> str:
+    raw = normalize_text(value)
+    text = normalize_haystack(raw).upper()
+    compact = re.sub(r"[^A-Z0-9]+", "", text)
+    if compact.startswith("1") or "FIJO" in compact:
+        return "FIJO"
+    if compact.startswith("2") or "VARIABLE" in compact:
+        return "VARIABLE"
+    if compact.startswith("3") or "INTEGRAL" in compact:
+        return "INTEGRAL"
+    return compact
+
+
+def _record_value_by_tokens(record: Dict[str, Any], token_groups: List[List[str]]) -> str:
+    for key, value in record.items():
+        key_norm = normalize_haystack(key)
+        if not key_norm:
+            continue
+        for tokens in token_groups:
+            if all(token in key_norm for token in tokens):
+                text = normalize_text(value)
+                if text:
+                    return text
+    return ""
+
+
+def _record_first_value(record: Dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = normalize_text(record.get(key, ""))
+        if value:
+            return value
+    return ""
+
+
+def _business_days_between(start: datetime, end: datetime) -> int:
+    start_date = start.date()
+    end_date = end.date()
+    if end_date <= start_date:
+        return 0
+    business_days = 0
+    current = start_date
+    while current < end_date:
+        if current.weekday() < 5:
+            business_days += 1
+        current = current.fromordinal(current.toordinal() + 1)
+    return business_days
+
+
+def _normalize_modalidad(value: Any) -> str:
+    text = normalize_haystack(value).upper()
+    text = "".join(ch for ch in text if ch.isalnum())
+    aliases = {
+        "PRESENCIAL": "PRESENCIAL",
+        "TELETRABAJO": "TELETRABAJO",
+        "CASA": "CASA",
+        "REMOTO": "REMOTO",
+    }
+    return aliases.get(text, text)
+
+
+def _normalize_jornada(value: Any) -> str:
+    text = normalize_haystack(value).upper()
+    text = re.sub(r"[^A-Z0-9]+", "", text)
+    aliases = {
+        "UNICA": "UNICA",
+        "TURNOS": "TURNOS",
+        "ROTATIVA": "ROTATIVA",
+    }
+    return aliases.get(text, text)
+
+
+def _normalize_zona(value: Any) -> str:
+    text = normalize_haystack(value).upper()
+    text = re.sub(r"[^A-Z0-9]+", "", text)
+    aliases = {
+        "U": "U",
+        "URBANA": "U",
+        "R": "R",
+        "RURAL": "R",
+    }
+    return aliases.get(text, text)
 
 
 def build_generated_lote_usuario(fecha_proceso: str) -> str:
@@ -392,7 +722,25 @@ def load_case(case_id: str) -> Dict[str, Any]:
     return json.loads(metadata_path.read_text(encoding="utf-8"))
 
 
+def _normalize_case_payload(case_payload: Dict[str, Any]) -> Dict[str, Any]:
+    analysis = case_payload.get("analysis") or {}
+    workflow = analysis.get("workflow_run") or {}
+    steps = workflow.get("steps")
+    if isinstance(steps, list):
+        workflow["timeline"] = list(steps)
+    workflow_status = normalize_haystack(workflow.get("status"))
+    if workflow_status == "completed":
+        case_payload["status"] = "completed"
+    elif workflow_status.startswith("stopped_") and not case_payload.get("status"):
+        case_payload["status"] = "analyzed"
+    if workflow:
+        analysis["workflow_run"] = workflow
+        case_payload["analysis"] = analysis
+    return case_payload
+
+
 def save_case(case_payload: Dict[str, Any]) -> Dict[str, Any]:
+    case_payload = _normalize_case_payload(case_payload)
     case_id = str(case_payload["id"])
     case_dir = get_case_dir(case_id)
     case_dir.mkdir(parents=True, exist_ok=True)
@@ -424,7 +772,116 @@ def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, exp
     }
     payload["updated_at"] = utc_now()
     save_case(payload)
+    _refresh_learning_artifacts()
     return review_store
+
+
+def _ensure_document_workspace(payload: Dict[str, Any]) -> Dict[str, Any]:
+    analysis = payload.setdefault("analysis", {}) or {}
+    if payload.get("analysis") is None:
+        payload["analysis"] = analysis
+    workspace = analysis.setdefault("document_workspace", {})
+    workspace.setdefault("order", [])
+    workspace.setdefault("removed_files", [])
+    return workspace
+
+
+def _sync_document_workspace(payload: Dict[str, Any]) -> Dict[str, Any]:
+    workspace = _ensure_document_workspace(payload)
+    available = [str(item.get("filename") or "").strip() for item in (payload.get("files") or []) if str(item.get("filename") or "").strip()]
+    order = [item for item in (workspace.get("order") or []) if item in available]
+    seen = set(order)
+    for filename in available:
+        if filename not in seen:
+            order.append(filename)
+            seen.add(filename)
+    workspace["order"] = order
+    removed = []
+    seen_removed = set()
+    for filename in (workspace.get("removed_files") or []):
+        name = str(filename or "").strip()
+        if not name or name not in available or name in seen_removed:
+            continue
+        removed.append(name)
+        seen_removed.add(name)
+    workspace["removed_files"] = removed
+    return workspace
+
+
+def save_document_workspace(case_id: str, action: str, filename: str = "", order: Optional[List[str]] = None) -> Dict[str, Any]:
+    payload = load_case(case_id)
+    workspace = _sync_document_workspace(payload)
+    files = payload.setdefault("files", [])
+    action_key = normalize_haystack(action).replace(" ", "_")
+    filename = str(filename or "").strip()
+
+    if action_key == "set_order":
+        valid = {str(item.get("filename") or "").strip() for item in files}
+        cleaned: List[str] = []
+        seen = set()
+        for item in order or []:
+            name = str(item or "").strip()
+            if not name or name not in valid or name in seen:
+                continue
+            cleaned.append(name)
+            seen.add(name)
+        workspace["order"] = cleaned
+    elif action_key == "remove":
+        if filename and filename not in workspace["removed_files"]:
+            workspace["removed_files"].append(filename)
+    elif action_key == "restore":
+        workspace["removed_files"] = [item for item in (workspace.get("removed_files") or []) if item != filename]
+    elif action_key == "duplicate":
+        if not filename:
+            raise ValueError("Debes indicar el archivo a duplicar.")
+        source_path = get_case_file_path(case_id, filename)
+        stem = source_path.stem
+        suffix = source_path.suffix
+        files_dir = source_path.parent
+        counter = 1
+        target = files_dir / f"{stem}__dup{counter}{suffix}"
+        while target.exists():
+            counter += 1
+            target = files_dir / f"{stem}__dup{counter}{suffix}"
+        shutil.copy2(source_path, target)
+
+        source_meta = next((item for item in files if str(item.get("filename") or "") == filename), None) or {}
+        duplicated_meta = {
+            **source_meta,
+            "filename": target.name,
+            "stored_path": str(target),
+            "size_bytes": target.stat().st_size,
+        }
+        files.append(duplicated_meta)
+
+        analysis = payload.get("analysis") or {}
+        documents = analysis.get("documents") or []
+        for item in documents:
+            if str(item.get("filename") or "") != filename:
+                continue
+            copied = json.loads(json.dumps(item, ensure_ascii=False))
+            copied["filename"] = target.name
+            documents.append(copied)
+            break
+        checklist = analysis.get("checklist") or {}
+        for group in checklist.get("received_summary") or []:
+            files_group = group.get("files") or []
+            if filename in files_group and target.name not in files_group:
+                files_group.append(target.name)
+                group["count"] = len(files_group)
+                break
+        current_order = workspace.get("order") or []
+        if filename in current_order:
+            insert_at = current_order.index(filename) + 1
+            current_order.insert(insert_at, target.name)
+            workspace["order"] = current_order
+    else:
+        raise ValueError(f"Acción documental no soportada: {action}")
+
+    _sync_document_workspace(payload)
+    payload["updated_at"] = utc_now()
+    save_case(payload)
+    return payload
 
 
 def export_manual_review_dataset() -> Dict[str, Any]:
@@ -527,7 +984,34 @@ def export_manual_review_dataset() -> Dict[str, Any]:
     }
 
 
-def list_cases() -> List[Dict[str, Any]]:
+def _case_updated_at_sort_value(payload: Dict[str, Any]) -> str:
+    return str(payload.get("updated_at") or payload.get("created_at") or "")
+
+
+def _case_entity_key(payload: Dict[str, Any]) -> tuple[str, str]:
+    analysis = payload.get("analysis") or {}
+    profile = ((analysis.get("xlsx_profile") or {}).get("profile") or {})
+    nit = only_digits(profile.get("nit") or "")
+    documento = only_digits(profile.get("documento") or "")
+    empresa = normalize_haystack(profile.get("empresa") or payload.get("label") or "")
+    return (nit or documento or empresa or payload.get("id") or "", empresa or documento or nit or payload.get("id") or "")
+
+
+_LIST_CASES_CACHE_TTL_SECONDS = 3.0
+_LIST_CASES_CACHE: Dict[bool, tuple[float, List[Dict[str, Any]]]] = {}
+
+
+def _clone_case_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [dict(item) for item in rows]
+
+
+def list_cases(include_all: bool = False) -> List[Dict[str, Any]]:
+    cache_key = bool(include_all)
+    cached = _LIST_CASES_CACHE.get(cache_key)
+    now = time.monotonic()
+    if cached and (now - cached[0]) <= _LIST_CASES_CACHE_TTL_SECONDS:
+        return _clone_case_rows(cached[1])
+
     rows: List[Dict[str, Any]] = []
     for path in sorted(get_cases_root().glob("*/case.json"), reverse=True):
         try:
@@ -535,7 +1019,19 @@ def list_cases() -> List[Dict[str, Any]]:
             rows.append(payload)
         except Exception:
             continue
-    return rows
+    rows.sort(key=_case_updated_at_sort_value, reverse=True)
+    if include_all:
+        _LIST_CASES_CACHE[cache_key] = (now, rows)
+        return _clone_case_rows(rows)
+    latest_by_entity: Dict[tuple[str, str], Dict[str, Any]] = {}
+    for payload in rows:
+        key = _case_entity_key(payload)
+        current = latest_by_entity.get(key)
+        if current is None or _case_updated_at_sort_value(payload) >= _case_updated_at_sort_value(current):
+            latest_by_entity[key] = payload
+    result = sorted(latest_by_entity.values(), key=_case_updated_at_sort_value, reverse=True)
+    _LIST_CASES_CACHE[cache_key] = (now, result)
+    return _clone_case_rows(result)
 
 
 def get_case_file_path(case_id: str, filename: str) -> Path:
@@ -548,6 +1044,7 @@ def get_case_file_path(case_id: str, filename: str) -> Path:
 
 def search_cases(query: str, limit: int = 10) -> List[Dict[str, Any]]:
     needle = normalize_haystack(query)
+    needle_company = _normalize_company_compare(query)
     query_tokens: List[str] = []
     for token in needle.split():
         if len(token) < 3:
@@ -556,10 +1053,11 @@ def search_cases(query: str, limit: int = 10) -> List[Dict[str, Any]]:
         if token.endswith("s") and len(token) >= 5:
             query_tokens.append(token[:-1])
     results: List[Dict[str, Any]] = []
-    for payload in list_cases():
+    for payload in list_cases(include_all=True):
         analysis = payload.get("analysis") or {}
         profile = (analysis.get("xlsx_profile") or {}).get("profile") or {}
         docs = analysis.get("documents") or []
+        workflow = analysis.get("workflow_run") or {}
         case_haystack = " ".join(
             [
                 payload.get("label", ""),
@@ -573,9 +1071,15 @@ def search_cases(query: str, limit: int = 10) -> List[Dict[str, Any]]:
             ]
         )
         case_norm = normalize_haystack(case_haystack)
+        company_norm = _normalize_company_compare(profile.get("empresa", "") or payload.get("label", ""))
         score = 0
         if needle and needle in case_norm:
             score += 10
+        if needle_company and company_norm:
+            if needle_company == company_norm:
+                score += 40
+            elif needle_company in company_norm or company_norm in needle_company:
+                score += 24
         score += fuzzy_text_score(query, profile.get("empresa", ""))
         score += fuzzy_text_score(query, payload.get("label", "")) // 2
         score += fuzzy_text_score(query, profile.get("nombre", "")) // 2
@@ -602,8 +1106,20 @@ def search_cases(query: str, limit: int = 10) -> List[Dict[str, Any]]:
             score -= 25
         if not profile.get("empresa") and not profile.get("nombre"):
             score -= 20
-        if payload.get("status") != "analyzed":
-            score -= 10
+        payload_status = normalize_haystack(payload.get("status"))
+        workflow_status = normalize_haystack(workflow.get("status"))
+        if payload_status == "completed":
+            score += 6
+        elif payload_status == "analyzed":
+            score += 3
+        elif payload_status == "failed":
+            score -= 4
+        elif payload_status in {"queued", "processing"}:
+            score -= 2
+        if workflow_status == "completed":
+            score += 4
+        elif workflow_status.startswith("stopped_"):
+            score += 1
         if normalize_haystack(payload.get("label", "")).startswith("case-"):
             score -= 1
         updated_at = str(payload.get("updated_at") or "")
@@ -900,6 +1416,7 @@ def search_document_registry(query: str, limit: int = 12) -> List[Dict[str, Any]
         person_document_source = str(item.get("person_document_source") or "")
         haystack = " ".join([label, company, person_name, item.get("nit", ""), person_document, document_number, document_type, ocr_text]).strip()
         score = 0
+        meaningful_hits = 0
         if needle and needle in haystack:
             score += 12
         for token in tokens:
@@ -916,12 +1433,20 @@ def search_document_registry(query: str, limit: int = 12) -> List[Dict[str, Any]
         for token in meaningful_tokens:
             if token in person_name:
                 score += 10
+                meaningful_hits += 1
             elif token in company:
                 score += 8
+                meaningful_hits += 1
+            elif token in label:
+                score += 7
+                meaningful_hits += 1
             elif token in haystack:
                 score += 5
+                meaningful_hits += 1
             else:
-                score -= 10
+                score -= 14
+        if meaningful_tokens and meaningful_hits == 0 and not query_digits:
+            continue
         if query_digits:
             if query_digits == person_document:
                 score += 32
@@ -980,7 +1505,6 @@ def search_document_registry(query: str, limit: int = 12) -> List[Dict[str, Any]
     for item in results:
         logical_filename = re.sub(r"(-\d+)(\.[a-z0-9]+)$", r"\2", Path(item.get("filename", "")).name.lower())
         dedupe_key = (
-            str(item.get("case_id") or ""),
             only_digits(item.get("person_document", "")) or only_digits(item.get("document_number", "")),
             normalize_haystack(item.get("company", "")),
             normalize_haystack(item.get("document_type", "")),
@@ -1020,8 +1544,16 @@ def _clean_company_name(value: str) -> str:
 
 def _normalize_company_compare(value: str) -> str:
     text = normalize_haystack(_clean_company_name(value))
+    text = re.sub(r"\bs\s*\.\s*a\s*\.\s*s\s*\.?\b", "sas", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bs\s*\.\s*a\b", "sa", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bl\s*\.\s*t\s*\.\s*d\s*\.\s*a\s*\.?\b", "ltda", text, flags=re.IGNORECASE)
     text = re.sub(r"[^a-z0-9]+", "", text)
-    text = text.replace("sas", "sas")
+    return text
+
+
+def _normalize_company_strict(value: str) -> str:
+    text = normalize_text(_clean_company_name(value))
+    text = re.sub(r"\s+", " ", text).strip(" .,-")
     return text
 
 
@@ -1297,6 +1829,105 @@ def _looks_like_rut_document(haystack: str) -> bool:
     return hits >= 2 and negative_hits == 0
 
 
+def _calibration_match_score(doc: Dict[str, Any], rule: Dict[str, Any], haystack: str) -> int:
+    score = 0
+    signal_set = {normalize_text(signal) for signal in (doc.get("signals_detected") or []) if normalize_text(signal)}
+    for hint in rule.get("signal_hints") or []:
+        if normalize_text(hint) in signal_set:
+            score += 1
+    for hint in rule.get("text_hints") or []:
+        if normalize_haystack(hint) and normalize_haystack(hint) in haystack:
+            score += 2
+    if float(doc.get("classification_confidence") or 0) <= 0.5:
+        score += 1
+    return score
+
+
+def _apply_document_learning_calibration(docs: List[Dict[str, Any]]) -> None:
+    calibration = _load_document_calibration()
+    remaps = calibration.get("remaps") or []
+    if not remaps:
+        return
+
+    remaps_by_from: Dict[str, List[Dict[str, Any]]] = {}
+    for rule in remaps:
+        from_type = str(rule.get("from_type") or "")
+        to_type = str(rule.get("to_type") or "")
+        if not from_type or not to_type:
+            continue
+        remaps_by_from.setdefault(from_type, []).append(rule)
+
+    for doc in docs:
+        current_type = str(doc.get("document_type") or "")
+        if current_type not in remaps_by_from:
+            continue
+        haystack = normalize_haystack(
+            f"{doc.get('filename', '')} {doc.get('ocr_text', '') or doc.get('text_preview', '')}"
+        )
+        if not haystack:
+            continue
+
+        for rule in remaps_by_from[current_type]:
+            target_type = str(rule.get("to_type") or "")
+            score = _calibration_match_score(doc, rule, haystack)
+            if score < 3:
+                continue
+
+            if target_type == "cedula":
+                if not any(
+                    marker in haystack
+                    for marker in [
+                        "lugar de nacimiento",
+                        "fecha y lugar de expedicion",
+                        "fecha y lugar de expedición",
+                        "indice derecho",
+                        "índice derecho",
+                        "registrador nacional",
+                    ]
+                ):
+                    continue
+            elif target_type == "soporte_ingresos":
+                if not any(
+                    marker in haystack
+                    for marker in [
+                        "planilla resumen",
+                        "resumen general de pago",
+                        "resumen de pago a salud",
+                        "informe consolidado de pagos por empresas",
+                        "valor a pagar",
+                        "datos generales del aportante",
+                        "ibc salud",
+                        "ibc pension",
+                        "ibc pensión",
+                    ]
+                ):
+                    continue
+            elif target_type == "carta":
+                if not any(
+                    marker in haystack
+                    for marker in [
+                        "se adjuntan los siguientes documentos",
+                        "cordialmente",
+                        "representante legal",
+                        "por medio de la presente",
+                        "desvinculacion de empresa",
+                        "desvinculación de empresa",
+                        "agradeciendo su colaboracion",
+                        "agradeciendo su colaboración",
+                    ]
+                ):
+                    continue
+
+            doc["document_type"] = target_type
+            doc["legacy_code"] = DOC_TYPE_TO_PRIMARY_CODE.get(target_type, doc.get("legacy_code"))
+            doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(int(doc["legacy_code"]), "")
+            doc["code_source"] = f"learned_calibration_{current_type}_to_{target_type}"
+            signals = list(doc.get("signals_detected") or [])
+            signals.append(f"learned:{current_type}->{target_type}")
+            doc["signals_detected"] = signals
+            break
+
+
 def _looks_like_autorizacion_document(haystack: str) -> bool:
     positive_markers = [
         "autorizacion de tratamiento de datos",
@@ -1388,6 +2019,7 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
             haystack = normalize_haystack(
                 f"{doc.get('filename', '')} {doc.get('ocr_text', '') or doc.get('text_preview', '')}"
             )
+            doc_type = str(doc.get("document_type") or "")
 
             if _looks_like_beneficiario_final_document(haystack):
                 doc["document_type"] = "beneficiario_final"
@@ -1396,35 +2028,35 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
                 doc["code_source"] = "post_beneficiario_precise"
                 continue
 
-            if doc.get("document_type") == "rut" and _looks_like_carta_document(haystack):
+            if doc_type == "rut" and _looks_like_carta_document(haystack):
                 doc["document_type"] = "carta"
                 doc["legacy_code"] = 4
                 doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(4, "")
                 doc["code_source"] = "post_carta_from_rut"
                 continue
 
-            if doc.get("document_type") == "pdf" and _looks_like_constancia_afiliacion(haystack):
+            if doc_type == "pdf" and _looks_like_constancia_afiliacion(haystack):
                 doc["document_type"] = "constancia_afiliacion"
                 doc["legacy_code"] = 7
                 doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(7, "")
                 doc["code_source"] = "post_constancia_precise"
                 continue
 
-            if doc.get("document_type") in {"pdf", "soporte_ingresos"} and _looks_like_autorizacion_document(haystack):
+            if doc_type in {"pdf", "soporte_ingresos"} and _looks_like_autorizacion_document(haystack):
                 doc["document_type"] = "autorizacion"
                 doc["legacy_code"] = 98
                 doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(98, "")
                 doc["code_source"] = "post_autorizacion_precise"
                 continue
 
-            if doc.get("document_type") == "pdf" and _looks_like_carta_document(haystack):
+            if doc_type == "pdf" and _looks_like_carta_document(haystack):
                 doc["document_type"] = "carta"
                 doc["legacy_code"] = 4
                 doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(4, "")
                 doc["code_source"] = "post_carta_from_pdf"
                 continue
 
-            if doc.get("document_type") == "pdf":
+            if doc_type in {"pdf", "imagen"}:
                 if (
                     ("lugar de nac" in haystack or re.search(r"lugar\s+de\s+n[a-z]{2,}", haystack))
                     and ("fecha y lug" in haystack or "expedicion" in haystack)
@@ -1463,6 +2095,22 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
 
                 prev_doc = group[index - 1] if index > 0 else None
                 next_doc = group[index + 1] if index + 1 < len(group) else None
+                prev_anchor = next(
+                    (
+                        candidate
+                        for candidate in reversed(group[:index])
+                        if str(candidate.get("document_type") or "") not in {"pdf", "imagen"}
+                    ),
+                    None,
+                )
+                next_anchor = next(
+                    (
+                        candidate
+                        for candidate in group[index + 1 :]
+                        if str(candidate.get("document_type") or "") not in {"pdf", "imagen"}
+                    ),
+                    None,
+                )
                 text_preview = (doc.get("text_preview") or "").strip()
                 looks_like_other_strong_type = any(
                     checker(haystack)
@@ -1475,6 +2123,25 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
                         _looks_like_rut_document,
                     )
                 )
+                if (
+                    doc_type in {"pdf", "imagen"}
+                    and not looks_like_other_strong_type
+                    and prev_anchor
+                    and next_anchor
+                    and str(prev_anchor.get("document_type") or "") == "rut"
+                    and str(next_anchor.get("document_type") or "") in {"soporte_ingresos", "autorizacion"}
+                    and (
+                        not text_preview
+                        or _text_quality_is_low(text_preview)
+                        or len((doc.get("fields") or {}).get("all_numbers") or []) <= 4
+                    )
+                ):
+                    doc["document_type"] = "cedula"
+                    doc["legacy_code"] = 6
+                    doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(6, "")
+                    doc["code_source"] = "post_cedula_between_rut_and_followup"
+                    continue
+
                 if (
                     not looks_like_other_strong_type
                     and prev_doc
@@ -1637,6 +2304,8 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
                 doc["legacy_code"] = 99
                 doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(99, "")
                 doc["code_source"] = "post_single_cedula_image"
+
+    _apply_document_learning_calibration(docs)
 
 
 def _classify_document(filename: str, text: str) -> Dict[str, Any]:
@@ -1892,9 +2561,14 @@ def _extract_fields(text: str) -> Dict[str, Any]:
     company_name = ""
     rep_name = ""
     rep_doc = ""
-    match = re.search(r"raz[oó]n social[^A-Za-z0-9]{0,10}([A-ZÁÉÍÓÚÑ0-9 .,&-]{6,120})", normalized, flags=re.IGNORECASE)
+    match = re.search(
+        r"raz[oó]n social[^A-Za-z0-9]{0,10}(?P<value>[A-ZÁÉÍÓÚÑ0-9 .,&-]{6,160}?)(?=(?:\s*|)(?:sigla|nit|domicilio principal)\s*:|$)",
+        normalized,
+        flags=re.IGNORECASE,
+    )
     if match:
-        candidate = normalize_text(match.group(1))
+        candidate = normalize_text(match.group("value"))
+        candidate = re.sub(r"\s+sigla\s*$", "", candidate, flags=re.IGNORECASE).strip()
         if _looks_like_company_name(candidate):
             company_name = candidate
     if not company_name:
@@ -1957,6 +2631,82 @@ def _extract_fields(text: str) -> Dict[str, Any]:
     if not nit_value and filtered_nit_candidates:
         nit_value = filtered_nit_candidates[0]
 
+    tipo_negocio = ""
+    tipoempresa_homologado = ""
+    if "tipo de negocio" in lowered:
+        tipo_section_match = re.search(
+            r"tipo\s+de\s+negocio(?P<section>.{0,260})",
+            normalized,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        tipo_section_raw = tipo_section_match.group("section") if tipo_section_match else normalized
+        tipo_section_raw = re.split(
+            r"pago\s+de\s+reconocimiento|documentos\s+anexos|datos\s+soporte",
+            tipo_section_raw,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        tipo_section = normalize_haystack(tipo_section_raw)
+        option_order = ["grande", "mediana", "pequena", "micro"]
+        option_labels = {
+            "grande": ("Grande", "2"),
+            "mediana": ("Mediana", "1"),
+            "pequena": ("Pequeña", "8"),
+            "micro": ("Micro", "9"),
+        }
+        token_stream = re.findall(r"[a-z0-9]+", tipo_section)
+        section_for_positions = re.sub(r"[^a-z0-9]+", " ", tipo_section).strip()
+        ordered_option_matches: List[Tuple[int, int, str]] = []
+        for option in option_order:
+            for match in re.finditer(rf"\b{re.escape(option)}\b", section_for_positions):
+                ordered_option_matches.append((match.start(), match.end(), option))
+        ordered_option_matches.sort(key=lambda item: item[0])
+        if ordered_option_matches:
+            for index, (start, end, option) in enumerate(ordered_option_matches):
+                next_start = ordered_option_matches[index + 1][0] if index + 1 < len(ordered_option_matches) else min(len(section_for_positions), end + 24)
+                segment = section_for_positions[end:next_start]
+                if re.search(r"\bx\b", segment):
+                    tipo_negocio, tipoempresa_homologado = option_labels[option]
+                    break
+        if not tipo_negocio:
+            option_positions: List[Tuple[int, str]] = [(start, option) for start, _, option in ordered_option_matches]
+            x_positions = [match.start() for match in re.finditer(r"\bx\b", section_for_positions)]
+            if option_positions and x_positions:
+                best_match = min(
+                    (
+                        (
+                            abs(option_pos - x_pos),
+                            x_pos,
+                            option_order.index(option),
+                            option,
+                        )
+                        for option_pos, option in option_positions
+                        for x_pos in x_positions
+                    ),
+                    default=None,
+                )
+                if best_match:
+                    _, _, _, selected_option = best_match
+                    tipo_negocio, tipoempresa_homologado = option_labels[selected_option]
+        if not tipo_negocio:
+            for index, token in enumerate(token_stream):
+                if token != "x":
+                    continue
+                prev_token = token_stream[index - 1] if index > 0 else ""
+                next_token = token_stream[index + 1] if index + 1 < len(token_stream) else ""
+                if prev_token in option_labels:
+                    tipo_negocio, tipoempresa_homologado = option_labels[prev_token]
+                    break
+                if next_token in option_labels:
+                    tipo_negocio, tipoempresa_homologado = option_labels[next_token]
+                    break
+        if not tipo_negocio:
+            sequence = " ".join(token_stream)
+            for option in option_order:
+                if f"x {option}" in sequence or f"{option} x" in sequence:
+                    tipo_negocio, tipoempresa_homologado = option_labels[option]
+                    break
+
     return {
         "document_number": doc_number,
         "nit": nit_value,
@@ -1966,6 +2716,8 @@ def _extract_fields(text: str) -> Dict[str, Any]:
         "representative_name": rep_name,
         "representative_document": rep_doc,
         "issue_date_textual": textual_issue_date.strftime("%Y-%m-%d") if textual_issue_date else "",
+        "tipo_negocio": tipo_negocio,
+        "tipoempresa_homologado": tipoempresa_homologado,
         "has_signature_hint": "firma" in lowered,
         "has_income_hint": any(token in lowered for token in ["ingres", "salario", "honorarios", "renta"]),
         "has_contrato_hint": "contrato" in lowered or "prestacion de servicios" in lowered,
@@ -2109,6 +2861,9 @@ def _classification_confidence(document_type: str, code_source: str, fields: Dic
         "name_override_formulario": 0.92,
         "name_override_sede": 0.92,
         "name_override_sede_compact": 0.92,
+        "learned_calibration_pdf_to_cedula": 0.82,
+        "learned_calibration_pdf_to_soporte_ingresos": 0.8,
+        "learned_calibration_rut_to_carta": 0.78,
         "file_pdf": 0.3,
         "file_image": 0.3,
         "fallback": 0.2,
@@ -2419,7 +3174,7 @@ def _extract_worker_records_from_rows(rows: List[tuple[Any, ...]]) -> tuple[List
     headers: List[str] = []
     best_score = -1
     for idx, row in enumerate(rows[:50]):
-        values = [normalize_text(cell) for cell in row[:40]]
+        values = [normalize_text(cell) for cell in row[:80]]
         normalized = [_header_key(cell) for cell in values if cell]
         has_document = any(
             key in normalized
@@ -2454,13 +3209,98 @@ def _extract_worker_records_from_rows(rows: List[tuple[Any, ...]]) -> tuple[List
                 header_index = idx
                 headers = [_header_key(cell) for cell in values]
 
+    if header_index >= 0 and headers and header_index + 1 < len(rows):
+        sub_values = [normalize_text(cell) for cell in rows[header_index + 1][: len(headers)]]
+        sub_keys = [_header_key(cell) for cell in sub_values]
+        day_seq = ["l", "m1", "m2", "j", "v", "s", "d"]
+        for pos, header in enumerate(list(headers)):
+            sub = sub_keys[pos] if pos < len(sub_keys) else ""
+            if header == "fecha_de_nacimiento":
+                if sub == "dia":
+                    headers[pos] = "fecha_nacimiento_dia"
+                elif sub == "mes":
+                    headers[pos] = "fecha_nacimiento_mes"
+                elif sub in {"ano", "año"}:
+                    headers[pos] = "fecha_nacimiento_ano"
+            elif not header and sub in {"dia", "mes", "ano", "año"}:
+                anchor = ""
+                for back in range(max(0, pos - 2), pos):
+                    if headers[back] == "fecha_nacimiento_dia" or headers[back] == "fecha_de_nacimiento":
+                        anchor = "fecha_de_nacimiento"
+                if anchor:
+                    if sub == "dia":
+                        headers[pos] = "fecha_nacimiento_dia"
+                    elif sub == "mes":
+                        headers[pos] = "fecha_nacimiento_mes"
+                    elif sub in {"ano", "año"}:
+                        headers[pos] = "fecha_nacimiento_ano"
+            elif header == "sexo_identificacion" and sub in {"m/f/t/nb/o", "m/f"}:
+                headers[pos] = "sexo_identificacion"
+            elif header.startswith("días_en_que_se_ejecuta_la_actividad") or header.startswith("dias_en_que_se_ejecuta_la_actividad"):
+                offset = pos - 41
+                if 1 <= offset <= len(day_seq):
+                    headers[pos] = f"dia_{day_seq[offset - 1]}"
+            elif not header and sub in {"l", "m", "j", "v", "s", "d"}:
+                nearby_days = any(
+                    headers[back].startswith("dia_") or headers[back] == "días_en_que_se_ejecuta_la_actividad_(indica_con_x)"
+                    for back in range(max(0, pos - 7), pos)
+                    if headers[back]
+                )
+                if nearby_days:
+                    offset = pos - 41
+                    if 1 <= offset <= len(day_seq):
+                        headers[pos] = f"dia_{day_seq[offset - 1]}"
+            elif header.startswith("horario_en_que_se_ejecutará_la_actividad") or header.startswith("horario_en_que_se_ejecutara_la_actividad"):
+                if sub.isdigit():
+                    headers[pos] = f"horario_{sub}"
+            elif not header and sub.isdigit():
+                nearby_hours = any(
+                    headers[back].startswith("horario_")
+                    or headers[back].startswith("horario_en_que_se_ejecutará_la_actividad")
+                    or headers[back].startswith("horario_en_que_se_ejecutara_la_actividad")
+                    for back in range(max(0, pos - 24), pos)
+                    if headers[back]
+                )
+                if nearby_hours:
+                    headers[pos] = f"horario_{sub}"
+
     records: List[Dict[str, str]] = []
+
+    def _looks_like_control_row(record: Dict[str, str]) -> bool:
+        document_value = only_digits(
+            record.get("documento")
+            or record.get("numero_documento")
+            or record.get("num_id_trabajador")
+            or record.get("numero_de_identificacion")
+            or ""
+        )
+        if document_value:
+            return False
+        values = [normalize_haystack(value) for value in record.values() if normalize_text(value)]
+        if not values:
+            return True
+        boolean_like = sum(1 for value in values if value in {"true", "false"})
+        salary_value = _parse_nomina_value(
+            record.get("salario")
+            or record.get("salario_basico")
+            or record.get("ibc")
+            or record.get("ingreso_base_de_cotizacion")
+            or ""
+        )
+        if boolean_like >= 6:
+            return True
+        if boolean_like >= 3 and salary_value > 0:
+            return True
+        return False
+
     if header_index >= 0 and headers:
         for row_offset, row in enumerate(rows[header_index + 1 :], start=header_index + 2):
             values = [normalize_text(cell) for cell in row[: len(headers)]]
             if not any(values):
                 continue
             record = {headers[pos]: values[pos] for pos in range(min(len(headers), len(values))) if headers[pos]}
+            if _looks_like_control_row(record):
+                continue
             document_value = (
                 record.get("documento")
                 or record.get("numero_documento")
@@ -2482,6 +3322,14 @@ def _extract_worker_records_from_rows(rows: List[tuple[Any, ...]]) -> tuple[List
             if document_value or name_value:
                 if doc_digits and len(doc_digits) >= 5 and doc_type in {"CC", "CE", "CD", "SC", "PE", "PT", "RC", "TI", "NI"}:
                     record["numero_de_identificacion"] = doc_digits
+                    if not record.get("fecha_de_nacimiento"):
+                        parts = [
+                            only_digits(record.get("fecha_nacimiento_dia", "")),
+                            only_digits(record.get("fecha_nacimiento_mes", "")),
+                            only_digits(record.get("fecha_nacimiento_ano", "")),
+                        ]
+                        if any(parts):
+                            record["fecha_de_nacimiento"] = "/".join(part for part in parts if part)
                     record["_row"] = str(row_offset)
                     records.append(record)
                 elif not document_value and name_value:
@@ -2490,16 +3338,202 @@ def _extract_worker_records_from_rows(rows: List[tuple[Any, ...]]) -> tuple[List
     return records, header_index
 
 
+def _extract_worker_sheet_control_totals(rows: List[tuple[Any, ...]]) -> Dict[str, int]:
+    reported_workers = 0
+    reported_salary_total = 0
+
+    for idx, row in enumerate(rows[:250]):
+        values = [normalize_text(cell) for cell in row[:40]]
+        normalized = [normalize_haystack(value) for value in values]
+        if "total_salarios" in normalized:
+            salary_col = normalized.index("total_salarios") if "total_salarios" in normalized else -1
+            worker_col = normalized.index("total_de_trabajadores_reportados") if "total_de_trabajadores_reportados" in normalized else -1
+            if idx + 1 < len(rows):
+                next_row = rows[idx + 1]
+                if worker_col >= 0 and worker_col < len(next_row):
+                    reported_workers = int(_parse_nomina_value(next_row[worker_col]) or 0)
+                if salary_col >= 0 and salary_col < len(next_row):
+                    reported_salary_total = int(_parse_nomina_value(next_row[salary_col]) or 0)
+            break
+
+    return {
+        "reported_workers": reported_workers,
+        "reported_salary_total": reported_salary_total,
+    }
+
+
+def _extract_activity_catalog_codes(rows: List[tuple[Any, ...]]) -> List[str]:
+    codes: set[str] = set()
+    for row in rows[:5000]:
+        values = [normalize_text(cell) for cell in row[:20]]
+        if len(values) < 2:
+            continue
+        first = normalize_haystack(values[0])
+        second = only_digits(values[1])
+        if first in {"clase_de_riesgo", "clase_riesgo"}:
+            continue
+        if first.isdigit() and second and 6 <= len(second) <= 9:
+            codes.add(second)
+    return sorted(codes)
+
+
+def _sheet_value(sheet: Any, row: int, col: int) -> str:
+    try:
+        value = sheet.cell(row=row, column=col).value
+    except Exception:
+        value = None
+    return normalize_text(value)
+
+
+def _extract_form_fields_from_sheet(sheet: Any) -> Dict[str, str]:
+    if sheet is None:
+        return {}
+
+    def cleaned_sheet_value(row: int, col: int, *fallbacks: tuple[int, int]) -> str:
+        candidates = [(row, col), *fallbacks]
+        for r, c in candidates:
+            value = _sheet_value(sheet, r, c)
+            norm = normalize_haystack(value)
+            if not value:
+                continue
+            if norm in {"codigo", "numero", "valor", "clase", "tipo", "estado", "codigo de actividad economica principal"}:
+                continue
+            if re.match(r"^\d+\.\s", value):
+                continue
+            return value
+        return ""
+
+    def detect_tipo_tramite() -> str:
+        row_values = {col: _sheet_value(sheet, 13, col) for col in range(4, 25)}
+        option_cols: List[tuple[int, str]] = []
+        for col, value in row_values.items():
+            norm = normalize_haystack(value)
+            if "afili" in norm:
+                option_cols.append((col, "Afiliación"))
+            elif "traslado" in norm:
+                option_cols.append((col, "Traslado"))
+            elif "terminacion" in norm:
+                option_cols.append((col, "Terminación de la afiliación"))
+        x_cols = [col for col, value in row_values.items() if normalize_haystack(value) == "x"]
+        if x_cols and option_cols:
+            selected_x = x_cols[0]
+            left_options = [item for item in option_cols if item[0] < selected_x]
+            if left_options:
+                return left_options[-1][1]
+            return min(option_cols, key=lambda item: abs(item[0] - selected_x))[1]
+        for _, option in option_cols:
+            if option:
+                return option
+        return ""
+
+    def detect_estado_cuenta() -> str:
+        options = [
+            (8, "Al día"),
+            (12, "En mora"),
+            (16, "Acuerdo de pago"),
+            (19, "Incumplimiento de acuerdo de pago"),
+        ]
+        for index, (_, label) in enumerate(options):
+            marker_col = options[index + 1][0] - 2 if index + 1 < len(options) else 10
+            if normalize_haystack(_sheet_value(sheet, 31, marker_col)) == "x":
+                return label
+        return _sheet_value(sheet, 31, 8)
+
+    tipo_tramite = detect_tipo_tramite()
+
+    row25_label = normalize_haystack(_sheet_value(sheet, 25, 4))
+    row28_label = normalize_haystack(_sheet_value(sheet, 28, 4))
+    is_afiliacion = tipo_tramite == "Afiliación" or ("afili" in row25_label and tipo_tramite != "Traslado")
+    is_traslado = tipo_tramite == "Traslado" or ("traslado" in row28_label and tipo_tramite != "Afiliación")
+    empleador_tipo_documento = _sheet_value(sheet, 16, 22)
+    tipo_persona = "Jurídica" if normalize_haystack(empleador_tipo_documento) == "ni" else "Natural"
+
+    return {
+        "fecha_radicacion": _sheet_value(sheet, 7, 7),
+        "fecha_inicio_cobertura": _sheet_value(sheet, 7, 12),
+        "numero_radicacion": _sheet_value(sheet, 7, 25),
+        "empleador_razon_social": _sheet_value(sheet, 16, 10),
+        "empleador_numero_documento_nit": only_digits(_sheet_value(sheet, 16, 33)),
+        "rep_legal_nombre_completo": " ".join(
+            value
+            for value in [
+                _sheet_value(sheet, 17, 10),
+                _sheet_value(sheet, 17, 21),
+                _sheet_value(sheet, 17, 33),
+                _sheet_value(sheet, 17, 43),
+            ]
+            if value and normalize_haystack(value) != "segundo nombre"
+        ).strip(),
+        "rep_legal_numero_documento": only_digits(_sheet_value(sheet, 18, 16)),
+        "rep_legal_tipo_documento": _sheet_value(sheet, 18, 8),
+        "rep_legal_correo": _sheet_value(sheet, 18, 27),
+        "sede_principal_codigo": _sheet_value(sheet, 21, 8),
+        "sede_principal_nombre": _sheet_value(sheet, 21, 13),
+        "sede_principal_direccion": _sheet_value(sheet, 20, 21),
+        "sede_principal_telefono": only_digits(_sheet_value(sheet, 20, 31) or _sheet_value(sheet, 21, 31)),
+        "sede_principal_correo": _sheet_value(sheet, 24, 27),
+        "sede_principal_municipio_distrito": _sheet_value(sheet, 22, 8),
+        "sede_principal_zona": _sheet_value(sheet, 22, 20),
+        "sede_principal_localidad_comuna": _sheet_value(sheet, 22, 28),
+        "sede_principal_departamento": _sheet_value(sheet, 22, 34),
+        "responsable_sede_principal_nombre_completo": " ".join(
+            value
+            for value in [
+                _sheet_value(sheet, 23, 11),
+                _sheet_value(sheet, 23, 22),
+                _sheet_value(sheet, 23, 34),
+                _sheet_value(sheet, 23, 44),
+            ]
+            if value and normalize_haystack(value) != "segundo nombre"
+        ).strip(),
+        "responsable_sede_principal_tipo_documento": _sheet_value(sheet, 24, 8),
+        "responsable_sede_principal_numero_documento": only_digits(_sheet_value(sheet, 24, 16)),
+        "tipo_tramite": tipo_tramite,
+        "naturaleza_juridica_empleador": cleaned_sheet_value(13, 26, (13, 28), (13, 27)),
+        "tipo_aportante": cleaned_sheet_value(13, 39, (13, 38), (13, 40)),
+        "tipo_persona": tipo_persona,
+        "empleador_tipo_documento": empleador_tipo_documento,
+        "a_codigo_actividad_economica_principal": only_digits(_sheet_value(sheet, 26, 7)) if is_afiliacion else "",
+        "a_clase_riesgo": cleaned_sheet_value(26, 13, (26, 14), (26, 12)) if is_afiliacion else "",
+        "a_numero_sedes": only_digits(_sheet_value(sheet, 26, 17)) if is_afiliacion else "",
+        "a_numero_centros_trabajo": only_digits(_sheet_value(sheet, 26, 22)) if is_afiliacion else "",
+        "a_numero_inicial_trabajadores_estudiantes": only_digits(_sheet_value(sheet, 26, 30)) if is_afiliacion else "",
+        "a_valor_total_nomina": only_digits(_sheet_value(sheet, 26, 43)) if is_afiliacion else "",
+        "b_arl_de_la_cual_se_traslada": _sheet_value(sheet, 30, 4) if is_traslado else "",
+        "b_clase_riesgo": cleaned_sheet_value(29, 13, (29, 14), (29, 12)) if is_traslado else "",
+        "b_codigo_actividad_economica_principal": only_digits(_sheet_value(sheet, 29, 19)) if is_traslado else "",
+        "b_numero_sedes": only_digits(_sheet_value(sheet, 29, 27)) if is_traslado else "",
+        "b_numero_centros_trabajo": only_digits(_sheet_value(sheet, 29, 33)) if is_traslado else "",
+        "b_numero_total_trabajadores_estudiantes": only_digits(_sheet_value(sheet, 29, 39)) if is_traslado else "",
+        "b_monto_total_cotizacion": only_digits(_sheet_value(sheet, 29, 46)) if is_traslado else "",
+        "estado_cuenta_empleador": detect_estado_cuenta() if is_traslado else "",
+    }
+
+
 def _read_xlsx(path: Path) -> Dict[str, Any]:
     workbook = load_workbook(path, data_only=True)
     sheets: List[Dict[str, Any]] = []
     flat_pairs: Dict[str, str] = {}
     records: List[Dict[str, str]] = []
     worker_sheet_counts: Dict[str, int] = {}
+    worker_sheet_salary_totals: Dict[str, int] = {}
+    form_fields: Dict[str, str] = {}
+    activity_catalog_codes: List[str] = []
+    has_independientes_723 = False
     for sheet in workbook.worksheets:
+        normalized_sheet_name = re.sub(r"\s+", " ", str(sheet.title or "").strip())
+        norm_sheet_name = normalize_haystack(normalized_sheet_name)
         rows = list(sheet.iter_rows(values_only=True))
         preview = [[normalize_text(cell) for cell in row[:12]] for row in rows[:8]]
-        sheets.append({"name": sheet.title, "preview": preview})
+        sheets.append({"name": normalized_sheet_name, "preview": preview})
+        if ("independiente" in norm_sheet_name and "723" in norm_sheet_name) or norm_sheet_name == "independientes 723":
+            has_independientes_723 = True
+        if "actividad" in norm_sheet_name and "econom" in norm_sheet_name:
+            extracted_codes = _extract_activity_catalog_codes(rows)
+            if extracted_codes:
+                activity_catalog_codes = extracted_codes
+        if "formulario de afili" in norm_sheet_name:
+            form_fields = _extract_form_fields_from_sheet(sheet)
         for row in [[normalize_text(cell) for cell in raw_row[:12]] for raw_row in rows[:80]]:
             if len(row) >= 2 and row[0] and row[1]:
                 key = normalize_haystack(normalize_text(row[0])).replace(" ", "_")
@@ -2507,12 +3541,15 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
                     flat_pairs[key] = row[1]
         sheet_records, header_index = _extract_worker_records_from_rows(rows)
         if header_index >= 0:
-            worker_sheet_counts[sheet.title] = len(
+            worker_sheet_counts[normalized_sheet_name] = len(
                 [record for record in sheet_records if only_digits(record.get("numero_de_identificacion", ""))]
             )
+            control_totals = _extract_worker_sheet_control_totals(rows)
+            if int(control_totals.get("reported_salary_total") or 0) > 0:
+                worker_sheet_salary_totals[normalized_sheet_name] = int(control_totals.get("reported_salary_total") or 0)
         for record in sheet_records:
-            if sheet.title:
-                record["_sheet"] = sheet.title
+            if normalized_sheet_name:
+                record["_sheet"] = normalized_sheet_name
             records.append(record)
     profile = {
         "tipo_afiliado": flat_pairs.get("tipo_afiliado") or flat_pairs.get("tipoafiliacion") or "",
@@ -2524,6 +3561,21 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
         "lote": flat_pairs.get("lote") or flat_pairs.get("nl") or flat_pairs.get("numero_lote") or "",
         "idtramite": flat_pairs.get("idtramite") or flat_pairs.get("id_tramite") or "",
     }
+    profile["numero_trabajadores"] = (
+        only_digits(form_fields.get("a_numero_inicial_trabajadores_estudiantes", ""))
+        or only_digits(form_fields.get("b_numero_total_trabajadores_estudiantes", ""))
+        or profile.get("numero_trabajadores", "")
+    )
+    profile["numero_sedes"] = (
+        only_digits(form_fields.get("a_numero_sedes", ""))
+        or only_digits(form_fields.get("b_numero_sedes", ""))
+        or profile.get("numero_sedes", "")
+    )
+    profile["nomina_total"] = (
+        only_digits(form_fields.get("a_valor_total_nomina", ""))
+        or only_digits(form_fields.get("b_monto_total_cotizacion", ""))
+        or profile.get("nomina_total", "")
+    )
 
     clean_preview = _generate_clean_from_workbook(workbook, path.name)
     contract_fields = _extract_employer_from_contract_text((clean_preview.get("contrato_clean") or {}).get("content", ""))
@@ -2544,9 +3596,14 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
     return {
         "sheets": sheets,
         "profile": profile,
+        "form_fields": form_fields,
         "flat_pairs": flat_pairs,
         "records": records,
         "worker_sheet_counts": worker_sheet_counts,
+        "worker_sheet_salary_totals": worker_sheet_salary_totals,
+        "activity_catalog_codes": activity_catalog_codes,
+        "has_independientes_723": has_independientes_723,
+        "source_filename": path.name,
     }
 
 
@@ -2621,11 +3678,12 @@ def _generate_clean_from_workbook(workbook: Any, excel_filename: str) -> Dict[st
         sheet_lines = _sheet_to_clean_lines(sheet, force_int_float=True)
         if not sheet_lines:
             continue
-        sede_match = re.search(r"sede\s*0*(\d+)", name, flags=re.IGNORECASE)
+        normalized_name = re.sub(r"\s+", " ", str(name or "").strip())
+        sede_match = re.search(r"sede\s*0*(\d+)", normalized_name, flags=re.IGNORECASE)
         sede_num = int(sede_match.group(1)) if sede_match else idx
         workers_multi.append(
             {
-                "sheet": name,
+                "sheet": normalized_name,
                 "filename": f"Sede{sede_num:02d}-Trabajadores_clean.txt",
                 "lines": len(sheet_lines),
                 "workers": len(worker_rows),
@@ -2705,6 +3763,46 @@ def _extract_employer_from_contract_text(contract_text: str) -> Dict[str, str]:
             break
 
     return {
+        "fecha_radicacion": by_label("Fecha de radicación", "fecha radicacion"),
+        "fecha_inicio_cobertura": by_label("Fecha inicio de cobertura", "fecha de inicio de cobertura", "inicio de cobertura"),
+        "numero_radicacion": by_label("Número de radicación", "numero de radicacion"),
+        "empleador_razon_social": by_label("1. Apellidos y nombres o razón social", "razón social", "razon social"),
+        "empleador_numero_documento_nit": only_digits(by_label("3. Número de documento o NIT", "nit")),
+        "rep_legal_nombre_completo": rep_name,
+        "rep_legal_numero_documento": only_digits(by_label("6. Número de documento")),
+        "rep_legal_tipo_documento": by_label("5. Tipo de documento"),
+        "rep_legal_correo": by_label("7. Correo electrónico"),
+        "sede_principal_codigo": by_label("Código de la sede", "codigo de la sede"),
+        "sede_principal_nombre": by_label("Nombre de la sede"),
+        "sede_principal_direccion": by_label("Dirección de la sede principal", "direccion de la sede"),
+        "sede_principal_telefono": only_digits(by_label("Teléfono fijo/celular", "telefono fijo/celular")),
+        "sede_principal_correo": by_label("Correo electrónico de la sede", "correo electrónico"),
+        "sede_principal_municipio_distrito": by_label("Municipio/Distrito", "municipio distrito"),
+        "sede_principal_zona": by_label("Zona sede", "Zona"),
+        "sede_principal_localidad_comuna": by_label("Localidad/Comuna", "localidad comuna"),
+        "sede_principal_departamento": by_label("Departamento"),
+        "responsable_sede_principal_nombre_completo": "",
+        "responsable_sede_principal_tipo_documento": "",
+        "responsable_sede_principal_numero_documento": "",
+        "tipo_tramite": by_label("Tipo de trámite", "tipo tramite"),
+        "naturaleza_juridica_empleador": by_label("Naturaleza jurídica del empleador", "naturaleza juridica del empleador"),
+        "tipo_aportante": by_label("Tipo de aportante"),
+        "tipo_persona": by_label("Tipo de persona"),
+        "empleador_tipo_documento": by_label("Tipo de documento del empleador", "tipo de documento"),
+        "a_codigo_actividad_economica_principal": only_digits(by_label("Código de actividad económica principal")),
+        "a_clase_riesgo": by_label("Clase de riesgo"),
+        "a_numero_sedes": only_digits(by_label("Número de sedes")),
+        "a_numero_centros_trabajo": only_digits(by_label("Número de centros de trabajo")),
+        "a_numero_inicial_trabajadores_estudiantes": only_digits(by_label("Número inicial de trabajadores o estudiantes", "Número total de trabajadores o estudiantes", "Cantidad de trabajadores y estudiantes")),
+        "a_valor_total_nomina": by_label("Valor total nómina", "valor total nomina"),
+        "b_arl_de_la_cual_se_traslada": by_label("ARL de la cual se traslada"),
+        "b_clase_riesgo": by_label("Clase de riesgo"),
+        "b_codigo_actividad_economica_principal": only_digits(by_label("Código de actividad económica principal")),
+        "b_numero_sedes": only_digits(by_label("Número de sedes")),
+        "b_numero_centros_trabajo": only_digits(by_label("Número de centros de trabajo")),
+        "b_numero_total_trabajadores_estudiantes": only_digits(by_label("Número total de trabajadores o estudiantes", "Cantidad de trabajadores y estudiantes")),
+        "b_monto_total_cotizacion": by_label("Monto total de cotización", "monto total cotizacion"),
+        "estado_cuenta_empleador": by_label("Estado de cuenta del empleador", "estado de cuenta"),
         "empresa": by_label("1. Apellidos y nombres o razón social"),
         "nit": only_digits(by_label("3. Número de documento o NIT", "nit")),
         "representante_legal": rep_name,
@@ -2778,11 +3876,15 @@ def _enrich_xlsx_profile_from_clean(
     profile = dict((xlsx_profile or {}).get("profile") or {})
     flat_pairs = dict((xlsx_profile or {}).get("flat_pairs") or {})
     worker_sheet_counts = dict((xlsx_profile or {}).get("worker_sheet_counts") or {})
+    form_fields = dict((xlsx_profile or {}).get("form_fields") or {})
     seeded_employer_nit = _normalize_company_nit(profile.get("documento_empleador") or profile.get("nit", ""), docs)
     if 8 <= len(seeded_employer_nit) <= 12:
         profile["documento_empleador"] = seeded_employer_nit
         profile["nit"] = seeded_employer_nit
-    contrato_clean = clean_output.get("contrato_clean") if isinstance(clean_output.get("contrato_clean"), dict) else {}
+    contrato_clean = _ensure_tipoempresa_in_contrato_clean(
+        clean_output.get("contrato_clean") if isinstance(clean_output.get("contrato_clean"), dict) else {},
+        xlsx_profile,
+    ) or {}
     contract_fields = _extract_employer_from_contract_text(str(contrato_clean.get("content") or ""))
 
     company_name = normalize_text(contract_fields.get("empresa", ""))
@@ -2870,8 +3972,79 @@ def _enrich_xlsx_profile_from_clean(
     elif only_digits(contract_fields.get("numero_trabajadores", "")):
         profile["numero_trabajadores"] = int(only_digits(contract_fields.get("numero_trabajadores", "")))
 
+    for key, value in contract_fields.items():
+        if key in {
+            "fecha_radicacion",
+            "fecha_inicio_cobertura",
+            "numero_radicacion",
+            "empleador_razon_social",
+            "empleador_numero_documento_nit",
+            "rep_legal_nombre_completo",
+            "rep_legal_numero_documento",
+            "rep_legal_tipo_documento",
+            "rep_legal_correo",
+            "sede_principal_codigo",
+            "sede_principal_nombre",
+            "sede_principal_direccion",
+            "sede_principal_telefono",
+            "sede_principal_correo",
+            "sede_principal_municipio_distrito",
+            "sede_principal_zona",
+            "sede_principal_localidad_comuna",
+            "sede_principal_departamento",
+            "responsable_sede_principal_nombre_completo",
+            "responsable_sede_principal_tipo_documento",
+            "responsable_sede_principal_numero_documento",
+            "tipo_tramite",
+            "naturaleza_juridica_empleador",
+            "tipo_aportante",
+            "tipo_persona",
+            "empleador_tipo_documento",
+            "a_codigo_actividad_economica_principal",
+            "a_clase_riesgo",
+            "a_numero_sedes",
+            "a_numero_centros_trabajo",
+            "a_numero_inicial_trabajadores_estudiantes",
+            "a_valor_total_nomina",
+            "b_arl_de_la_cual_se_traslada",
+            "b_clase_riesgo",
+            "b_codigo_actividad_economica_principal",
+            "b_numero_sedes",
+            "b_numero_centros_trabajo",
+            "b_numero_total_trabajadores_estudiantes",
+            "b_monto_total_cotizacion",
+            "estado_cuenta_empleador",
+        }:
+            if not normalize_text(form_fields.get(key, "")) and normalize_text(value):
+                form_fields[key] = value
+
+    tipo_tramite_norm = normalize_haystack(form_fields.get("tipo_tramite", ""))
+    if "traslado" in tipo_tramite_norm:
+        for key in (
+            "a_codigo_actividad_economica_principal",
+            "a_clase_riesgo",
+            "a_numero_sedes",
+            "a_numero_centros_trabajo",
+            "a_numero_inicial_trabajadores_estudiantes",
+            "a_valor_total_nomina",
+        ):
+            form_fields[key] = ""
+    elif "afili" in tipo_tramite_norm:
+        for key in (
+            "b_arl_de_la_cual_se_traslada",
+            "b_clase_riesgo",
+            "b_codigo_actividad_economica_principal",
+            "b_numero_sedes",
+            "b_numero_centros_trabajo",
+            "b_numero_total_trabajadores_estudiantes",
+            "b_monto_total_cotizacion",
+            "estado_cuenta_empleador",
+        ):
+            form_fields[key] = ""
+
     enriched = dict(xlsx_profile or {})
     enriched["profile"] = profile
+    enriched["form_fields"] = form_fields
     if clean_output:
         enriched["clean_source"] = clean_output.get("_source", "local")
         enriched["clean_preview"] = {
@@ -2992,11 +4165,33 @@ def _finalize_profile_from_docs(xlsx_profile: Dict[str, Any], docs: List[Dict[st
 
 
 def _build_required_documents(xlsx_profile: Dict[str, Any]) -> List[str]:
-    afiliado = normalize_text(xlsx_profile.get("tipo_afiliado", "")).lower()
-    required = ["cedula", "rut", "soporte_ingresos"]
+    form_fields = dict((xlsx_profile or {}).get("form_fields") or {})
+    profile = dict((xlsx_profile or {}).get("profile") or {})
+    afiliado = normalize_text(
+        xlsx_profile.get("tipo_afiliado", "")
+        or profile.get("tipo_afiliado", "")
+    ).lower()
+    tipo_tramite = normalize_text(
+        form_fields.get("tipo_tramite", "")
+        or profile.get("tipo_tramite", "")
+    ).lower()
+
+    # El formulario debe mandar sobre etiquetas heredadas o históricas.
+    explicit_afiliacion = "afili" in tipo_tramite
+    explicit_traslado = "traslado" in tipo_tramite and not explicit_afiliacion
+
+    required = ["cedula", "rut"]
+    if explicit_traslado or (not explicit_afiliacion and "traslado" in afiliado):
+        required.append("soporte_ingresos")
     if any(token in afiliado for token in ["independ", "contratista"]):
         required.append("contrato")
     return required
+
+
+def _is_natural_person_with_cedula(profile: Dict[str, Any]) -> bool:
+    tipo_persona = normalize_haystack(profile.get("tipo_persona", ""))
+    empleador_tipo_documento = normalize_text(profile.get("empleador_tipo_documento", "")).upper()
+    return "natural" in tipo_persona and empleador_tipo_documento in {"CC", "CE", "TI", "CD"}
 
 
 def _doc_by_type(docs: List[Dict[str, Any]], document_type: str) -> List[Dict[str, Any]]:
@@ -3066,6 +4261,7 @@ def _summarize_received_documents(docs: List[Dict[str, Any]]) -> List[Dict[str, 
 def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, Any]], required_docs: List[str], missing_docs: List[str]) -> Dict[str, Any]:
     profile = xlsx_profile.get("profile", {})
     flat_pairs = xlsx_profile.get("flat_pairs", {})
+    form_fields = xlsx_profile.get("form_fields", {}) or {}
     records = xlsx_profile.get("records", [])
     clean_preview = xlsx_profile.get("clean_preview", {}) or {}
     worker_sheet_counts = xlsx_profile.get("worker_sheet_counts", {}) or {}
@@ -3088,8 +4284,11 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
     row_warnings: List[Dict[str, Any]] = []
     expected_workers = int(profile.get("numero_trabajadores") or 0) if str(profile.get("numero_trabajadores") or "").isdigit() else 0
     expected_sedes = int(profile.get("numero_sedes") or 0) if str(profile.get("numero_sedes") or "").isdigit() else 0
-    parsed_sede_files = int(clean_preview.get("sede_files") or 0)
+    active_worker_sedes = sum(1 for count in worker_sheet_counts.values() if int(count or 0) > 0)
+    parsed_sede_files = active_worker_sedes if active_worker_sedes > 0 else int(clean_preview.get("sede_files") or 0)
     workers_count_matches = expected_workers > 0 and len(records) == expected_workers
+    primary_validation = run_xlsx_primary_validations(xlsx_profile)
+    secondary_validation = run_xlsx_secondary_validations(xlsx_profile)
 
     missing_profile_fields: List[str] = []
     if not normalize_text(profile.get("empresa", "")):
@@ -3114,12 +4313,90 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
         )
         next_actions.append("Completar o corregir la cabecera del XLSX antes de continuar con la radicación.")
 
+    responsable_sede_documento = only_digits(form_fields.get("responsable_sede_principal_numero_documento", ""))
+    if not responsable_sede_documento:
+        rejection_reasons.append(
+            {
+                "code": "RESPONSABLE_SEDE_DOCUMENTO_VACIO",
+                "severity": "blocker",
+                "message": "La cédula del responsable del centro de trabajo es obligatoria.",
+            }
+        )
+
+    sede_principal_telefono = only_digits(form_fields.get("sede_principal_telefono", ""))
+    if sede_principal_telefono:
+        if sede_principal_telefono.startswith("0"):
+            rejection_reasons.append(
+                {
+                    "code": "SEDE_PRINCIPAL_TELEFONO_INVALIDO",
+                    "severity": "blocker",
+                    "message": f"El teléfono de la sede principal no puede iniciar en 0 ({sede_principal_telefono}).",
+                }
+            )
+        elif len(sede_principal_telefono) not in {7, 10}:
+            rejection_reasons.append(
+                {
+                    "code": "SEDE_PRINCIPAL_TELEFONO_INVALIDO",
+                    "severity": "blocker",
+                    "message": f"El teléfono fijo/celular de la sede principal debe tener 7 o 10 dígitos ({sede_principal_telefono}).",
+                }
+            )
+
+    for email_key, email_label in (
+        ("rep_legal_correo", "El correo del representante legal"),
+        ("sede_principal_correo", "El correo de la sede principal"),
+    ):
+        email_value = normalize_text(form_fields.get(email_key, ""))
+        if email_value and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email_value):
+            rejection_reasons.append(
+                {
+                    "code": "FORMULARIO_CORREO_INVALIDO",
+                    "severity": "blocker",
+                    "message": f"{email_label} no tiene un formato válido ({email_value}).",
+                }
+            )
+
+    for blocker in primary_validation.get("blockers", []):
+        rejection_reasons.append({**blocker, "severity": "blocker"})
+    for blocker in secondary_validation.get("blockers", []):
+        rejection_reasons.append({**blocker, "severity": "blocker"})
+    for action in primary_validation.get("next_actions", []):
+        if action not in next_actions:
+            next_actions.append(action)
+    for item in secondary_validation.get("alerts", []):
+        alerts.append(item)
+
+    suspicious_required_docs: List[str] = []
+    for doc in docs:
+        doc_type = str(doc.get("document_type") or "")
+        if doc_type not in required_docs:
+            continue
+        text_size = len(normalize_text(doc.get("ocr_text") or doc.get("text_preview") or ""))
+        key_fields = doc.get("key_fields") or {}
+        classification_confidence = float(doc.get("classification_confidence") or 0)
+        ocr_quality_score = float(doc.get("ocr_quality_score") or 0)
+        if text_size < 20 and not key_fields:
+            suspicious_required_docs.append(f"{doc.get('filename')} ({doc_type})")
+            continue
+        if classification_confidence < 0.45 and ocr_quality_score < 0.18:
+            suspicious_required_docs.append(f"{doc.get('filename')} ({doc_type})")
+    if suspicious_required_docs:
+        rejection_reasons.append(
+            {
+                "code": "DOCUMENTS_MINIMUM_QUALITY_FAILED",
+                "severity": "blocker",
+                "message": "Estos soportes no cumplen características mínimas de lectura o clasificación: " + ", ".join(sorted(set(suspicious_required_docs))) + ".",
+            }
+        )
+        next_actions.append("Reemplazar los soportes borrosos, vacíos o sin contenido útil antes de volver a ejecutar la prevalidación.")
+
     if missing_docs:
+        missing_doc_labels = [DOC_TYPE_LABELS.get(item, item.replace("_", " ")) for item in missing_docs]
         rejection_reasons.append(
             {
                 "code": "MISSING_REQUIRED_DOCUMENTS",
                 "severity": "blocker",
-                "message": f"Faltan soportes obligatorios: {', '.join(missing_docs)}.",
+                "message": f"Faltan soportes obligatorios: {', '.join(missing_doc_labels)}.",
             }
         )
         next_actions.append("Solicitar al cliente los soportes faltantes antes de continuar el trámite.")
@@ -3202,31 +4479,17 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
             f"Revisar la estructura interna de la hoja de trabajadores del XLSX; el archivo declara {expected_workers} trabajador(es) pero Imagine leyó 0 filas individuales."
         )
 
-    empty_worker_sheets = [sheet for sheet, count in worker_sheet_counts.items() if int(count or 0) == 0]
-    if empty_worker_sheets:
-        message = "El XLSX tiene hojas de trabajadores sin registros válidos: " + ", ".join(empty_worker_sheets) + "."
-        if workers_count_matches:
-            alerts.append(
-                {
-                    "code": "EMPTY_WORKER_SHEETS",
-                    "severity": "alert",
-                    "message": message,
-                }
-            )
-        else:
-            rejection_reasons.append(
-                {
-                    "code": "EMPTY_WORKER_SHEETS",
-                    "severity": "blocker",
-                    "message": message,
-                }
-            )
-            next_actions.append("Revisar las hojas de trabajadores que quedaron sin registros válidos o confirmar si deben eliminarse del contrato.")
+    worker_sheet_counts_active = {
+        sheet: int(count or 0)
+        for sheet, count in worker_sheet_counts.items()
+        if int(count or 0) > 0
+    }
+    # Tener una hoja de sede sin trabajadores no debe reportarse ni contarse como inconsistencia.
 
     if expected_workers > 0 and records and len(records) != expected_workers:
         sheet_breakdown = ", ".join(
             f"{sheet}: {count}"
-            for sheet, count in worker_sheet_counts.items()
+            for sheet, count in worker_sheet_counts_active.items()
         )
         rejection_reasons.append(
             {
@@ -3243,7 +4506,7 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
     if expected_sedes > 0 and parsed_sede_files > 0 and expected_sedes != parsed_sede_files:
         sheet_breakdown = ", ".join(
             f"{sheet}: {count}"
-            for sheet, count in worker_sheet_counts.items()
+            for sheet, count in worker_sheet_counts_active.items()
         )
         message = (
             f"El contrato tiene {parsed_sede_files} sede(s) detectadas en el paquete, "
@@ -3268,16 +4531,47 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
             )
 
     valid_modalidades = {"PRESENCIAL", "TELETRABAJO", "CASA", "REMOTO"}
-    valid_jornadas = {"UNICA", "ÚNICA", "TURNOS", "ROTATIVA"}
-    valid_zonas = {"U", "R", "URBANA", "RURAL"}
-    valid_sexos = {"M", "F", "MASCULINO", "FEMENINO"}
+    valid_jornadas = {"UNICA", "TURNOS", "ROTATIVA"}
+    valid_zonas = {"U", "R"}
+    valid_sexos = {"M", "F", "T", "NB", "O"}
+    valid_tipo_documento = {"CC", "CE", "CD", "SC", "PE", "PT", "RC", "TI", "NI"}
+    valid_tipo_trabajador = {"DEPENDIENTE", "INDEPENDIENTE", "ESTUDIANTE", "PENSIONADO", "APRENDIZ", "COOPERADO"}
+    valid_tipo_salario = {"FIJO", "VARIABLE", "INTEGRAL"}
+    today = datetime.now()
+    afiliacion_inicio_cobertura = _parse_date_value(form_fields.get("fecha_inicio_cobertura", ""))
+    _, smmlv_value = _resolve_smmlv_value(form_fields)
+    activity_catalog_codes = {
+        only_digits(value)
+        for value in (xlsx_profile.get("activity_catalog_codes") or [])
+        if only_digits(value)
+    }
+    if activity_catalog_codes:
+        form_activity_code = only_digits(
+            form_fields.get("a_codigo_actividad_economica_principal")
+            or form_fields.get("b_codigo_actividad_economica_principal")
+            or ""
+        )
+        if form_activity_code and form_activity_code not in activity_catalog_codes:
+            rejection_reasons.append(
+                {
+                    "code": "FORMULARIO_ACTIVIDAD_ECONOMICA_INVALIDA",
+                    "severity": "blocker",
+                    "message": (
+                        "El código de actividad económica del formulario no existe en el listado de actividades económicas "
+                        f"del XLSX ({form_activity_code})."
+                    ),
+                }
+            )
     for index, record in enumerate(records[:200], start=1):
-        row_document = only_digits(
+        raw_document = normalize_text(
             record.get("documento")
             or record.get("numero_documento")
             or record.get("num_id_trabajador")
             or record.get("numero_de_identificacion")
             or ""
+        )
+        row_document = only_digits(
+            raw_document
         )
         full_name = normalize_text(
             record.get("nombre")
@@ -3295,36 +4589,412 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
         )
         if not row_document:
             row_errors.append({"row": index, "code": "DOCUMENTO_VACIO", "message": f"Documento vacío en fila {index}.", "documento": ""})
+        elif not _is_strict_numeric_value(raw_document):
+            row_errors.append({
+                "row": index,
+                "code": "DOCUMENTO_NO_NUMERICO",
+                "message": f"El número de identificación debe ser numérico en fila {index} ({raw_document}).",
+                "documento": row_document,
+            })
         if not full_name:
             row_errors.append({"row": index, "code": "NOMBRE_VACIO", "message": f"Nombre vacío en fila {index}.", "documento": row_document})
-        sexo = normalize_text(record.get("sexo", "") or record.get("sexo_identificacion", "")).upper()
-        if sexo and sexo not in valid_sexos:
-            row_errors.append({"row": index, "code": "SEXO_INVALIDO", "message": f"Sexo inválido en fila {index} ({sexo}).", "documento": row_document})
+
+        doc_type_raw = record.get("tipo_de_documento", "")
+        doc_type = normalize_haystack(doc_type_raw).upper()
+        if not doc_type:
+            row_errors.append({"row": index, "code": "TIPO_DOCUMENTO_VACIO", "message": f"Tipo de documento vacío en fila {index}.", "documento": row_document})
+        elif doc_type not in valid_tipo_documento:
+            row_errors.append({"row": index, "code": "TIPO_DOCUMENTO_INVALIDO", "message": f"Tipo de documento inválido en fila {index} ({doc_type_raw}).", "documento": row_document})
+        elif row_document:
+            doc_max_lengths = {
+                "CC": 10,
+                "TI": 10,
+                "CD": 10,
+                "RC": 10,
+                "CE": 7,
+                "PT": 15,
+            }
+            doc_exact_lengths = {
+                "SC": 9,
+                "PE": 15,
+            }
+            if doc_type in doc_max_lengths and len(row_document) > doc_max_lengths[doc_type]:
+                row_errors.append({
+                    "row": index,
+                    "code": "DOCUMENTO_LONGITUD_INVALIDA",
+                    "message": f"El documento tipo {doc_type} no puede tener más de {doc_max_lengths[doc_type]} dígitos en fila {index} ({row_document}).",
+                    "documento": row_document,
+                })
+            elif doc_type in doc_exact_lengths and len(row_document) != doc_exact_lengths[doc_type]:
+                row_errors.append({
+                    "row": index,
+                    "code": "DOCUMENTO_LONGITUD_INVALIDA",
+                    "message": f"El documento tipo {doc_type} debe tener exactamente {doc_exact_lengths[doc_type]} dígitos en fila {index} ({row_document}).",
+                    "documento": row_document,
+                })
+
+        birthdate = _parse_birthdate_from_record(record)
+        birth_year_raw = only_digits(record.get("fecha_nacimiento_ano", ""))
+        if birth_year_raw and len(birth_year_raw) == 4 and int(birth_year_raw) < 1905:
+            row_errors.append({
+                "row": index,
+                "code": "FECHA_NACIMIENTO_ANTIGUA_INVALIDA",
+                "message": f"El año de nacimiento no puede ser inferior a 1905 en fila {index} ({birth_year_raw}).",
+                "documento": row_document,
+            })
+        if birthdate:
+            age = _age_years(birthdate, today)
+            if age < 17:
+                row_errors.append({
+                    "row": index,
+                    "code": "EDAD_MINIMA_INVALIDA",
+                    "message": f"La fecha de nacimiento en fila {index} deja una edad menor a 17 años ({birthdate.strftime('%d/%m/%Y')}).",
+                    "documento": row_document,
+                })
+
+        sexo_raw = record.get("sexo", "") or record.get("sexo_identificacion", "")
+        sexo = _normalize_sexo_identificacion(sexo_raw)
+        if not sexo:
+            row_errors.append({"row": index, "code": "SEXO_VACIO", "message": f"Sexo identificación vacío en fila {index}.", "documento": row_document})
+        elif sexo not in valid_sexos:
+            row_errors.append({"row": index, "code": "SEXO_INVALIDO", "message": f"Sexo identificación inválido en fila {index} ({sexo_raw}). Usa solo M, F, T, NB u O.", "documento": row_document})
 
         zona_raw = record.get("zona", "") or record.get("zona_rural_urbana", "") or record.get("zona_(rural/urbana)", "")
-        zona = normalize_haystack(zona_raw).upper()
-        if zona and zona not in valid_zonas:
+        zona = _normalize_zona(zona_raw)
+        if not zona:
+            row_errors.append({"row": index, "code": "ZONA_VACIA", "message": f"Zona vacía en fila {index}.", "documento": row_document})
+        elif zona not in valid_zonas:
             row_errors.append({"row": index, "code": "ZONA_INVALIDA", "message": f"Zona inválida en fila {index} ({zona_raw}).", "documento": row_document})
 
-        modalidad = normalize_haystack(record.get("modalidad", "")).upper()
-        if modalidad and modalidad not in valid_modalidades:
+        modalidad_raw = record.get("modalidad", "")
+        modalidad = _normalize_modalidad(modalidad_raw)
+        if not modalidad:
+            row_errors.append({"row": index, "code": "MODALIDAD_VACIA", "message": f"Modalidad vacía en fila {index}.", "documento": row_document})
+        elif modalidad not in valid_modalidades:
             row_errors.append({"row": index, "code": "MODALIDAD_INVALIDA", "message": f"Modalidad inválida en fila {index} ({record.get('modalidad')}).", "documento": row_document})
 
-        jornada = normalize_haystack(record.get("jornada", "")).upper()
-        if jornada and jornada not in valid_jornadas:
+        jornada_raw = record.get("jornada", "")
+        jornada = _normalize_jornada(jornada_raw)
+        if not jornada:
+            row_errors.append({"row": index, "code": "JORNADA_VACIA", "message": f"Jornada vacía en fila {index}.", "documento": row_document})
+        elif jornada not in valid_jornadas:
             row_errors.append({"row": index, "code": "JORNADA_INVALIDA", "message": f"Jornada inválida en fila {index} ({record.get('jornada')}).", "documento": row_document})
 
-        phone = only_digits(record.get("telefono") or "")
-        if phone and len(phone) != 7:
-            row_warnings.append({"row": index, "code": "TELEFONO_FORMATO", "message": f"Teléfono con longitud no legacy en fila {index}.", "documento": row_document})
+        tipo_trabajador_raw = record.get("tipo_de_trabajador", "")
+        tipo_trabajador = _normalize_tipo_trabajador(tipo_trabajador_raw)
+        if not tipo_trabajador:
+            row_errors.append({"row": index, "code": "TIPO_TRABAJADOR_VACIO", "message": f"Tipo de trabajador vacío en fila {index}.", "documento": row_document})
+        elif tipo_trabajador not in valid_tipo_trabajador:
+            row_errors.append({"row": index, "code": "TIPO_TRABAJADOR_INVALIDO", "message": f"Tipo de trabajador inválido en fila {index} ({tipo_trabajador_raw}).", "documento": row_document})
+        elif tipo_trabajador == "ESTUDIANTE":
+            actividad_economica_estudiante_raw = (
+                record.get("codigo_actividad_economica")
+                or record.get("codigo_de_actividad_economica")
+                or record.get("codigo_actividad_economica_principal")
+                or record.get("actividad_economica")
+                or record.get("actividad_economica_ct")
+                or _record_value_by_tokens(
+                    record,
+                    [
+                        ["codigo", "actividad", "economica"],
+                        ["actividad", "economica"],
+                    ],
+                )
+            )
+            actividad_economica_estudiante = only_digits(actividad_economica_estudiante_raw)
+            if not actividad_economica_estudiante:
+                row_errors.append(
+                    {
+                        "row": index,
+                        "code": "ESTUDIANTE_ACTIVIDAD_ECONOMICA_VACIA",
+                        "message": f"Para tipo de trabajador estudiante, el código de actividad económica es obligatorio en fila {index}.",
+                        "documento": row_document,
+                    }
+                )
+            elif activity_catalog_codes and actividad_economica_estudiante not in activity_catalog_codes:
+                row_errors.append(
+                    {
+                        "row": index,
+                        "code": "ESTUDIANTE_ACTIVIDAD_ECONOMICA_INVALIDA",
+                        "message": f"Para tipo de trabajador estudiante, el código de actividad económica no existe en el catálogo del XLSX en fila {index} ({actividad_economica_estudiante}).",
+                        "documento": row_document,
+                    }
+                )
 
+            fecha_inicio_cobertura_estudiante_raw = (
+                record.get("fecha_inicio_cobertura")
+                or record.get("fecha_de_inicio_de_cobertura")
+                or record.get("inicio_cobertura")
+                or record.get("fecha_inicio")
+                or record.get("fecha_inicio_estudiante")
+                or _record_value_by_tokens(
+                    record,
+                    [
+                        ["fecha", "inicio"],
+                        ["inicio", "contrato"],
+                    ],
+                )
+                or ""
+            )
+            fecha_inicio_cobertura_estudiante = _parse_date_value(fecha_inicio_cobertura_estudiante_raw)
+            if not fecha_inicio_cobertura_estudiante:
+                row_errors.append(
+                    {
+                        "row": index,
+                        "code": "ESTUDIANTE_COBERTURA_VACIA",
+                        "message": f"Para tipo de trabajador estudiante, la fecha de inicio de cobertura es obligatoria en fila {index}.",
+                        "documento": row_document,
+                    }
+                )
+            elif afiliacion_inicio_cobertura and fecha_inicio_cobertura_estudiante.date() < afiliacion_inicio_cobertura.date():
+                row_errors.append(
+                    {
+                        "row": index,
+                        "code": "ESTUDIANTE_COBERTURA_INVALIDA",
+                        "message": (
+                            "La fecha de inicio de cobertura del estudiante no puede ser inferior a la fecha de inicio de cobertura "
+                            f"de la afiliación en fila {index}. Estudiante: {_format_date_value(fecha_inicio_cobertura_estudiante_raw)} "
+                            f"· Afiliación: {_format_date_value(form_fields.get('fecha_inicio_cobertura'))}."
+                        ),
+                        "documento": row_document,
+                    }
+                )
+
+        tipo_salario_raw = record.get("tipo_de_salario", "")
+        tipo_salario = _normalize_tipo_salario(tipo_salario_raw)
+        if not tipo_salario:
+            row_errors.append({"row": index, "code": "TIPO_SALARIO_VACIO", "message": f"Tipo de salario vacío en fila {index}.", "documento": row_document})
+        elif tipo_salario not in valid_tipo_salario:
+            row_errors.append({"row": index, "code": "TIPO_SALARIO_INVALIDO", "message": f"Tipo de salario inválido en fila {index} ({tipo_salario_raw}).", "documento": row_document})
+
+        codigo_ct = only_digits(
+            _record_first_value(
+                record,
+                "codigo_del_centro_de_trabajo",
+                "codigo_centro_trabajo",
+                "codigo_ct",
+            )
+        )
+        if not codigo_ct:
+            row_errors.append(
+                {
+                    "row": index,
+                    "code": "CENTRO_TRABAJO_CODIGO_VACIO",
+                    "message": f"El código del centro de trabajo es obligatorio en fila {index}.",
+                    "documento": row_document,
+                }
+            )
+
+        if tipo_trabajador == "INDEPENDIENTE":
+            tipo_contrato = _record_first_value(record, "tipo_de_contrato", "tipo_contrato")
+            tipo_cotizante = _record_first_value(record, "tipo_de_cotizante", "tipo_cotizante")
+            fecha_inicio_contrato_raw = (
+                _record_first_value(record, "fecha_inicio_contrato", "fecha_de_inicio_del_contrato")
+                or _record_value_by_tokens(record, [["fecha", "inicio", "contrato"]])
+            )
+            fecha_fin_contrato_raw = (
+                _record_first_value(record, "fecha_fin_contrato", "fecha_de_fin_del_contrato")
+                or _record_value_by_tokens(record, [["fecha", "fin", "contrato"]])
+            )
+            fecha_fin_contrato = _parse_date_value(fecha_fin_contrato_raw)
+            actividad_economica_raw = (
+                _record_first_value(record, "actividad_economica", "codigo_actividad_economica", "codigo_de_actividad_economica")
+                or _record_value_by_tokens(record, [["actividad", "economica"]])
+            )
+            actividad_economica = only_digits(actividad_economica_raw)
+            actividad_economica_ct = only_digits(
+                _record_first_value(record, "actividad_economica_ct", "codigo_actividad_economica_ct")
+            )
+            zona_ct_raw = _record_first_value(record, "zona_ct", "zona_centro_trabajo")
+            zona_ct = _normalize_zona(zona_ct_raw)
+            valor_contrato = _parse_nomina_value(
+                _record_first_value(record, "valor_contrato", "monto_total_del_contrato_en_practica")
+            )
+            valor_mensual = _parse_nomina_value(_record_first_value(record, "valor_mensual"))
+            ibc = _parse_nomina_value(_record_first_value(record, "ibc", "ingreso_base_de_cotizacion"))
+
+            if not tipo_cotizante:
+                row_errors.append({
+                    "row": index,
+                    "code": "INDEPENDIENTE_TIPO_COTIZANTE_VACIO",
+                    "message": f"Para independientes, el tipo de cotizante es obligatorio en fila {index}.",
+                    "documento": row_document,
+                })
+            if not tipo_contrato:
+                row_errors.append({
+                    "row": index,
+                    "code": "INDEPENDIENTE_TIPO_CONTRATO_VACIO",
+                    "message": f"Para independientes, el tipo de contrato es obligatorio en fila {index}.",
+                    "documento": row_document,
+                })
+            if not fecha_inicio_contrato_raw:
+                row_errors.append({
+                    "row": index,
+                    "code": "INDEPENDIENTE_FECHA_INICIO_CONTRATO_VACIA",
+                    "message": f"Para independientes, la fecha de inicio del contrato es obligatoria en fila {index}.",
+                    "documento": row_document,
+                })
+            if not fecha_fin_contrato_raw:
+                row_errors.append({
+                    "row": index,
+                    "code": "INDEPENDIENTE_FECHA_FIN_CONTRATO_VACIA",
+                    "message": f"Para independientes, la fecha de fin del contrato es obligatoria en fila {index}.",
+                    "documento": row_document,
+                })
+            elif afiliacion_inicio_cobertura and fecha_fin_contrato and fecha_fin_contrato.date() < afiliacion_inicio_cobertura.date():
+                row_errors.append({
+                    "row": index,
+                    "code": "INDEPENDIENTE_FECHA_FIN_CONTRATO_INVALIDA",
+                    "message": (
+                        "Para independientes, la fecha de fin del contrato no puede ser inferior a la fecha de inicio de cobertura "
+                        f"de la afiliación en fila {index}. Fin contrato: {_format_date_value(fecha_fin_contrato_raw)} "
+                        f"· Afiliación: {_format_date_value(form_fields.get('fecha_inicio_cobertura'))}."
+                    ),
+                    "documento": row_document,
+                })
+            if not actividad_economica:
+                row_errors.append({
+                    "row": index,
+                    "code": "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_VACIA",
+                    "message": f"Para independientes, la actividad económica es obligatoria en fila {index}.",
+                    "documento": row_document,
+                })
+            elif activity_catalog_codes and actividad_economica not in activity_catalog_codes:
+                row_errors.append({
+                    "row": index,
+                    "code": "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_INVALIDA",
+                    "message": f"Para independientes, la actividad económica no existe en el catálogo del XLSX en fila {index} ({actividad_economica}).",
+                    "documento": row_document,
+                })
+            if not actividad_economica_ct:
+                row_errors.append({
+                    "row": index,
+                    "code": "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_CT_VACIA",
+                    "message": f"Para independientes, la actividad económica del centro de trabajo es obligatoria en fila {index}.",
+                    "documento": row_document,
+                })
+            elif activity_catalog_codes and actividad_economica_ct not in activity_catalog_codes:
+                row_errors.append({
+                    "row": index,
+                    "code": "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_CT_INVALIDA",
+                    "message": f"Para independientes, la actividad económica del centro de trabajo no existe en el catálogo del XLSX en fila {index} ({actividad_economica_ct}).",
+                    "documento": row_document,
+                })
+            if not zona_ct:
+                row_errors.append({
+                    "row": index,
+                    "code": "INDEPENDIENTE_ZONA_CT_VACIA",
+                    "message": f"Para independientes, la zona del centro de trabajo es obligatoria en fila {index}.",
+                    "documento": row_document,
+                })
+            elif zona_ct not in valid_zonas:
+                row_errors.append({
+                    "row": index,
+                    "code": "INDEPENDIENTE_ZONA_CT_INVALIDA",
+                    "message": f"Para independientes, la zona del centro de trabajo es inválida en fila {index} ({zona_ct_raw}).",
+                    "documento": row_document,
+                })
+            if not valor_contrato:
+                row_errors.append({
+                    "row": index,
+                    "code": "INDEPENDIENTE_VALOR_CONTRATO_VACIO",
+                    "message": f"Para independientes, el valor del contrato es obligatorio en fila {index}.",
+                    "documento": row_document,
+                })
+            elif valor_contrato < smmlv_value:
+                row_errors.append({
+                    "row": index,
+                    "code": "INDEPENDIENTE_VALOR_CONTRATO_INVALIDO",
+                    "message": f"Para independientes, el valor del contrato no puede ser inferior al mínimo configurado ({smmlv_value}) en fila {index}.",
+                    "documento": row_document,
+                })
+            if not valor_mensual:
+                row_errors.append({
+                    "row": index,
+                    "code": "INDEPENDIENTE_VALOR_MENSUAL_VACIO",
+                    "message": f"Para independientes, el valor mensual es obligatorio en fila {index}.",
+                    "documento": row_document,
+                })
+            elif valor_mensual < smmlv_value:
+                row_errors.append({
+                    "row": index,
+                    "code": "INDEPENDIENTE_VALOR_MENSUAL_INVALIDO",
+                    "message": f"Para independientes, el valor mensual no puede ser inferior al mínimo configurado ({smmlv_value}) en fila {index}.",
+                    "documento": row_document,
+                })
+            if not ibc:
+                row_errors.append({
+                    "row": index,
+                    "code": "INDEPENDIENTE_IBC_VACIO",
+                    "message": f"Para independientes, el IBC es obligatorio en fila {index}.",
+                    "documento": row_document,
+                })
+            elif ibc < smmlv_value:
+                row_errors.append({
+                    "row": index,
+                    "code": "INDEPENDIENTE_IBC_INVALIDO",
+                    "message": f"Para independientes, el IBC no puede ser inferior al mínimo configurado ({smmlv_value}) en fila {index}.",
+                    "documento": row_document,
+                })
+
+        phone = only_digits(record.get("telefono") or "")
         mobile = only_digits(record.get("celular") or "")
-        if mobile and len(mobile) != 10:
-            row_warnings.append({"row": index, "code": "CELULAR_FORMATO", "message": f"Celular con longitud no legacy en fila {index}.", "documento": row_document})
+        phone_looks_like_mobile = len(phone) == 10 and not phone.startswith("0")
+        phone_as_mobile = not mobile and phone_looks_like_mobile
+        effective_mobile = phone if phone_as_mobile else mobile
+        phone_can_be_zero = bool(mobile) and phone in {"", "0"}
+        if phone_as_mobile:
+            phone_can_be_zero = True
+
+        if phone and not phone_can_be_zero:
+            if phone == "0":
+                row_errors.append({
+                    "row": index,
+                    "code": "TELEFONO_FORMATO_INVALIDO",
+                    "message": f"El teléfono debe ir en 0 solo cuando el celular esté diligenciado en fila {index}.",
+                    "documento": row_document,
+                })
+            elif phone.startswith("0"):
+                row_errors.append({
+                    "row": index,
+                    "code": "TELEFONO_FORMATO_INVALIDO",
+                    "message": f"El teléfono no puede iniciar en 0 en fila {index} ({phone}).",
+                    "documento": row_document,
+                })
+            elif len(phone) not in {7, 10}:
+                row_errors.append({
+                    "row": index,
+                    "code": "TELEFONO_FORMATO_INVALIDO",
+                    "message": f"El teléfono debe tener 7 dígitos o 10 si fue reportado como celular en fila {index} ({phone}).",
+                    "documento": row_document,
+                })
+
+        if effective_mobile:
+            if effective_mobile.startswith("0"):
+                row_errors.append({
+                    "row": index,
+                    "code": "CELULAR_FORMATO_INVALIDO",
+                    "message": f"El celular no puede iniciar en 0 en fila {index} ({effective_mobile}).",
+                    "documento": row_document,
+                })
+            elif len(effective_mobile) != 10:
+                row_errors.append({
+                    "row": index,
+                    "code": "CELULAR_FORMATO_INVALIDO",
+                    "message": f"El celular debe tener 10 dígitos en fila {index} ({effective_mobile}).",
+                    "documento": row_document,
+                })
 
         email = normalize_text(record.get("mail") or record.get("correo") or record.get("correo_electronico") or "")
-        if email and "@" not in email:
-            row_warnings.append({"row": index, "code": "CORREO_FORMATO", "message": f"Correo con formato no válido en fila {index}.", "documento": row_document})
+        if email:
+            simple_email_ok = bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email))
+            if not simple_email_ok:
+                row_errors.append({
+                    "row": index,
+                    "code": "CORREO_FORMATO_INVALIDO",
+                    "message": f"Correo con formato no válido en fila {index} ({email}).",
+                    "documento": row_document,
+                })
 
     if row_errors:
         rejection_reasons.extend(
@@ -3359,6 +5029,8 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
 
     return {
         "approved": not rejection_reasons,
+        "xlsx_primary_validation": primary_validation,
+        "xlsx_secondary_validation": secondary_validation,
         "motivos_de_rechazo": rejection_reasons,
         "alerts": alerts,
         "row_errors": row_errors[:50],
@@ -3369,12 +5041,18 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
 
 def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, Any]], missing_docs: List[str]) -> Dict[str, Any]:
     profile = xlsx_profile.get("profile", {})
+    flat_pairs = xlsx_profile.get("flat_pairs", {}) or {}
+    form_fields = dict((xlsx_profile or {}).get("form_fields") or {})
     xlsx_document = only_digits(profile.get("documento", ""))
     xlsx_nit = _normalize_company_nit(profile.get("documento_empleador") or profile.get("nit", ""), docs)
     validations: List[Dict[str, Any]] = []
     alerts: List[Dict[str, Any]] = []
     matches: Dict[str, Any] = {}
     required_evidence = _infer_required_document_satisfaction(_build_required_documents(profile), docs, profile)
+    natural_person_with_cedula = _is_natural_person_with_cedula({
+        "tipo_persona": form_fields.get("tipo_persona") or profile.get("tipo_persona", ""),
+        "empleador_tipo_documento": form_fields.get("empleador_tipo_documento") or profile.get("empleador_tipo_documento", ""),
+    })
 
     cedula_docs = _doc_by_type(docs, "cedula")
     matched_cedula = None
@@ -3527,40 +5205,50 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
 
     profile_company = normalize_haystack(profile.get("empresa", ""))
     profile_company_cmp = _normalize_company_compare(profile.get("empresa", ""))
+    profile_company_strict = _normalize_company_strict(profile.get("empresa", ""))
     camara_docs = _doc_by_type(docs, "camara_comercio")
-    camara_primary = camara_docs[0] if camara_docs else None
+    camara_primary = next((d for d in camara_docs if d.get("fields", {}).get("company_name", "").strip()), camara_docs[0] if camara_docs else None)
     formulario_primary = formulario_docs[0] if formulario_docs else None
-    camara_company = normalize_haystack((camara_primary or {}).get("fields", {}).get("company_name", "") or (camara_primary or {}).get("text_preview", ""))
-    form_company = normalize_haystack((formulario_primary or {}).get("fields", {}).get("company_name", "") or (formulario_primary or {}).get("text_preview", ""))
-    camara_company_cmp = _normalize_company_compare((camara_primary or {}).get("fields", {}).get("company_name", "") or (camara_primary or {}).get("text_preview", ""))
-    form_company_cmp = _normalize_company_compare((formulario_primary or {}).get("fields", {}).get("company_name", "") or (formulario_primary or {}).get("text_preview", ""))
+    camara_company_source = normalize_text((camara_primary or {}).get("fields", {}).get("company_name", ""))
+    form_company_source = normalize_text((formulario_primary or {}).get("fields", {}).get("company_name", "")) or normalize_text(profile.get("empresa", ""))
+    camara_company = normalize_haystack(camara_company_source)
+    form_company = normalize_haystack(form_company_source)
+    camara_company_cmp = _normalize_company_compare(camara_company_source)
+    form_company_cmp = _normalize_company_compare(form_company_source)
+    camara_company_strict = _normalize_company_strict(camara_company_source)
+    form_company_strict = _normalize_company_strict(form_company_source)
     company_ok = False
-    if camara_primary and formulario_primary:
-        camara_tokens = [token for token in camara_company.split() if len(token) >= 5]
-        profile_matches_camara = bool(profile_company_cmp and (profile_company_cmp in camara_company_cmp or camara_company_cmp in profile_company_cmp))
-        profile_matches_form = bool(profile_company_cmp and form_company_cmp and (profile_company_cmp in form_company_cmp or form_company_cmp in profile_company_cmp))
-        form_has_company = bool(form_company)
-        company_ok = (
-            profile_matches_camara
-            or profile_matches_form
-            or bool(camara_tokens and sum(1 for token in camara_tokens if token in form_company) >= min(2, len(camara_tokens)))
-            or (not form_has_company and profile_matches_camara)
+    if not natural_person_with_cedula and camara_primary and (formulario_primary or profile.get("empresa")):
+        form_or_xlsx_company = normalize_haystack(form_company_source)
+        form_or_xlsx_company_cmp = _normalize_company_compare(form_company_source)
+        form_or_xlsx_company_strict = _normalize_company_strict(form_company_source)
+        form_has_company = bool(form_or_xlsx_company)
+        company_ok = bool(
+            camara_company_cmp
+            and (
+                (form_has_company and form_or_xlsx_company_cmp and camara_company_cmp == form_or_xlsx_company_cmp)
+                or (not form_has_company and profile_company_cmp and camara_company_cmp == profile_company_cmp)
+            )
         )
         validations.append(
             {
                 "code": "EMPRESA_MATCH_CAMARA_FORMULARIO",
                 "status": "OK" if company_ok else "ALERTA",
-                "message": "La razón social coincide entre cámara de comercio y formulario."
+                "message": "La razón social coincide entre cámara de comercio y formulario/XLSX."
                 if company_ok
-                else "La razón social no coincide entre cámara de comercio y formulario.",
+                else "La razón social no coincide entre cámara de comercio y formulario/XLSX.",
             }
         )
         matches["empresa_nombre"] = {
             "profile": profile.get("empresa", ""),
             "camara": (camara_primary or {}).get("fields", {}).get("company_name", ""),
-            "formulario": (formulario_primary or {}).get("fields", {}).get("company_name", ""),
+            "formulario": (formulario_primary or {}).get("fields", {}).get("company_name", "") or profile.get("empresa", ""),
+            "camara_compare": camara_company_cmp,
+            "formulario_compare": form_or_xlsx_company_cmp,
+            "camara_strict": camara_company_strict,
+            "formulario_strict": form_or_xlsx_company_strict,
             "camara_file": (camara_primary or {}).get("filename", ""),
-            "formulario_file": (formulario_primary or {}).get("filename", ""),
+            "formulario_file": (formulario_primary or {}).get("filename", "") or (xlsx_profile.get("source_filename") or ""),
             "ok": company_ok,
         }
         if not company_ok:
@@ -3588,7 +5276,7 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
             }
         )
 
-    if camara_docs:
+    if camara_docs and not natural_person_with_cedula:
         recent_date = None
         recent_source = None
         for doc in camara_docs:
@@ -3607,28 +5295,99 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
                 recent_source = doc.get("filename")
         if recent_date:
             age_days = (datetime.now() - recent_date).days
-            ok = age_days <= 90
+            age_business_days = _business_days_between(recent_date, datetime.now())
+            ok = age_business_days <= 60
             issue_date_human = _format_date_es(recent_date)
             validations.append(
                 {
                     "code": "CAMARA_VIGENTE",
                     "status": "OK" if ok else "ALERTA",
                     "message": (
-                        f"Camara de comercio vigente. Fecha de expedicion: {issue_date_human}. Antigüedad: {age_days} dias."
+                        f"Camara de comercio vigente. Fecha de expedicion: {issue_date_human}. Antigüedad: {age_business_days} dias hábiles."
                         if ok
-                        else f"Camara de comercio vencida. Fecha de expedicion: {issue_date_human}. Antigüedad: {age_days} dias."
+                        else f"Camara de comercio vencida. Fecha de expedicion: {issue_date_human}. Antigüedad: {age_business_days} dias hábiles."
                     ),
+                    "severity": "blocker" if not ok else "ok",
                 }
             )
             matches["camara_vigencia"] = {
                 "issued_at": recent_date.strftime("%Y-%m-%d"),
                 "issued_at_human": issue_date_human,
                 "age_days": age_days,
+                "age_business_days": age_business_days,
                 "filename": recent_source or "",
                 "ok": ok,
             }
             if not ok:
                 alerts.append(validations[-1])
+
+    tipo_negocio_detectado = normalize_text(profile.get("tipo_negocio_detectado") or "")
+    tipoempresa_detectado = normalize_text(profile.get("tipoempresa_homologado") or "")
+    naturaleza_empleador = normalize_text(
+        profile.get("naturaleza_juridica_empleador")
+        or flat_pairs.get("naturalezajuridica")
+        or ""
+    )
+    tipoempresa_compat = _map_naturaleza_to_tipoempresa_compat(naturaleza_empleador)
+    if tipoempresa_detectado:
+        tipoempresa_ok = not tipoempresa_compat or tipoempresa_detectado == tipoempresa_compat
+        message = (
+            f"tipoempresa detectado desde 'TIPO DE NEGOCIO' = {tipoempresa_detectado} ({tipo_negocio_detectado or 'n/d'}) y coincide con el valor que hoy usaría el CORE."
+            if tipoempresa_ok
+            else f"tipoempresa detectado desde 'TIPO DE NEGOCIO' = {tipoempresa_detectado} ({tipo_negocio_detectado or 'n/d'}), pero el CORE hoy usaría {tipoempresa_compat} según naturaleza jurídica '{naturaleza_empleador or 'n/d'}'."
+        )
+        validations.append(
+            {
+                "code": "TIPOEMPRESA_CORE_COMPARE",
+                "status": "OK" if tipoempresa_ok else "ALERTA",
+                "message": message,
+            }
+        )
+        matches["tipoempresa_core"] = {
+            "tipo_negocio_detectado": tipo_negocio_detectado,
+            "expected_from_pdf": tipoempresa_detectado,
+            "core_current_from_naturaleza": tipoempresa_compat,
+            "naturaleza_juridica_empleador": naturaleza_empleador,
+            "source_document": profile.get("tipoempresa_source_document", ""),
+            "source": profile.get("tipoempresa_source", ""),
+            "ok": tipoempresa_ok,
+            "inference": "core_current_from_naturaleza" if tipoempresa_compat else "",
+        }
+        if not tipoempresa_ok:
+            alerts.append(validations[-1])
+
+    entrega_porcentaje_issue = None
+    for doc in docs:
+        if str(doc.get("document_type") or "") != "entrega_documentos":
+            continue
+        entrega_data = _extract_intermediario_codigo_y_porcentaje(doc)
+        codigo_intermediario = entrega_data.get("codigo_intermediario") or ""
+        porcentaje_venta = entrega_data.get("porcentaje_venta") or ""
+        if codigo_intermediario not in {"1", "01", "3", "03"}:
+            continue
+        ok = _is_percentage_100(porcentaje_venta)
+        validations.append(
+            {
+                "code": "ENTREGA_DOCUMENTOS_PORCENTAJE_INTERMEDIARIO",
+                "status": "OK" if ok else "ALERTA",
+                "severity": "ok" if ok else "blocker",
+                "message": (
+                    f"En el soporte entrega de documentos, para intermediario código {codigo_intermediario.zfill(2)} el porcentaje de la venta fue leído como '{porcentaje_venta}' y cumple con el 100% requerido."
+                    if ok
+                    else f"En el soporte entrega de documentos, para intermediario código {codigo_intermediario.zfill(2)} el porcentaje de la venta debe venir diligenciado al 100%. Valor leído: '{porcentaje_venta or 'vacío'}'."
+                ),
+            }
+        )
+        matches["entrega_documentos_intermediario"] = {
+            "codigo_intermediario": codigo_intermediario.zfill(2),
+            "porcentaje_venta": porcentaje_venta,
+            "filename": str(doc.get("filename") or ""),
+            "ok": ok,
+        }
+        if not ok:
+            entrega_porcentaje_issue = validations[-1]
+            alerts.append(validations[-1])
+        break
 
     precheck = _build_precheck_summary(xlsx_profile, docs, _build_required_documents(profile), missing_docs)
     alerts.extend(item for item in precheck.get("alerts", []) if item not in alerts)
@@ -3670,6 +5429,7 @@ def _build_executive_report(label: str, xlsx_profile: Dict[str, Any], checklist:
     employer_nit = _normalize_company_nit(profile.get("documento_empleador") or profile.get("nit", ""))
     records = xlsx_profile.get("records", []) or []
     worker_sheet_counts = xlsx_profile.get("worker_sheet_counts", {}) or {}
+    worker_sheet_salary_totals = xlsx_profile.get("worker_sheet_salary_totals", {}) or {}
     raw_fecha_proceso = only_digits(profile.get("fecha_proceso") or "")[:8]
     if len(raw_fecha_proceso) != 8:
         raw_fecha_proceso = datetime.now().strftime("%Y%m%d")
@@ -3681,7 +5441,7 @@ def _build_executive_report(label: str, xlsx_profile: Dict[str, Any], checklist:
     derived_workers = profile.get("numero_trabajadores")
     derived_sedes = profile.get("numero_sedes")
     worker_count = int(derived_workers) if str(derived_workers).isdigit() else len(records)
-    nomina_total = sum(
+    nomina_total_from_records = sum(
         _parse_nomina_value(
             record.get("salario")
             or record.get("salario_basico")
@@ -3691,6 +5451,7 @@ def _build_executive_report(label: str, xlsx_profile: Dict[str, Any], checklist:
         )
         for record in records
     )
+    nomina_total = sum(int(value or 0) for value in worker_sheet_salary_totals.values()) or nomina_total_from_records
     active_worker_sedes = sum(1 for count in worker_sheet_counts.values() if int(count or 0) > 0)
     sedes_count = (
         active_worker_sedes
@@ -3822,6 +5583,91 @@ def _build_926_output(case_id: str, xlsx_profile: Dict[str, Any], checklist: Dic
     }
 
 
+def _extract_tipoempresa_from_entrega_docs(docs: List[Dict[str, Any]]) -> Dict[str, str]:
+    for doc in docs:
+        if str(doc.get("document_type") or "") != "entrega_documentos":
+            continue
+        fields = doc.get("fields") or {}
+        tipo_negocio = normalize_text(fields.get("tipo_negocio") or "")
+        tipoempresa_homologado = normalize_text(fields.get("tipoempresa_homologado") or "")
+        if tipo_negocio and tipoempresa_homologado:
+            return {
+                "tipo_negocio_detectado": tipo_negocio,
+                "tipoempresa_homologado": tipoempresa_homologado,
+                "tipoempresa_source_document": str(doc.get("filename") or ""),
+                "tipoempresa_source": "entrega_documentos_pdf",
+            }
+    return {}
+
+
+def _extract_intermediario_codigo_y_porcentaje(doc: Dict[str, Any]) -> Dict[str, str]:
+    fields = doc.get("fields") or {}
+    direct_codigo = normalize_text(
+        fields.get("intermediario_codigo")
+        or fields.get("codigo_intermediario")
+        or fields.get("codigo_del_intermediario")
+        or ""
+    )
+    direct_porcentaje = normalize_text(
+        fields.get("porcentaje_venta")
+        or fields.get("porcentaje_de_venta")
+        or fields.get("porcentaje")
+        or fields.get("participacion")
+        or ""
+    )
+    text = normalize_text(doc.get("ocr_text") or doc.get("text_preview") or "")
+
+    codigo = only_digits(direct_codigo)
+    if not codigo:
+        codigo_match = (
+            re.search(r"codigo(?:\s+del)?\s+intermediario\s*[:\-]?\s*(\d{1,2})", text, flags=re.IGNORECASE)
+            or re.search(r"intermediario\s*[:\-]?\s*(\d{1,2})", text, flags=re.IGNORECASE)
+            or re.search(r"\bcodigo\s*[:\-]?\s*(\d{1,2})\b", text, flags=re.IGNORECASE)
+        )
+        if codigo_match:
+            codigo = only_digits(codigo_match.group(1))
+
+    porcentaje = direct_porcentaje
+    if not porcentaje:
+        porcentaje_match = (
+            re.search(r"porcentaje(?:\s+de\s+la\s+venta)?\s*[:\-]?\s*(\d{1,3}(?:[.,]\d{1,2})?\s*%?)", text, flags=re.IGNORECASE)
+            or re.search(r"participacion\s*[:\-]?\s*(\d{1,3}(?:[.,]\d{1,2})?\s*%?)", text, flags=re.IGNORECASE)
+        )
+        if porcentaje_match:
+            porcentaje = normalize_text(porcentaje_match.group(1))
+
+    return {
+        "codigo_intermediario": codigo,
+        "porcentaje_venta": porcentaje,
+    }
+
+
+def _is_percentage_100(value: Any) -> bool:
+    text = normalize_text(value)
+    if not text:
+        return False
+    cleaned = text.replace("%", "").replace(" ", "")
+    if "," in cleaned and "." in cleaned:
+        cleaned = cleaned.replace(".", "").replace(",", ".")
+    else:
+        cleaned = cleaned.replace(",", ".")
+    try:
+        return abs(float(cleaned) - 100.0) < 0.0001
+    except ValueError:
+        return False
+
+
+def _map_naturaleza_to_tipoempresa_compat(naturaleza: str) -> str:
+    value = normalize_text(naturaleza).upper()
+    if value == "PRIVADA":
+        return "2"
+    if value in {"PUBLICA", "PÚBLICA"}:
+        return "1"
+    if value == "MIXTA":
+        return "3"
+    return ""
+
+
 def _legacy_post(path: str, payload: Dict[str, Any], timeout: float = 120.0) -> Dict[str, Any]:
     base_url = str(settings.legacy_backend_url or "").strip().rstrip("/")
     if not base_url:
@@ -3914,6 +5760,7 @@ def _build_contrato_clean(xlsx_profile: Dict[str, Any], docs: List[Dict[str, Any
     lines = [
         f"1. Apellidos y nombres o razón social|{employer_name}|2. Tipo de documento|NI|3. Número de documento o NIT|{employer_doc}",
         f"1. Tipo de trámite|X|2. Naturaleza jurídica del empleador|{naturaleza}|3. Tipo de aportante|{tipo_aportante}",
+        f"4. Tipo de negocio homologado|{normalize_text(profile.get('tipoempresa_homologado') or '')}|Tipo de negocio detectado|{normalize_text(profile.get('tipo_negocio_detectado') or '')}",
         f"4. Apellidos y nombres del Representante Legal|{rep_name}",
         f"5. Tipo de documento|CC|6. Número de documento|{rep_doc}|7. Correo electrónico|{email}",
         f"1. Datos de la sede principal|Dirección de la sede principal|{direccion}|Teléfono fijo/celular|{telefono}",
@@ -3927,6 +5774,40 @@ def _build_contrato_clean(xlsx_profile: Dict[str, Any], docs: List[Dict[str, Any
         "content": "\n".join(lines) + "\n",
         "lines": len(lines),
     }
+
+
+def _ensure_tipoempresa_in_contrato_clean(contrato_clean: Optional[Dict[str, Any]], xlsx_profile: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not isinstance(contrato_clean, dict):
+        return contrato_clean
+    content = str(contrato_clean.get("content") or "")
+    if not content.strip():
+        return contrato_clean
+
+    profile = (xlsx_profile or {}).get("profile") or {}
+    tipoempresa = normalize_text(profile.get("tipoempresa_homologado") or "")
+    tipo_negocio = normalize_text(profile.get("tipo_negocio_detectado") or "")
+    if not tipoempresa and not tipo_negocio:
+        return contrato_clean
+
+    tipo_line = f"4. Tipo de negocio homologado|{tipoempresa}|Tipo de negocio detectado|{tipo_negocio}"
+    lines = content.splitlines()
+    replaced = False
+    normalized_lines: List[str] = []
+    for line in lines:
+        if "tipo de negocio homologado" in line.lower():
+            normalized_lines.append(tipo_line)
+            replaced = True
+        else:
+            normalized_lines.append(line)
+
+    if not replaced:
+        insert_at = 2 if len(normalized_lines) >= 2 else len(normalized_lines)
+        normalized_lines.insert(insert_at, tipo_line)
+
+    updated = dict(contrato_clean)
+    updated["content"] = "\n".join(normalized_lines).rstrip() + "\n"
+    updated["lines"] = len(normalized_lines)
+    return updated
 
 
 def _build_independientes_clean(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]:
@@ -4216,6 +6097,7 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
     independientes_clean = clean_output.get("independientes_clean") if isinstance(clean_output.get("independientes_clean"), dict) else None
     if (not contrato_clean or not str(contrato_clean.get("content") or "").strip()) and xlsx_entry:
         contrato_clean = _build_contrato_clean(analysis.get("xlsx_profile") or {}, analysis.get("documents") or [])
+    contrato_clean = _ensure_tipoempresa_in_contrato_clean(contrato_clean, analysis.get("xlsx_profile") or {})
     if not trabajadores_clean_multi and xlsx_entry:
         fallback_indep = _build_independientes_clean(analysis.get("xlsx_profile") or {})
         if str(fallback_indep.get("content") or "").strip():
@@ -4720,6 +6602,9 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
             clean_output["_source"] = "local_fallback"
         xlsx_profile = _enrich_xlsx_profile_from_clean(xlsx_profile, clean_output, docs)
         xlsx_profile = _finalize_profile_from_docs(xlsx_profile, docs)
+    tipoempresa_detectado = _extract_tipoempresa_from_entrega_docs(docs)
+    if tipoempresa_detectado:
+        xlsx_profile.setdefault("profile", {}).update(tipoempresa_detectado)
     _attach_operational_filenames(docs, xlsx_profile)
     clean_duration_ms = int((perf_counter() - clean_started) * 1000)
 
@@ -4728,21 +6613,15 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
     received_types = {item["document_type"] for item in docs}
     required_evidence = _infer_required_document_satisfaction(required_docs, docs, xlsx_profile.get("profile", {}))
     missing_docs = [doc for doc in required_docs if not (required_evidence.get(doc) or {}).get("satisfied")]
-
-    xlsx_document = only_digits(xlsx_profile.get("profile", {}).get("documento", ""))
-    matched_docs = [
-        item["filename"]
-        for item in docs
-        if xlsx_document and xlsx_document == only_digits(item["fields"].get("document_number", ""))
-    ]
-    mismatches = []
-    if xlsx_document and not matched_docs:
-        mismatches.append("Ningun documento OCR coincide con el documento principal reportado en el XLSX.")
-
-    blockers = []
-    blockers.extend(mismatches)
+    matched_docs = _unique_preserve(
+        str(item.get("filename") or "")
+        for item in required_evidence.values()
+        if isinstance(item, dict) and item.get("satisfied") and item.get("filename")
+    )
+    mismatches: List[str] = []
 
     validation_summary = _build_validation_summary(xlsx_profile, docs, missing_docs)
+    blockers = []
     blockers.extend(
         item["message"]
         for item in validation_summary.get("precheck", {}).get("motivos_de_rechazo", [])
@@ -4761,7 +6640,7 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
 
     decision_status = "aprobable" if not blockers else "observado"
     next_step = (
-        "Validar expediente final y radicar afiliacion."
+        "Validar contrato final y radicar afiliacion."
         if decision_status == "aprobable"
         else "Solicitar faltantes o corregir inconsistencias antes de radicar."
     )
@@ -4778,7 +6657,7 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
     decision = {
         "flow": "afiliacion_documental",
         "recommended_status": decision_status,
-        "summary": "Expediente listo para radicacion." if decision_status == "aprobable" else "Expediente con faltantes o inconsistencias.",
+        "summary": "Contrato listo para radicacion." if decision_status == "aprobable" else "Contrato con faltantes o inconsistencias.",
         "blockers": blockers,
         "alerts": non_blocking_alerts,
         "next_step": next_step,

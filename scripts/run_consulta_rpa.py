@@ -6,8 +6,9 @@ from pathlib import Path
 
 import requests
 
+ROOT = Path(__file__).resolve().parents[1]
 API_URL = "http://127.0.0.1:8000"
-OUTPUT_PATH = Path("/Users/escobar/Desktop/afi-nueva/data/evals/latest_consulta_rpa_report.json")
+OUTPUT_PATH = ROOT / "data" / "evals" / "latest_consulta_rpa_report.json"
 
 QUERIES = [
     "protegemos",

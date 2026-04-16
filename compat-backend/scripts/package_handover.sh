@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/Users/escobar/Downloads/sst/migracion_py_react"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DOCS="$ROOT/docs"
 OUT="${1:-$DOCS/handover_produccion_2026-02-25.zip}"
 
@@ -36,4 +36,3 @@ zip -j "$OUT" $(cat "$tmp_list") >/dev/null
 rm -f "$tmp_list"
 
 echo "[OK] Handover empaquetado: $OUT"
-

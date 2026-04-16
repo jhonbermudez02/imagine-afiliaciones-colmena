@@ -1,0 +1,882 @@
+[
+  {
+    "id": "ok_basico",
+    "description": "Caso base válido de afiliación con un trabajador correcto.",
+    "expected_approved": true,
+    "expected_blocker_codes": [],
+    "overrides": {
+      "activity_catalog_codes": ["4466301"]
+    }
+  },
+  {
+    "id": "salario_bajo_smmlv",
+    "description": "Debe rechazar salario inferior al mínimo configurado por año.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["XLSX_SECONDARY_SMMLV_BLOCKER"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "10000",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ],
+      "worker_sheet_salary_totals": {
+        "Sede 01 - Trabajadores": 10000
+      },
+      "form_fields": {
+        "a_valor_total_nomina": "10000"
+      },
+      "profile": {
+        "nomina_total": "10000"
+      }
+    }
+  },
+  {
+    "id": "eps_invalida",
+    "description": "Debe rechazar EPS no encontrada en catálogo mostrando cédula.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["XLSX_SECONDARY_EPS_INVALID"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "EPS INVENTADA",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "afp_invalida",
+    "description": "Debe rechazar AFP no encontrada en catálogo mostrando cédula.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["XLSX_SECONDARY_AFP_INVALID"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "AFP INVENTADA",
+          "sexo_identificacion": "F",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "documento_no_numerico",
+    "description": "Debe rechazar documento con letras.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["DOCUMENTO_NO_NUMERICO"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446ffff",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "edad_menor_17",
+    "description": "Debe rechazar fecha de nacimiento que deje edad menor a 17.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["EDAD_MINIMA_INVALIDA"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "2030",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "fecha_nacimiento_menor_1905",
+    "description": "Debe rechazar año de nacimiento inferior a 1905.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["FECHA_NACIMIENTO_ANTIGUA_INVALIDA"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1900",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "telefono_invalido",
+    "description": "Debe rechazar teléfono fijo con cero inicial o longitud distinta de 7.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["TELEFONO_FORMATO_INVALIDO"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "telefono": "0123456",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "celular_invalido",
+    "description": "Debe rechazar celular con cero inicial o longitud distinta de 10.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["CELULAR_FORMATO_INVALIDO"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "celular": "0123456789",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "responsable_sede_sin_documento",
+    "description": "Debe rechazar cuando falta la cédula del responsable del centro de trabajo.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["RESPONSABLE_SEDE_DOCUMENTO_VACIO"],
+    "overrides": {
+      "form_fields": {
+        "responsable_sede_principal_numero_documento": ""
+      }
+    }
+  },
+  {
+    "id": "telefono_sede_principal_invalido",
+    "description": "Debe rechazar teléfono de sede principal con cero inicial o longitud distinta de 7.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["SEDE_PRINCIPAL_TELEFONO_INVALIDO"],
+    "overrides": {
+      "form_fields": {
+        "sede_principal_telefono": "0123456"
+      }
+    }
+  },
+  {
+    "id": "correo_formulario_invalido",
+    "description": "Debe rechazar correos inválidos en el bloque principal del formulario.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["FORMULARIO_CORREO_INVALIDO"],
+    "overrides": {
+      "form_fields": {
+        "rep_legal_correo": "correo-invalido"
+      }
+    }
+  },
+  {
+    "id": "sexo_vacio",
+    "description": "Debe rechazar sexo identificación vacío.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["SEXO_VACIO"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "sexo_invalido",
+    "description": "Debe rechazar sexo identificación fuera del catálogo.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["SEXO_INVALIDO"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "XYZ",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "estudiante_sin_codigo_actividad",
+    "description": "Debe rechazar estudiante sin código de actividad económica diligenciado.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["ESTUDIANTE_ACTIVIDAD_ECONOMICA_VACIA"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "tipo_de_documento": "CC",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "tipo_de_trabajador": "Estudiante",
+          "tipo_de_salario": "1-Fijo",
+          "jornada": "Única",
+          "modalidad": "Presencial",
+          "zona_(rural/urbana)": "Urbana",
+          "fecha_inicio_cobertura": "11/04/2026",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "estudiante_cobertura_antes_de_afiliacion",
+    "description": "Debe rechazar estudiante con fecha de cobertura inferior a la de afiliación.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["ESTUDIANTE_COBERTURA_INVALIDA"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "tipo_de_documento": "CC",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "tipo_de_trabajador": "Estudiante",
+          "tipo_de_salario": "1-Fijo",
+          "jornada": "Única",
+          "modalidad": "Presencial",
+          "zona_(rural/urbana)": "Urbana",
+          "codigo_actividad_economica": "4466301",
+          "fecha_inicio_cobertura": "10/04/2026",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "ce_longitud_invalida",
+    "description": "Debe rechazar CE mayor a 7 dígitos.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["DOCUMENTO_LONGITUD_INVALIDA"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "12345678",
+          "tipo_de_documento": "CE",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "tipo_de_trabajador": "Dependiente",
+          "tipo_de_salario": "1-Fijo",
+          "jornada": "Única",
+          "modalidad": "Presencial",
+          "zona_(rural/urbana)": "Urbana",
+          "codigo_del_centro_de_trabajo": "1",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "independiente_campos_contractuales_faltantes",
+    "description": "Debe rechazar independiente sin campos contractuales obligatorios.",
+    "expected_approved": false,
+    "expected_blocker_codes": [
+      "INDEPENDIENTE_TIPO_COTIZANTE_VACIO",
+      "INDEPENDIENTE_TIPO_CONTRATO_VACIO",
+      "INDEPENDIENTE_FECHA_INICIO_CONTRATO_VACIA",
+      "INDEPENDIENTE_FECHA_FIN_CONTRATO_VACIA",
+      "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_VACIA",
+      "INDEPENDIENTE_VALOR_CONTRATO_VACIO",
+      "INDEPENDIENTE_VALOR_MENSUAL_VACIO",
+      "INDEPENDIENTE_IBC_VACIO"
+    ],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "tipo_de_documento": "CC",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "tipo_de_trabajador": "Independiente",
+          "tipo_de_salario": "1-Fijo",
+          "jornada": "Única",
+          "modalidad": "Presencial",
+          "zona_(rural/urbana)": "Urbana",
+          "codigo_del_centro_de_trabajo": "1",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "independiente_fecha_fin_contrato_invalida",
+    "description": "Debe rechazar independiente con fecha fin contrato inferior al inicio de cobertura.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["INDEPENDIENTE_FECHA_FIN_CONTRATO_INVALIDA"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "tipo_de_documento": "CC",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "tipo_de_trabajador": "Independiente",
+          "tipo_de_salario": "1-Fijo",
+          "jornada": "Única",
+          "modalidad": "Presencial",
+          "zona_(rural/urbana)": "Urbana",
+          "codigo_del_centro_de_trabajo": "1",
+          "tipo_de_cotizante": "51",
+          "tipo_de_contrato": "1",
+          "actividad_economica": "4466301",
+          "fecha_inicio_contrato": "01/04/2026",
+          "fecha_fin_contrato": "10/04/2026",
+          "valor_contrato": "2000000",
+          "valor_mensual": "1750905",
+          "ibc": "1750905",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ],
+      "form_fields": {
+        "fecha_inicio_cobertura": "11/04/2026"
+      }
+    }
+  },
+  {
+    "id": "independiente_ibc_bajo_minimo",
+    "description": "Debe rechazar independiente con IBC inferior al mínimo configurado.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["INDEPENDIENTE_IBC_INVALIDO"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "tipo_de_documento": "CC",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "tipo_de_trabajador": "Independiente",
+          "tipo_de_salario": "1-Fijo",
+          "jornada": "Única",
+          "modalidad": "Presencial",
+          "zona_(rural/urbana)": "Urbana",
+          "codigo_del_centro_de_trabajo": "1",
+          "tipo_de_cotizante": "51",
+          "tipo_de_contrato": "1",
+          "actividad_economica": "4466301",
+          "actividad_economica_ct": "4466301",
+          "zona_ct": "U",
+          "fecha_inicio_contrato": "01/04/2026",
+          "fecha_fin_contrato": "12/04/2026",
+          "valor_contrato": "2000000",
+          "valor_mensual": "1750905",
+          "ibc": "1000000",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "independiente_ct_faltante",
+    "description": "Debe rechazar independiente sin actividad económica o zona del centro de trabajo.",
+    "expected_approved": false,
+    "expected_blocker_codes": [
+      "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_CT_VACIA",
+      "INDEPENDIENTE_ZONA_CT_VACIA"
+    ],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "tipo_de_documento": "CC",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "tipo_de_trabajador": "Independiente",
+          "tipo_de_salario": "1-Fijo",
+          "jornada": "Única",
+          "modalidad": "Presencial",
+          "zona_(rural/urbana)": "Urbana",
+          "codigo_del_centro_de_trabajo": "1",
+          "tipo_de_cotizante": "51",
+          "tipo_de_contrato": "1",
+          "actividad_economica": "4466301",
+          "fecha_inicio_contrato": "01/04/2026",
+          "fecha_fin_contrato": "12/04/2026",
+          "valor_contrato": "2000000",
+          "valor_mensual": "1750905",
+          "ibc": "1750905",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "formulario_actividad_fuera_catalogo",
+    "description": "Debe rechazar código de actividad económica del formulario fuera del catálogo del XLSX.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["FORMULARIO_ACTIVIDAD_ECONOMICA_INVALIDA"],
+    "overrides": {
+      "activity_catalog_codes": ["4466301"],
+      "form_fields": {
+        "a_codigo_actividad_economica_principal": "9999999"
+      }
+    }
+  },
+  {
+    "id": "independiente_actividad_fuera_catalogo",
+    "description": "Debe rechazar actividad económica de independiente fuera del catálogo del XLSX.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["INDEPENDIENTE_ACTIVIDAD_ECONOMICA_INVALIDA"],
+    "overrides": {
+      "activity_catalog_codes": ["4466301"],
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "tipo_de_documento": "CC",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "tipo_de_trabajador": "Independiente",
+          "tipo_de_salario": "1-Fijo",
+          "jornada": "Única",
+          "modalidad": "Presencial",
+          "zona_(rural/urbana)": "Urbana",
+          "codigo_del_centro_de_trabajo": "1",
+          "tipo_de_cotizante": "51",
+          "tipo_de_contrato": "1",
+          "actividad_economica": "9999999",
+          "actividad_economica_ct": "4466301",
+          "zona_ct": "U",
+          "fecha_inicio_contrato": "01/04/2026",
+          "fecha_fin_contrato": "12/04/2026",
+          "valor_contrato": "2000000",
+          "valor_mensual": "1750905",
+          "ibc": "1750905",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "correo_invalido",
+    "description": "Debe rechazar correo con formato inválido cuando venga informado.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["CORREO_FORMATO_INVALIDO"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "tipo_de_documento": "CC",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "tipo_de_trabajador": "Dependiente",
+          "tipo_de_salario": "1-Fijo",
+          "jornada": "Única",
+          "modalidad": "Presencial",
+          "codigo_del_centro_de_trabajo": "1",
+          "zona_(rural/urbana)": "Urbana",
+          "correo_electronico": "correo-invalido",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "tipo_documento_invalido",
+    "description": "Debe rechazar tipo de documento fuera del catálogo.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["TIPO_DOCUMENTO_INVALIDO"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "tipo_de_documento": "XX",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "tipo_de_trabajador": "Dependiente",
+          "tipo_de_salario": "1-Fijo",
+          "jornada": "Única",
+          "modalidad": "Presencial",
+          "zona_(rural/urbana)": "Urbana",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "jornada_vacia",
+    "description": "Debe rechazar jornada vacía.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["JORNADA_VACIA"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "tipo_de_trabajador": "Dependiente",
+          "tipo_de_salario": "1-Fijo",
+          "jornada": "",
+          "modalidad": "Presencial",
+          "zona_(rural/urbana)": "Urbana",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "modalidad_invalida",
+    "description": "Debe rechazar modalidad fuera del catálogo.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["MODALIDAD_INVALIDA"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "tipo_de_trabajador": "Dependiente",
+          "tipo_de_salario": "1-Fijo",
+          "jornada": "Única",
+          "modalidad": "HIBRIDO",
+          "zona_(rural/urbana)": "Urbana",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "tipo_salario_invalido",
+    "description": "Debe rechazar tipo de salario fuera del catálogo.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["TIPO_SALARIO_INVALIDO"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "tipo_de_trabajador": "Dependiente",
+          "tipo_de_salario": "99-Otro",
+          "jornada": "Única",
+          "modalidad": "Presencial",
+          "zona_(rural/urbana)": "Urbana",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "zona_vacia",
+    "description": "Debe rechazar zona vacía.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["ZONA_VACIA"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "tipo_de_trabajador": "Dependiente",
+          "tipo_de_salario": "1-Fijo",
+          "jornada": "Única",
+          "modalidad": "Presencial",
+          "zona_(rural/urbana)": "",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        }
+      ]
+    }
+  },
+  {
+    "id": "afiliacion_fecha_cobertura_mala",
+    "description": "Debe rechazar afiliación cuando cobertura no es radicación + 1 día.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["XLSX_PRIMARY_FECHA_COBERTURA_INVALIDA"],
+    "overrides": {
+      "form_fields": {
+        "fecha_radicacion": "25/03/2025",
+        "fecha_inicio_cobertura": "26/03/2026"
+      }
+    }
+  },
+  {
+    "id": "traslado_fecha_mala",
+    "description": "Debe rechazar traslado cuando la fecha de radicación no queda dos meses antes de la fecha de inicio de cobertura.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["XLSX_PRIMARY_FECHA_TRASLADO_INVALIDA"],
+    "overrides": {
+      "form_fields": {
+        "tipo_tramite": "Traslado",
+        "fecha_radicacion": "27/03/2026",
+        "fecha_inicio_cobertura": "01/04/2026"
+      },
+      "profile": {
+        "tipo_afiliado": "Traslado"
+      }
+    }
+  },
+  {
+    "id": "sin_hoja_sede",
+    "description": "Debe rechazar cuando no hay hojas de sede/trabajadores válidas.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["XLSX_PRIMARY_SEDE_SHEETS_MISSING", "XLSX_PRIMARY_WORKERS_MISSING"],
+    "overrides": {
+      "worker_sheet_counts": {
+        "__replace__": true,
+        "value": {}
+      },
+      "records": [],
+      "worker_sheet_salary_totals": {
+        "__replace__": true,
+        "value": {}
+      }
+    }
+  },
+  {
+    "id": "trabajadores_duplicados",
+    "description": "Debe rechazar documentos repetidos entre trabajadores.",
+    "expected_approved": false,
+    "expected_blocker_codes": ["DUPLICATE_WORKER_DOCUMENTS"],
+    "overrides": {
+      "records": [
+        {
+          "numero_de_identificacion": "11032446",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 01 - Trabajadores",
+          "_row": "2"
+        },
+        {
+          "numero_de_identificacion": "11032446",
+          "primer_nombre": "ANA",
+          "primer_apellido": "LOPEZ",
+          "salario": "1750905",
+          "eps": "SALUD TOTAL",
+          "pension": "PORVENIR",
+          "sexo_identificacion": "F",
+          "fecha_nacimiento_dia": "22",
+          "fecha_nacimiento_mes": "11",
+          "fecha_nacimiento_ano": "1988",
+          "_sheet": "Sede 02 - Trabajadores",
+          "_row": "2"
+        }
+      ],
+      "worker_sheet_counts": {
+        "Sede 01 - Trabajadores": 1,
+        "Sede 02 - Trabajadores": 1
+      },
+      "worker_sheet_salary_totals": {
+        "Sede 01 - Trabajadores": 1750905,
+        "Sede 02 - Trabajadores": 1750905
+      },
+      "form_fields": {
+        "a_numero_sedes": "2",
+        "a_numero_inicial_trabajadores_estudiantes": "2",
+        "a_valor_total_nomina": "3501810"
+      },
+      "profile": {
+        "numero_sedes": "2",
+        "numero_trabajadores": "2",
+        "nomina_total": "3501810"
+      }
+    }
+  }
+]

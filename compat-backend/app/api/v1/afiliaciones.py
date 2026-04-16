@@ -2020,7 +2020,7 @@ def _sync_engine_from_db(lote: str, base: str = "temporal", fecha_proceso: str =
             row["producto"] = "AFA"
 
         tipoempresa = as_text(row.get("tipoempresa")).strip()
-        if tipoempresa not in {"1", "2", "3"}:
+        if tipoempresa not in {"1", "2", "3", "8", "9"}:
             # 2 = privada (default operativo usado en pruebas legacy)
             row["tipoempresa"] = "2"
 
@@ -2675,8 +2675,12 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
             tipoaportante_raw = str(int(tipoaportante_raw))
 
         naturaleza_code = RULES_ENGINE.map_naturaleza_juridica(row.get("naturalezajuridica"))
+        tipoempresa_override = as_text(row.get("tipoempresa")).strip()
+        if tipoempresa_override not in {"1", "2", "3", "8", "9"}:
+            tipoempresa_override = ""
         if naturaleza_code == 0:
             naturaleza_code = 2
+        tipoempresa_value = tipoempresa_override or str(naturaleza_code)
         f49_code = _tipo_tramite_f49(row.get("tipoafiliacion"))
         if arl_emp == "" and f49_code == "1":
             arl_emp = "10"
@@ -2716,7 +2720,7 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                 "fecloc": fecha_proceso,
                 "f20": as_text(row.get("telefonocelularempleador") or row.get("telefonoprincipalempleador")),
                 "f55": correo_emp,
-                "tipoempresa": str(naturaleza_code),
+                "tipoempresa": tipoempresa_value,
                 "grupoecono": "00000",
                 "doccont1": "3",
                 "contratoant": "000000",
@@ -2840,7 +2844,7 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                     "fecloc": fecha_proceso,
                     "f20": as_text((sede_row or {}).get("telefono") or row.get("telefonocelularempleador")),
                     "f55": correo_sede,
-                    "tipoempresa": str(naturaleza_code),
+                    "tipoempresa": tipoempresa_value,
                     "grupoecono": "00000",
                     "doccont1": "3",
                     "contratoant": "000000",
@@ -3575,6 +3579,7 @@ def _parse_empleador_from_contrato_clean(content: str) -> dict[str, str]:
         "correoelectronicorepresentantelegal": "",
         "actividadeconomicaempleador": "",
         "naturalezajuridica": "",
+        "tipoempresa": "",
         "tipoafiliacion": "Inicial",
         "tipoaportante": "",
         "arlanteriorempleador": "",
@@ -3634,6 +3639,13 @@ def _parse_empleador_from_contrato_clean(content: str) -> dict[str, str]:
                 tip_ap = _extract_between_fuzzy(parts, "3. Tipo de aportante")
             if tip_ap:
                 out["tipoaportante"] = _only_digits(tip_ap) or tip_ap
+
+        elif "tipo de negocio homologado" in low_ln:
+            tipoempresa = _extract_after_key_numeric(parts, "4. Tipo de negocio homologado", digits_min=1, digits_max=1)
+            if not tipoempresa:
+                tipoempresa = _only_digits(_extract_between_fuzzy(parts, "4. Tipo de negocio homologado"))
+            if tipoempresa:
+                out["tipoempresa"] = tipoempresa
 
         elif "apellidos y nombres del representante legal" in low_ln:
             # 4. Apellidos ...|AP1|AP2|N1|N2
@@ -3790,6 +3802,10 @@ def _validate_empleador_import_data(data: dict[str, str]) -> list[str]:
     actividad = _clean_token(data.get("actividadeconomicaempleador"))
     if actividad and not actividad.isdigit():
         errors.append("Actividad económica inválida (debe ser numérica).")
+
+    tipoempresa = _clean_token(data.get("tipoempresa"))
+    if tipoempresa and tipoempresa not in {"1", "2", "3", "8", "9"}:
+        errors.append("tipoempresa inválido (debe ser 1, 2, 3, 8 o 9).")
 
     mail_emp = _clean_token(data.get("correoelectronicoempleador"))
     if mail_emp and "@" not in mail_emp:
@@ -6859,6 +6875,7 @@ def ruta_inclusion_importar_empleador_contrato(payload: dict[str, Any]) -> dict[
         "actividadeconomicaempleador",
         "razonsocialempleador",
         "naturalezajuridica",
+        "tipoempresa",
         "tipoafiliacion",
         "tipoaportante",
         "arlanteriorempleador",
@@ -6872,6 +6889,14 @@ def ruta_inclusion_importar_empleador_contrato(payload: dict[str, Any]) -> dict[
                 base,
                 "ALTER TABLE proc_servicios_obtenerempleadortramite "
                 "ADD COLUMN IF NOT EXISTS arlanteriorempleador text",
+            )
+        except (ValueError, SQLAlchemyError):
+            pass
+        try:
+            execute_by_alias(
+                base,
+                "ALTER TABLE proc_servicios_obtenerempleadortramite "
+                "ADD COLUMN IF NOT EXISTS tipoempresa text",
             )
         except (ValueError, SQLAlchemyError):
             pass

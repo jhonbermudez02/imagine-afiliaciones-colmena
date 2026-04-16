@@ -858,13 +858,13 @@ def infer_operational_decision(query: str, sources: List[Dict[str, object]]) -> 
                 "classification": "recoleccion_documental",
                 "recommended_status": "pendiente_documentos",
                 "summary": "El caso requiere recopilar soportes y validar consistencia antes de radicar.",
-                "next_step": "Consolidar soportes del afiliado, validar consistencia documental y radicar el caso cuando el expediente este completo.",
+                "next_step": "Consolidar soportes del afiliado, validar consistencia documental y radicar el caso cuando el contrato este completo.",
                 "recommended_channel": "radicacion_afiliacion",
             }
         )
     elif response_mode == "remediation":
         blockers = [
-            "Documento ilegible o inconsistente frente al expediente."
+            "Documento ilegible o inconsistente frente al contrato."
             if any(token in lowered for token in ["ilegible", "inconsistente", "inconsistencia"])
             else "El expediente presenta observaciones que requieren subsanacion."
         ]
@@ -1027,7 +1027,7 @@ def build_fallback_answer(query: str, sources: List[Dict[str, object]], response
         remediation_points = points["validations"][:]
         if any(token in query.lower() for token in ["ilegible", "inconsistente", "documento"]):
             remediation_points = [
-                "Validar si el documento esta ilegible, vencido o inconsistente frente al expediente.",
+                "Validar si el documento esta ilegible, vencido o inconsistente frente al contrato.",
                 "Enumerar la inconsistencia puntual.",
                 "Confirmar si el soporte debe reemplazarse o complementarse.",
             ]

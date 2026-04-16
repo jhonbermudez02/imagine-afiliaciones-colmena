@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/Users/escobar/Downloads/sst/migracion_py_react"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BACKEND="$ROOT/backend"
 REPORT="$ROOT/docs/real_ready_report_2026-02-24.json"
 BASE_URL="${BASE_URL:-http://localhost:8000/api/v1}"

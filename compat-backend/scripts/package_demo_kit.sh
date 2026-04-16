@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/Users/escobar/Downloads/sst/migracion_py_react"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DOCS="$ROOT/docs"
 CAPTURAS="$DOCS/demo_capturas_2026-02-25"
 OUT="${1:-$DOCS/demo_kit_2026-02-25.zip}"
@@ -34,4 +34,3 @@ fi
 zip -j "$OUT" $(cat "$tmp_list") >/dev/null
 rm -f "$tmp_list"
 echo "[OK] Demo kit: $OUT"
-

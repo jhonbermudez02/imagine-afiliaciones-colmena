@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/Users/escobar/Downloads/sst/migracion_py_react"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DOCS="$ROOT/docs"
 STAMP="${1:-20260225_143804}"
 OUT="${2:-$DOCS/release_ready_${STAMP}.zip}"

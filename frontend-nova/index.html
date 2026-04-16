@@ -1,215 +1,455 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Imagine S.A.S. - Sistema de Afiliaciones</title>
-    <link rel="stylesheet" href="/styles.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AFI Colima · Portal ARL</title>
+  <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-    <div class="app-shell">
-        <main class="workspace">
-            <section class="workspace-topbar">
-                <div class="brand-panel top-brand-panel">
-                    <div class="brand-logo-wrap">
-                        <img class="brand-logo" src="/imagine-logo.svg" alt="Imagine S.A.S.">
-                    </div>
-                    <div class="brand-copy">
-                        <div class="brand-kicker">IMAGINE S.A.S.</div>
-                        <h1 class="nova-title">Control documental y operativo</h1>
-                        <p class="nova-subtitle">Orquestación de afiliaciones, OCR y mejora continua para producción.</p>
-                    </div>
-                </div>
-                <section class="sidebar-card top-nav-card">
-                    <div class="panel-label">Navegación</div>
-                    <div class="view-switcher inline-switcher" id="viewSwitcher">
-                        <button class="view-tab active" type="button" data-view="processView">Proceso</button>
-                        <button class="view-tab" type="button" data-view="searchView">Búsqueda</button>
-                        <button class="view-tab" type="button" data-view="adminView">Administración</button>
-                    </div>
-                </section>
-            </section>
 
-            <section class="workspace-view active" id="processView">
-                <section class="chat-stage">
-                    <div class="case-uploader">
-                        <div class="case-form-grid">
-                            <label class="upload-pill upload-pill-wide">
-                                Subir paquete completo
-                                <input type="file" id="packageFilesInput" multiple accept=".xlsx,.xls,.xlsm,.pdf,.zip,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp">
-                            </label>
-                            <button class="search-button process-run-button" id="runWorkflowButton" type="button">Ejecutar proceso</button>
-                        </div>
-                        <div class="case-status-line" id="caseStatusLine">Carga el paquete completo y ejecuta el proceso. Imagine hará la prevalidación y, si pasa, continuará hasta el 926.</div>
-                    </div>
-                    <section class="sources-section expanded workflow-section hidden" id="workflowSection">
-                        <div class="sources-header">
-                            <span>Resumen operativo</span>
-                        </div>
-                        <div class="workflow-content" id="workflowContent"></div>
-                    </section>
-
-                    <section class="sources-section expanded workflow-section hidden" id="checklistSection">
-                        <div class="sources-header">
-                            <span>Checklist documental</span>
-                        </div>
-                        <div class="workflow-content" id="caseChecklistContent"></div>
-                    </section>
-
-                    <section class="sources-section expanded workflow-section hidden" id="precheckSection">
-                        <div class="sources-header">
-                            <span>Reporte ejecutivo de prevalidación</span>
-                        </div>
-                        <div class="workflow-content" id="precheckReportContent"></div>
-                    </section>
-
-                    <section class="sources-section expanded workflow-section hidden" id="executiveSection">
-                        <div class="sources-header">
-                            <span>Reporte ejecutivo final</span>
-                        </div>
-                        <div class="workflow-content" id="executiveReportContent"></div>
-                    </section>
-
-                    <section class="sources-section expanded workflow-section hidden" id="workflowRunSection">
-                        <div class="sources-header">
-                            <span>Flujo automático</span>
-                        </div>
-                        <div class="workflow-content" id="workflowRunContent"></div>
-                    </section>
-
-                    <section class="sources-section expanded workflow-section" id="recover926Section">
-                        <div class="sources-header">
-                            <div class="sources-heading-group">
-                                <span>Procesos con 926</span>
-                                <span class="service-role">Recupera, abre o descarga archivos 926 de procesos terminados.</span>
-                            </div>
-                            <button class="search-button secondary compact-button" id="toggleRecover926Button" type="button">Mostrar</button>
-                        </div>
-                        <div class="workflow-content hidden" id="recover926Content"></div>
-                    </section>
-                </section>
-            </section>
-
-            <section class="workspace-view" id="searchView">
-                <section class="chat-stage search-stage">
-                    <div class="chat-container" id="chatContainer"></div>
-
-                    <div class="composer-shell">
-                        <div class="search-container">
-                            <input type="text" class="search-input" id="searchInput" placeholder="Ejemplo: cédula representante protegemos, puerto gaitan, cámara monca, londono...">
-                            <button class="search-button" id="sendButton" type="button">Enviar</button>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="sources-section expanded workflow-section hidden" id="caseSearchSection">
-                    <div class="sources-header">
-                        <span>Búsqueda en expedientes</span>
-                    </div>
-                    <div class="workflow-content" id="caseSearchContent"></div>
-                </section>
-
-                <section class="sources-section expanded workflow-section">
-                    <div class="sources-header">
-                        <span>Comparador 926</span>
-                        <span class="service-role">Compara el 926 del clone contra el 926 del sistema antiguo.</span>
-                    </div>
-                    <div class="workflow-content">
-                        <label class="upload-pill upload-pill-wide">
-                            Archivo 926 del clone
-                            <input type="file" id="compareLeftFile" accept=".txt,.926,text/plain">
-                        </label>
-                        <label class="upload-pill upload-pill-wide">
-                            Archivo 926 del sistema antiguo
-                            <input type="file" id="compareRightFile" accept=".txt,.926,text/plain">
-                        </label>
-                        <div class="case-head-actions">
-                            <button class="search-button" id="compare926Button" type="button">Comparar 926</button>
-                        </div>
-                        <div id="compare926Content" class="workflow-content"></div>
-                    </div>
-                </section>
-            </section>
-
-            <section class="workspace-view" id="adminView">
-                <section class="admin-grid">
-                    <section class="sidebar-card">
-                        <div class="panel-label">Estado rápido</div>
-                        <div class="status-overview">
-                            <div>
-                                <strong id="overallStatusText">Cargando estado...</strong>
-                                <p class="service-role" id="modelsText">Sincronizando stack</p>
-                            </div>
-                            <div class="status-badge" id="overallStatusBadge">SYNC</div>
-                        </div>
-                        <div class="status-metrics">
-                            <div class="metric-chip" id="knowledgeDocsChip">Corpus: -- docs</div>
-                            <div class="metric-chip" id="knowledgeChunksChip">Indice: -- chunks</div>
-                            <div class="metric-chip" id="feedProcessedChip">Procesadas: --</div>
-                            <div class="metric-chip" id="feedOcrChip">OCR: --</div>
-                            <div class="metric-chip" id="evalAverageChip">Promedio: --</div>
-                            <div class="metric-chip" id="evalPassChip">Pass rate: --</div>
-                        </div>
-                    </section>
-
-                    <section class="sidebar-card">
-                        <div class="panel-label">Estado del sistema</div>
-                        <div class="services-grid" id="servicesGrid"></div>
-                    </section>
-
-                    <section class="sidebar-card">
-                        <div class="panel-label">Alimentacion y OCR</div>
-                        <div class="status-metrics compact-metrics">
-                            <div class="metric-chip" id="feedSkippedChip">Saltadas: --</div>
-                            <div class="metric-chip" id="feedFailedChip">Fallidas: --</div>
-                        </div>
-                        <div class="feed-types" id="feedTypes"></div>
-                        <div class="feed-types" id="ocrStrategies"></div>
-                        <div class="feed-errors" id="feedErrors"></div>
-                    </section>
-
-                    <section class="sidebar-card">
-                        <div class="panel-label">Evaluacion</div>
-                        <div class="status-metrics compact-metrics">
-                            <div class="metric-chip" id="evalCasesChip">Casos: --</div>
-                            <div class="metric-chip" id="evalWeakChip">Debiles: --</div>
-                        </div>
-                        <div class="feed-types" id="evalTopics"></div>
-                        <div class="feed-errors" id="evalLowest"></div>
-                    </section>
-
-                    <section class="sidebar-card">
-                        <div class="panel-label">Comparación 926</div>
-                        <div class="status-metrics compact-metrics">
-                            <div class="metric-chip" id="compareTotalChip">Comparaciones: --</div>
-                            <div class="metric-chip" id="compareExactChip">Exactas: --</div>
-                            <div class="metric-chip" id="compareSimilarityChip">Similitud: --</div>
-                        </div>
-                        <div class="feed-errors" id="compareLatest"></div>
-                    </section>
-
-                    <section class="sidebar-card sidebar-actions">
-                        <div class="panel-label">Acciones</div>
-                        <div id="actionsList"></div>
-                        <button class="primary-action" id="exportReviewsButton" type="button">Exportar revisiones</button>
-                        <button class="primary-action" id="reindexButton" type="button">Reindexar conocimiento</button>
-                    </section>
-                </section>
-            </section>
-        </main>
+<!-- LOGIN SCREEN -->
+<div id="loginScreen" class="login-screen hidden">
+  <div class="login-card">
+    <div class="login-brand">
+      <img src="/imagine-logo.jpeg" alt="Imagine S.A.S." class="login-logo-img" />
+      <div class="login-brand-text">
+        <div class="login-title">AFI Colima</div>
+        <div class="login-sub">Portal ARL · Afiliaciones</div>
+      </div>
     </div>
-
-    <div class="document-modal hidden" id="documentModal">
-        <div class="document-modal-backdrop" id="documentModalBackdrop"></div>
-        <div class="document-modal-panel">
-            <div class="document-modal-head">
-                <strong id="documentModalTitle">Visor documental</strong>
-                <button class="search-button secondary" id="documentModalClose" type="button">Cerrar</button>
-            </div>
-            <div class="document-modal-body" id="documentModalBody"></div>
+    <div class="login-section-label">Selecciona tu perfil</div>
+    <div class="login-profiles" id="loginProfiles">
+      <button class="login-profile-btn" type="button" data-profile="imagine">
+        <div class="profile-icon">I</div>
+        <div>
+          <div class="profile-name">Perfil Imagine</div>
+          <div class="profile-desc">Carga, valida y clasifica expedientes</div>
         </div>
+      </button>
+      <button class="login-profile-btn" type="button" data-profile="colmena">
+        <div class="profile-icon profile-icon-alt">C</div>
+        <div>
+          <div class="profile-name">Perfil Colmena</div>
+          <div class="profile-desc">Revisa, valida imágenes y genera plano</div>
+        </div>
+      </button>
+    </div>
+    <div class="login-section-label" style="margin-top:20px">Selecciona tu nombre</div>
+    <div class="login-users" id="loginUsers">
+      <div class="login-loading">Cargando operadores...</div>
+    </div>
+    <div class="login-note" id="loginNote"></div>
+  </div>
+</div>
+
+<!-- MAIN APP SHELL -->
+<div id="appShell" class="app-shell hidden">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <img src="/imagine-logo.jpeg" alt="Imagine S.A.S." class="sidebar-logo-img" />
+      <div>
+        <div class="brand-name">IMAGINE S.A.S.</div>
+        <div class="brand-sub">AFI Colima · Portal ARL</div>
+      </div>
     </div>
 
-    <script type="module" src="/main.js"></script>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <div class="nav-group-label">Operación</div>
+        <button class="nav-item active" data-view="bandeja" type="button">
+          <span class="nav-dot"></span>Bandeja de entrada
+        </button>
+        <button class="nav-item" data-view="flujo" type="button">
+          <span class="nav-dot"></span>Nuevo contrato
+        </button>
+        <button class="nav-item" data-view="clasificacion" type="button">
+          <span class="nav-dot"></span>Clasificación
+          <span class="nav-badge" id="pendingBadge" style="display:none">0</span>
+        </button>
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-group-label">Revisión</div>
+        <button class="nav-item" data-view="validacion" type="button">
+          <span class="nav-dot"></span>Validación OCR
+        </button>
+        <button class="nav-item" data-view="visor" type="button">
+          <span class="nav-dot"></span>Visor documental
+        </button>
+        <button class="nav-item" data-view="reporte" type="button">
+          <span class="nav-dot"></span>Reporte ejecutivo
+        </button>
+      </div>
+
+      <div class="nav-group" id="navColmena" style="display:none">
+        <div class="nav-group-label">Colmena</div>
+        <button class="nav-item" data-view="produccion" type="button">
+          <span class="nav-dot"></span>Producción
+        </button>
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-group-label">Sistema</div>
+        <button class="nav-item" data-view="entrenamiento" type="button">
+          <span class="nav-dot"></span>Entrenamiento
+        </button>
+        <button class="nav-item" data-view="busqueda" type="button">
+          <span class="nav-dot"></span>Búsqueda
+        </button>
+        <button class="nav-item" data-view="admin" type="button">
+          <span class="nav-dot"></span>Admin
+        </button>
+      </div>
+    </nav>
+
+    <div class="sidebar-user">
+      <div class="user-avatar" id="userAvatar">--</div>
+      <div class="user-info">
+        <div class="user-name" id="userName">Sin sesión</div>
+        <div class="user-role" id="userRole">—</div>
+      </div>
+      <button class="user-logout" id="logoutBtn" title="Cambiar sesión" type="button">↩</button>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main class="main-area">
+
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="page-title" id="pageTitle">Bandeja de entrada</div>
+        <div class="page-breadcrumb" id="pageBreadcrumb">Operación · contratos activos</div>
+      </div>
+      <div class="topbar-right" id="topbarActions"></div>
+    </header>
+
+    <!-- VIEWS -->
+    <div class="view-area">
+
+      <!-- BANDEJA -->
+      <section class="view active" id="view-bandeja">
+        <div class="metrics-row" id="metricsRow">
+          <div class="metric-card" data-filter="cola" role="button" tabindex="0" title="Ver contratos en proceso">
+            <div class="metric-label">En proceso</div>
+            <div class="metric-val" id="metricEnProceso">—</div>
+            <div class="metric-sub" id="metricEnProcesoSub"></div>
+          </div>
+          <div class="metric-card" data-filter="aprobables" role="button" tabindex="0" title="Ver contratos aprobables">
+            <div class="metric-label">Aprobables</div>
+            <div class="metric-val" id="metricAprobables">—</div>
+            <div class="metric-sub ok" id="metricAprobablesSub"></div>
+          </div>
+          <div class="metric-card" data-filter="observados" role="button" tabindex="0" title="Ver contratos observados">
+            <div class="metric-label">Observados</div>
+            <div class="metric-val" id="metricObservados">—</div>
+            <div class="metric-sub warn" id="metricObservadosSub"></div>
+          </div>
+          <div class="metric-card" data-filter="no-aprobados" role="button" tabindex="0" title="Ver contratos no aprobados">
+            <div class="metric-label">No aprobados</div>
+            <div class="metric-val" id="metricNoAprobados">—</div>
+            <div class="metric-sub err" id="metricNoAprobadosSub"></div>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div class="section-card-head">
+            <div class="tabs-row" id="bandejaTabsRow">
+              <button class="tab active" data-tab="todos" type="button">Todos</button>
+              <button class="tab" data-tab="aprobables" type="button">Aprobables</button>
+              <button class="tab" data-tab="observados" type="button">Observados</button>
+              <button class="tab" data-tab="no-aprobados" type="button">No aprobados</button>
+              <button class="tab" data-tab="cola" type="button">Cola</button>
+            </div>
+            <button class="btn-icon" id="refreshBandejaBtn" title="Actualizar" type="button">↺</button>
+          </div>
+          <div class="cases-table-wrap" id="casesTableWrap">
+            <div class="loading-msg">Cargando contratos...</div>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div class="section-card-head">
+            <div class="section-title">Flujo del contrato</div>
+          </div>
+          <div class="flow-track">
+            <div class="flow-step done"><span class="flow-num">01</span><span class="flow-label">Ingreso XLSX + PDF</span></div>
+            <div class="flow-arrow">›</div>
+            <div class="flow-step done"><span class="flow-num">02</span><span class="flow-label">Clasificación</span></div>
+            <div class="flow-arrow">›</div>
+            <div class="flow-step active"><span class="flow-num">03</span><span class="flow-label">Prevalidación</span></div>
+            <div class="flow-arrow">›</div>
+            <div class="flow-step"><span class="flow-num">04</span><span class="flow-label">Revisión operador</span></div>
+            <div class="flow-arrow">›</div>
+            <div class="flow-step"><span class="flow-num">05</span><span class="flow-label">Decisión</span></div>
+            <div class="flow-arrow">›</div>
+            <div class="flow-step"><span class="flow-num">06</span><span class="flow-label">Generación 926</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- FLUJO / NUEVO CONTRATO -->
+      <section class="view" id="view-flujo">
+        <div class="section-card">
+          <div class="section-card-head">
+            <div class="section-title">Cargar nuevo contrato</div>
+          </div>
+          <div class="upload-zone" id="uploadZone">
+            <div class="upload-icon">↑</div>
+            <div class="upload-text">Arrastra el XLSX y los PDFs aquí</div>
+            <div class="upload-sub">o haz clic para seleccionar archivos</div>
+            <input type="file" id="packageFilesInput" multiple accept=".xlsx,.xls,.xlsm,.pdf,.zip" style="display:none" />
+          </div>
+          <div class="upload-selected" id="uploadSelected" style="display:none">
+            <div class="upload-files-list" id="uploadFilesList"></div>
+            <div class="upload-actions">
+              <button class="btn-secondary" id="clearFilesBtn" type="button">Limpiar selección</button>
+              <button class="btn-primary" id="runWorkflowBtn" type="button">Ejecutar prevalidación</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-card" id="workflowProgressCard" style="display:none">
+          <div class="section-card-head">
+            <div class="section-title">Progreso del proceso</div>
+            <div class="status-pill" id="workflowStatusPill">En curso</div>
+          </div>
+          <div class="progress-steps" id="progressSteps"></div>
+          <div class="progress-msg" id="progressMsg"></div>
+        </div>
+
+        <div class="section-card" id="workflowResultCard" style="display:none">
+          <div class="section-card-head">
+            <div class="section-title">Resultado de prevalidación</div>
+          </div>
+          <div id="workflowResultContent"></div>
+        </div>
+      </section>
+
+      <!-- CLASIFICACIÓN -->
+      <section class="view" id="view-clasificacion">
+        <div class="two-col-layout">
+          <div class="col-left">
+            <div class="section-card">
+              <div class="section-card-head">
+                <div class="section-title">Documentos del contrato</div>
+              </div>
+              <div class="case-selector-row" id="classifCaseSelector">
+                <select class="field-select" id="classifCaseSelect">
+                  <option value="">Selecciona un contrato...</option>
+                </select>
+              </div>
+              <div id="classifDocList" class="doc-list">
+                <div class="empty-state">Selecciona un contrato para ver sus documentos</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-right">
+            <div class="section-card" id="classifPreviewCard">
+              <div class="section-card-head">
+                <div class="section-title" id="classifPreviewTitle">Vista previa</div>
+                <div id="classifPreviewActions"></div>
+              </div>
+              <div id="classifPreviewBody">
+                <div class="empty-state">Selecciona un documento para ver su contenido</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VALIDACIÓN OCR -->
+      <section class="view" id="view-validacion">
+        <div class="section-card">
+          <div class="section-card-head">
+            <div class="section-title">Validación OCR · comparación de fuentes</div>
+          </div>
+          <div class="case-selector-row">
+            <select class="field-select" id="validacionCaseSelect">
+              <option value="">Selecciona un contrato...</option>
+            </select>
+          </div>
+          <div id="validacionContent">
+            <div class="empty-state">Selecciona un contrato para revisar las validaciones OCR</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VISOR DOCUMENTAL -->
+      <section class="view" id="view-visor">
+        <div class="two-col-layout">
+          <div class="col-left" style="max-width:280px">
+            <div class="section-card">
+              <div class="section-card-head">
+                <div class="section-title">Documentos</div>
+              </div>
+              <select class="field-select" id="visorCaseSelect" style="margin:0 0 12px">
+                <option value="">Selecciona contrato...</option>
+              </select>
+              <div id="visorDocList" class="doc-list"></div>
+            </div>
+          </div>
+          <div class="col-right">
+            <div class="section-card" style="height:100%">
+              <div class="section-card-head">
+                <div class="section-title" id="visorDocTitle">Visor</div>
+                <div id="visorDocActions"></div>
+              </div>
+              <div id="visorDocFrame" class="doc-frame">
+                <div class="empty-state">Selecciona un documento para visualizarlo</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- REPORTE EJECUTIVO -->
+      <section class="view" id="view-reporte">
+        <div class="reporte-layout">
+          <!-- Panel lateral de contratos -->
+          <div class="reporte-sidebar">
+            <div class="reporte-sidebar-head">
+              <span class="section-title" style="font-size:12px">Contratos</span>
+              <input class="field-input" id="reporteSidebarSearch" type="text" placeholder="Buscar..." style="font-size:11px;padding:4px 8px;height:28px;flex:1;min-width:0" />
+            </div>
+            <div id="reporteSidebarList" class="reporte-sidebar-list">
+              <div class="loading-msg">Cargando...</div>
+            </div>
+          </div>
+          <!-- Contenido del reporte -->
+          <div class="reporte-main">
+            <div class="section-card" style="margin:0;border-radius:0;border:none;flex:1">
+              <div id="reporteContent">
+                <div class="empty-state" style="padding:48px">Selecciona un contrato del panel izquierdo</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PRODUCCIÓN (Colmena) -->
+      <section class="view" id="view-produccion">
+        <div class="section-card">
+          <div class="section-card-head">
+            <div class="section-title">Contratos aprobados · lote Colmena</div>
+            <div style="display:flex;gap:8px">
+              <button class="btn-secondary" id="clearColmenaBtn" type="button">Limpiar selección</button>
+              <button class="btn-primary" id="downloadColmenaBtn" type="button">Descargar lote 926</button>
+            </div>
+          </div>
+          <div id="produccionContent">
+            <div class="loading-msg">Cargando contratos...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ENTRENAMIENTO -->
+      <section class="view" id="view-entrenamiento">
+        <div class="section-card">
+          <div class="section-card-head">
+            <div class="section-title">Registro de hallazgos · feedback del operador</div>
+          </div>
+          <div class="feedback-form">
+            <div class="field-row">
+              <label class="field-label">Operador</label>
+              <input class="field-input" id="feedbackName" type="text" placeholder="Tu nombre" readonly />
+            </div>
+            <div class="field-row">
+              <label class="field-label">Tipo de hallazgo</label>
+              <select class="field-select" id="feedbackCategory">
+                <option value="falso_positivo">⚠ Falso positivo — el sistema rechazó algo que debía aprobar</option>
+                <option value="ocr_error">🔍 Error OCR — el sistema leyó mal un documento</option>
+                <option value="clasificacion_erronea">📄 Clasificación errónea — el sistema clasificó mal un PDF</option>
+                <option value="sugerencia">💡 Sugerencia de mejora</option>
+                <option value="otro">📝 Otro</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <label class="field-label">Contrato relacionado</label>
+              <select class="field-select" id="feedbackCaseSelect">
+                <option value="">— Selecciona el contrato (opcional) —</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <label class="field-label">Descripción del hallazgo</label>
+              <textarea class="field-textarea" id="feedbackNote" placeholder="Describe qué falló, qué corregiste, o qué mejoraría el sistema..." rows="4"></textarea>
+            </div>
+            <div class="field-actions">
+              <button class="btn-primary" id="saveFeedbackBtn" type="button">Registrar hallazgo</button>
+              <span class="save-status" id="feedbackSaveStatus"></span>
+            </div>
+          </div>
+        </div>
+        <div class="section-card">
+          <div class="section-card-head">
+            <div class="section-title">Hallazgos registrados</div>
+            <button class="btn-icon" id="refreshFeedbackBtn" type="button">↺</button>
+          </div>
+          <div id="feedbackNotesList">
+            <div class="loading-msg">Cargando hallazgos...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- BÚSQUEDA -->
+      <section class="view" id="view-busqueda">
+        <div class="section-card">
+          <div class="section-card-head">
+            <div class="section-title">Búsqueda documental</div>
+          </div>
+          <div class="search-row">
+            <input class="field-input" id="searchInput" type="text" placeholder="Busca por empresa, NIT o contrato..." />
+            <button class="btn-primary" id="searchBtn" type="button">Buscar</button>
+          </div>
+          <div id="searchResults" style="margin-top:16px">
+            <div class="empty-state">Ingresa un término para buscar</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ADMIN -->
+      <section class="view" id="view-admin">
+        <div class="metrics-row">
+          <div class="metric-card" id="adminStatusCard">
+            <div class="metric-label">Estado del sistema</div>
+            <div class="metric-val" id="adminStatusVal">—</div>
+            <div class="metric-sub" id="adminStatusSub"></div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Versión frontend</div>
+            <div class="metric-val" id="adminBuildId" style="font-size:13px;padding-top:4px">—</div>
+          </div>
+        </div>
+        <div class="section-card">
+          <div class="section-card-head">
+            <div class="section-title">Acciones del sistema</div>
+          </div>
+          <div class="admin-actions">
+            <button class="btn-secondary" id="reindexBtn" type="button">Reindexar conocimiento</button>
+            <button class="btn-secondary" id="exportReviewsBtn" type="button">Exportar revisiones</button>
+            <button class="btn-secondary" id="refreshStatusBtn" type="button">Actualizar estado</button>
+          </div>
+          <div id="adminStatusDetail" style="margin-top:16px"></div>
+        </div>
+      </section>
+
+    </div><!-- end view-area -->
+  </main>
+</div>
+
+<!-- DOCUMENT MODAL -->
+<div class="modal-backdrop hidden" id="docModalBackdrop"></div>
+<div class="modal hidden" id="docModal">
+  <div class="modal-head">
+    <div class="modal-title" id="docModalTitle">Documento</div>
+    <button class="modal-close" id="docModalClose" type="button">✕</button>
+  </div>
+  <div class="modal-body" id="docModalBody"></div>
+</div>
+
+<script type="module" src="/main.js"></script>
 </body>
 </html>
