@@ -5668,7 +5668,7 @@ def _extract_intermediario_codigo_y_porcentaje(doc: Dict[str, Any]) -> Dict[str,
 
     # Patron CPS-F-11: tabla CODIGO | NRO DOCUMENTO | NOMBRE | % PARTICIPACION
     tabla_cpsf11 = re.search(
-        r"(?:c[o]digo)[^\n]{0,80}(?:documento|nro)[^\n]{0,80}(?:nombre|apellido)[^\n]{0,80}(?:participaci[o]n|porcentaje)[^\n]{0,40}?\s*([1-4])\s+(\d{7,12})\s+[a-zA-Z][a-zA-Z\s]{5,60}?\s+(\d{2,3})\b",
+        r"(?:c[oó]digo|c\u00f3digo)[^\n]{0,80}(?:documento|nro)[^\n]{0,80}(?:nombre|apellido)[^\n]{0,80}(?:participaci[oó]n|participaci\u00f3n|porcentaje)[^\n]{0,40}?\s*([1-4])\s+(\d{7,12})\s+[\w][\w\s]{5,60}?\s+(\d{2,3})\b",
         text, flags=re.IGNORECASE
     )
     if tabla_cpsf11:
@@ -6500,7 +6500,8 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
     try:
         gen926_started = perf_counter()
         # Insertar comisiones del Entrega Doc antes de generar el plano
-        _push_comisiones_to_legacy(lote=lote, docs=docs, base=base)  # docs = analysis documents
+        _workflow_docs = (analysis.get("documents") or [])
+        _push_comisiones_to_legacy(lote=lote, docs=_workflow_docs, base=base)
         generated_926 = _legacy_build_926_http(
             lote=lote,
             base=base,
