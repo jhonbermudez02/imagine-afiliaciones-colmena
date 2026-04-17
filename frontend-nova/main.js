@@ -575,7 +575,8 @@ function renderCasesTable(cases, tab = 'todos') {
                         <button class="table-action-link" data-action="reporte" data-case="${escapeHtml(id)}" type="button">Reporte</button>
                         <button class="table-action-link" data-action="clasificacion" data-case="${escapeHtml(id)}" type="button">Docs</button>
                         <button class="table-action-link" data-action="recuperar" data-case="${escapeHtml(id)}" type="button">Recuperar</button>
-                        ${has926 ? `<button class="table-action-link" data-action="descargar926" data-case="${escapeHtml(id)}" data-file="${escapeHtml(filename)}" type="button">926 ↓</button>` : ''}
+                        ${has926 ? `<button class="table-action-link" data-action="descargar926" data-case="${escapeHtml(id)}" data-file="${escapeHtml(filename)}" type="button">Plano ↓</button>` : ''}
+                        ${readProfile() !== 'colmena' ? `<button class="table-action-link table-action-danger" data-action="eliminar" data-case="${escapeHtml(id)}" data-empresa="${escapeHtml(empresa)}" type="button">✕</button>` : ''}
                     </div>
                 </div>
             </div>
@@ -629,8 +630,21 @@ async function handleCaseAction(action, caseId, file) {
             if (sel) sel.value = caseId;
             if (el) renderReporte(el, activeCasePayload);
         }
-    } else if (action === 'descargar926') {
-        download926(caseId, file);
+    } else if (action === 'eliminar') {
+        const empresa = document.querySelector(`[data-action="eliminar"][data-case="${caseId}"]`)?.dataset?.empresa || caseId;
+        if (!confirm(`¿Eliminar el contrato de ${empresa}?\n\nEsta acción eliminará el expediente y todos sus archivos adjuntos. No se puede deshacer.`)) return;
+        try {
+            const r = await fetch(`${API_URL}/api/cases/${encodeURIComponent(caseId)}`, { method: 'DELETE' });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            // Remover tarjeta del DOM inmediatamente
+            const card = document.querySelector(`[data-default-case="${caseId}"]`);
+            if (card) card.remove();
+            // Actualizar métricas
+            allCases = allCases.filter(c => c.id !== caseId);
+            renderMetrics(allCases);
+        } catch(e) {
+            alert('No se pudo eliminar el contrato: ' + e.message);
+        }
     }
 }
 

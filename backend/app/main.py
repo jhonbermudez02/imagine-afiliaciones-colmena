@@ -2669,6 +2669,21 @@ async def case_detail(case_id: str):
         raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
 
 
+@app.delete("/api/cases/{case_id}")
+async def case_delete(case_id: str):
+    """Elimina un caso y todos sus archivos adjuntos."""
+    import shutil
+    try:
+        payload = load_case(case_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Caso no encontrado.")
+    case_dir = Path(settings.cases_dir) / case_id
+    if case_dir.exists():
+        shutil.rmtree(str(case_dir))
+        return {"ok": True, "deleted": case_id, "message": f"Caso {case_id} eliminado."}
+    raise HTTPException(status_code=404, detail="Directorio del caso no encontrado.")
+
+
 @app.post("/api/cases/{case_id}/analyze", response_model=CaseCreateResponse)
 async def case_analyze(case_id: str):
     try:
