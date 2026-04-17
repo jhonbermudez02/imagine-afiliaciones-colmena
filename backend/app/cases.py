@@ -5360,6 +5360,12 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     for doc in docs:
         if str(doc.get("document_type") or "") != "entrega_documentos":
             continue
+        # Extraer todos los intermediarios y validar suma por tipo
+        todos_intermediarios = _extract_todos_intermediarios(doc)
+        errores_participacion = _validate_participacion_por_tipo(todos_intermediarios)
+        for err in errores_participacion:
+            validations.append({"code": "COMISION_PARTICIPACION_SUMA", "status": "ALERTA", "severity": "blocker", "message": err})
+            alerts.append(validations[-1])
         entrega_data = _extract_intermediario_codigo_y_porcentaje(doc)
         codigo_intermediario = entrega_data.get("codigo_intermediario") or ""
         porcentaje_venta = entrega_data.get("porcentaje_venta") or ""
@@ -5548,7 +5554,6 @@ def _build_926_draft(profile: Dict[str, Any], checklist: Dict[str, Any], decisio
 
 
 def _push_comisiones_to_legacy(lote: str, docs: List[Dict[str, Any]], base: str = "temporal") -> bool:
-    """Inserta datos de comisiones del Entrega Doc en la DB del compat-backend."""
     if not lote:
         return False
     base_url = str(settings.legacy_backend_url or "").strip().rstrip("/")
@@ -5558,28 +5563,30 @@ def _push_comisiones_to_legacy(lote: str, docs: List[Dict[str, Any]], base: str 
     if not entrega_docs:
         return False
     comision_rows = []
+    linea = 0
     for doc in entrega_docs:
-        data = _extract_intermediario_codigo_y_porcentaje(doc)
-        codigo = only_digits(data.get("codigo_intermediario") or "")
-        porcentaje = normalize_text(data.get("porcentaje_venta") or "")
-        vendedor_doc = only_digits(data.get("vendedor_documento") or "")
-        if not codigo:
-            continue
-        # Si el extractor no encontró el documento del vendedor, buscar en el OCR
-        if not vendedor_doc:
-            text = normalize_text(doc.get("ocr_text") or doc.get("text_preview") or "")
-            m = re.search(r"\b" + re.escape(codigo) + r"\s+(\d{7,12})\s+", text)
-            if m:
-                vendedor_doc = only_digits(m.group(1))
-        comision_rows.append({
-            "lote": lote,
-            "linea": str(len(comision_rows) + 1),
-            "vendedor": vendedor_doc or codigo,
-            "codigo_vendedor": codigo,
-            "venta": "1",
-            "porcentaje": porcentaje or "100",
-            "sr": "1",
-        })
+        intermediarios = _extract_todos_intermediarios(doc)
+        if not intermediarios:
+            data = _extract_intermediario_codigo_y_porcentaje(doc)
+            codigo = only_digits(data.get("codigo_intermediario") or "")
+            if codigo and codigo != "2":
+                codigo_plano = {"1": "2", "3": "3", "4": "4"}.get(codigo, "2")
+                linea += 1
+                comision_rows.append({
+                    "lote": lote, "linea": str(linea), "sr": "1",
+                    "vendedor": only_digits(data.get("vendedor_documento") or codigo),
+                    "codigo_vendedor": codigo_plano, "venta": "1",
+                    "porcentaje": only_digits(data.get("porcentaje_venta") or "100"),
+                })
+        else:
+            for interm in intermediarios:
+                linea += 1
+                comision_rows.append({
+                    "lote": lote, "linea": str(linea), "sr": "1",
+                    "vendedor": interm.get("vendedor_documento") or interm.get("codigo_intermediario"),
+                    "codigo_vendedor": interm.get("codigo_vendedor", "2"), "venta": "1",
+                    "porcentaje": interm.get("porcentaje_venta", "100"),
+                })
     if not comision_rows:
         return False
     try:
@@ -5592,6 +5599,7 @@ def _push_comisiones_to_legacy(lote: str, docs: List[Dict[str, Any]], base: str 
     except Exception as exc:
         logger.warning("No pude insertar comisiones en legacy DB: %s", exc)
         return False
+
 
 def _build_926_output(case_id: str, xlsx_profile: Dict[str, Any], checklist: Dict[str, Any], decision: Dict[str, Any], docs: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     if decision.get("recommended_status") != "aprobable":
@@ -5647,6 +5655,58 @@ def _extract_tipoempresa_from_entrega_docs(docs: List[Dict[str, Any]]) -> Dict[s
                 "tipoempresa_source": "entrega_documentos_pdf",
             }
     return {}
+
+
+def _extract_todos_intermediarios(doc: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Extrae todos los intermediarios CPS-F-11. Ignora codigo 2 (Referido)."""
+    text = normalize_text(doc.get("ocr_text") or doc.get("text_preview") or "")
+    results = []
+    tabla_start = re.search(
+        r"(?:c[o]digo)[^\n]{0,80}(?:documento|nro)[^\n]{0,80}(?:nombre|apellido)[^\n]{0,80}(?:participaci[o]n|porcentaje)",
+        text, flags=re.IGNORECASE
+    )
+    if not tabla_start:
+        return results
+    tabla_text = text[tabla_start.end():]
+    fila_pattern = re.compile(
+        r"\b(0?[1-4])\s+([\d]{6,12})\s+[\w\s\-\.]{4,60}?\s+(\d{1,3})\s*%?(?=\s|$)",
+        re.IGNORECASE
+    )
+    for m in fila_pattern.finditer(tabla_text):
+        codigo_raw = only_digits(m.group(1))
+        if codigo_raw == "2":
+            continue
+        codigo_plano = {"1": "2", "3": "3", "4": "4"}.get(codigo_raw, "2")
+        results.append({
+            "codigo_intermediario": codigo_raw,
+            "codigo_vendedor": codigo_plano,
+            "vendedor_documento": only_digits(m.group(2)),
+            "porcentaje_venta": m.group(3),
+        })
+    return results
+
+def _validate_participacion_por_tipo(intermediarios: List[Dict[str, str]]) -> List[str]:
+    """Valida que la suma de participación por tipo de código sea 100%."""
+    errores = []
+    from collections import defaultdict
+    por_tipo: dict = defaultdict(list)
+    for interm in intermediarios:
+        codigo = interm.get("codigo_intermediario", "")
+        pct = interm.get("porcentaje_venta", "0")
+        try:
+            por_tipo[codigo].append(float(pct.replace(",", ".").replace("%", "").strip()))
+        except ValueError:
+            pass
+    for codigo, porcentajes in por_tipo.items():
+        if len(porcentajes) > 1:
+            total = sum(porcentajes)
+            if abs(total - 100.0) > 0.5:
+                tipo_nombre = {"1": "Consultor", "3": "Corredor/Agencia", "4": "Convenio"}.get(codigo, f"Tipo {codigo}")
+                errores.append(
+                    f"Comisiones intermediario: la suma de participación para {tipo_nombre} "
+                    f"(código {codigo}) es {total:.0f}%, debe ser 100%."
+                )
+    return errores
 
 
 def _extract_intermediario_codigo_y_porcentaje(doc: Dict[str, Any]) -> Dict[str, str]:
@@ -6677,6 +6737,18 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
         )
 
     _apply_document_classification_overrides(docs)
+
+    # Aplicar correcciones manuales del operador (sobreescriben el clasificador OCR)
+    manual_docs = (previous_manual_review or {}).get("documents") or {}
+    if manual_docs:
+        for doc in docs:
+            fname = str(doc.get("filename") or "")
+            override = manual_docs.get(fname)
+            if override and str(override.get("verdict") or "") == "no" and override.get("expected_type"):
+                doc["document_type"] = str(override["expected_type"])
+                doc["legacy_code"] = override.get("expected_code") or DOC_TYPE_TO_PRIMARY_CODE.get(str(override["expected_type"]), 99)
+                doc["code_source"] = "manual_review_override"
+
     for doc in docs:
         fields = doc.get("fields") or {}
         doc["key_fields"] = _document_key_fields(str(doc.get("document_type") or ""), fields)
