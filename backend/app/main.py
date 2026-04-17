@@ -130,6 +130,7 @@ class CaseManualReviewRequest(BaseModel):
     filename: str
     verdict: str
     expected_type: Optional[str] = None
+    comisiones: Optional[List[Dict[str, Any]]] = None
 
 
 class CaseDocumentWorkspaceRequest(BaseModel):
@@ -2774,7 +2775,7 @@ async def case_run_workflow(case_id: str):
 @app.post("/api/cases/{case_id}/manual-review")
 async def case_manual_review(case_id: str, request: CaseManualReviewRequest):
     try:
-        if normalize_haystack(request.verdict) not in {"si", "no"}:
+        if normalize_haystack(request.kind) != "comisiones" and normalize_haystack(request.verdict) not in {"si", "no"}:
             raise HTTPException(status_code=400, detail="La calificación debe ser 'si' o 'no'.")
         review_store = save_manual_review(
             case_id=case_id,
@@ -2782,6 +2783,7 @@ async def case_manual_review(case_id: str, request: CaseManualReviewRequest):
             filename=request.filename,
             verdict=request.verdict,
             expected_type=request.expected_type or "",
+            comisiones=request.comisiones,
         )
         return {"case_id": case_id, "manual_review": review_store}
     except FileNotFoundError as exc:

@@ -1214,6 +1214,17 @@ function renderClassifActions(item, payload) {
             </div>
             <div class="reclassify-status" id="reclassifyStatus"></div>
         </div>
+        ${item.type === 'entrega_documentos' ? `
+        <div class="reclassify-panel" style="margin-top:10px;border-top:1px solid var(--c-border);padding-top:12px">
+            <div style="font-size:12px;font-weight:600;color:var(--c-text-1);margin-bottom:8px">Corrección manual de comisiones</div>
+            <div style="font-size:11px;color:var(--c-text-2);margin-bottom:10px">Si el sistema leyó mal la tabla CPS-F-11, ingresa los datos manualmente.</div>
+            <div id="comisionRows" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+            <button class="btn-secondary" id="addComisionRow" type="button" style="font-size:11px;padding:5px 10px">+ Agregar intermediario</button>
+            <div style="margin-top:8px;display:flex;gap:6px">
+                <button class="btn-primary" id="saveComisiones" type="button" style="font-size:12px;padding:6px 14px">Guardar comisiones</button>
+                <span id="comisionStatus" style="font-size:11px;line-height:2.2"></span>
+            </div>
+        </div>` : ''}
     `;
 
     document.getElementById('reclassifyBtn')?.addEventListener('click', async () => {
@@ -1284,6 +1295,77 @@ function renderClassifActions(item, payload) {
             if (btn) { btn.disabled = false; btn.textContent = 'Reclasificar'; }
         }
     });
+
+    // ── Panel de comisiones manuales (solo para entrega_documentos) ──
+    if (item.type === 'entrega_documentos') {
+        const comisionRows = document.getElementById('comisionRows');
+        const addBtn = document.getElementById('addComisionRow');
+        const saveBtn = document.getElementById('saveComisiones');
+        const comisionStatus = document.getElementById('comisionStatus');
+
+        // Cargar correcciones existentes si las hay
+        const existingComisiones = payload?.analysis?.manual_review?.comisiones?.[item.file] || [];
+        
+        function renderComisionRow(data = {}) {
+            const idx = comisionRows.children.length;
+            const div = document.createElement('div');
+            div.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap';
+            div.innerHTML = `
+                <select class="field-select comision-codigo" style="width:110px;font-size:11px">
+                    <option value="1" ${data.codigo==='1'?'selected':''}>01 - Consultor</option>
+                    <option value="3" ${data.codigo==='3'?'selected':''}>03 - Corredor</option>
+                </select>
+                <input class="field-input comision-cedula" placeholder="Nro. documento" 
+                    value="${escapeHtml(data.cedula||'')}" style="width:130px;font-size:11px;padding:5px 8px">
+                <input class="field-input comision-pct" placeholder="%" 
+                    value="${escapeHtml(data.porcentaje||'100')}" style="width:55px;font-size:11px;padding:5px 8px">
+                <button class="btn-icon" type="button" style="font-size:12px;padding:2px 6px" 
+                    onclick="this.closest('div').remove()">✕</button>
+            `;
+            comisionRows.appendChild(div);
+        }
+
+        // Renderizar filas existentes o una vacía
+        if (existingComisiones.length) {
+            existingComisiones.forEach(c => renderComisionRow(c));
+        } else {
+            renderComisionRow();
+        }
+
+        addBtn?.addEventListener('click', () => renderComisionRow());
+
+        saveBtn?.addEventListener('click', async () => {
+            const rows = [...comisionRows.querySelectorAll('div')].map(row => ({
+                codigo: row.querySelector('.comision-codigo')?.value || '',
+                cedula: row.querySelector('.comision-cedula')?.value?.trim() || '',
+                porcentaje: row.querySelector('.comision-pct')?.value?.trim() || '100',
+            })).filter(r => r.cedula);
+
+            if (!rows.length) { comisionStatus.textContent = 'Agrega al menos un intermediario.'; return; }
+
+            try {
+                saveBtn.disabled = true; saveBtn.textContent = 'Guardando...';
+                const r = await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(payload.id)}/manual-review`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        kind: 'comisiones',
+                        filename: item.file,
+                        verdict: 'no',
+                        comisiones: rows,
+                    }),
+                });
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                comisionStatus.style.color = 'var(--c-ok)';
+                comisionStatus.textContent = `✓ ${rows.length} intermediario(s) guardados`;
+                saveBtn.disabled = false; saveBtn.textContent = 'Guardar comisiones';
+            } catch(e) {
+                comisionStatus.style.color = 'var(--c-err)';
+                comisionStatus.textContent = 'Error: ' + e.message;
+                saveBtn.disabled = false; saveBtn.textContent = 'Guardar comisiones';
+            }
+        });
+    }
 }
 
 async function reclassifyDocument(caseId, item, newType) {

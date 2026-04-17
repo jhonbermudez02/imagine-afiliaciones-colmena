@@ -787,12 +787,28 @@ def save_case(case_payload: Dict[str, Any]) -> Dict[str, Any]:
     return case_payload
 
 
-def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, expected_type: str = "") -> Dict[str, Any]:
+def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, expected_type: str = "", comisiones: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     payload = load_case(case_id)
     analysis = payload.setdefault("analysis", {}) or {}
     if payload.get("analysis") is None:
         payload["analysis"] = analysis
     review_store = analysis.setdefault("manual_review", {})
+
+    # Corrección manual de comisiones
+    if normalize_haystack(kind) == "comisiones" and comisiones is not None:
+        comisiones_store = review_store.setdefault("comisiones", {})
+        comisiones_store[str(filename)] = [
+            {
+                "codigo": only_digits(str(c.get("codigo") or "1")),
+                "cedula": only_digits(str(c.get("cedula") or "")),
+                "porcentaje": str(c.get("porcentaje") or "100"),
+            }
+            for c in comisiones if c.get("cedula")
+        ]
+        payload["updated_at"] = utc_now()
+        save_case(payload)
+        return review_store
+
     bucket_name = "xlsx" if normalize_haystack(kind) == "xlsx" else "documents"
     bucket = review_store.setdefault(bucket_name, {})
     normalized_expected_type = normalize_haystack(expected_type).replace(" ", "_")
@@ -5407,6 +5423,11 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         porcentaje_venta = entrega_data.get("porcentaje_venta") or ""
         if codigo_intermediario not in {"1", "01", "3", "03"}:
             continue
+        # Solo validar porcentaje si hay tabla legible (todos_intermediarios) o porcentaje explícito
+        # Si no hay tabla y el porcentaje es ambiguo (1 dígito), no bloquear
+        porcentaje_legible = bool(todos_intermediarios) or (len(only_digits(porcentaje_venta)) >= 2)
+        if not porcentaje_legible:
+            continue
         ok = _is_percentage_100(porcentaje_venta)
         validations.append(
             {
@@ -5611,9 +5632,32 @@ def _push_comisiones_to_legacy(lote: str, docs: List[Dict[str, Any]], base: str 
     entrega_docs = [d for d in docs if str(d.get("document_type") or "") == "entrega_documentos"]
     if not entrega_docs:
         return False
+    # Buscar correcciones manuales de comisiones en el payload
+    manual_comisiones: Dict[str, List[Dict[str, str]]] = {}
+    for doc in entrega_docs:
+        fname = str(doc.get("filename") or "")
+        mc = doc.get("_manual_comisiones") or []
+        if mc:
+            manual_comisiones[fname] = mc
     comision_rows = []
     linea = 0
     for doc in entrega_docs:
+        fname = str(doc.get("filename") or "")
+        # Preferir correcciones manuales del operador sobre OCR
+        if fname in manual_comisiones:
+            for mc in manual_comisiones[fname]:
+                codigo_raw = only_digits(str(mc.get("codigo") or "1"))
+                if codigo_raw == "2":
+                    continue
+                codigo_plano = {"1": "2", "3": "3", "4": "4"}.get(codigo_raw, "2")
+                linea += 1
+                comision_rows.append({
+                    "lote": lote, "linea": str(linea), "sr": "1",
+                    "vendedor": only_digits(str(mc.get("cedula") or codigo_raw)),
+                    "codigo_vendedor": codigo_plano, "venta": "1",
+                    "porcentaje": str(mc.get("porcentaje") or "100"),
+                })
+            continue
         intermediarios = _extract_todos_intermediarios(doc)
         if not intermediarios:
             data = _extract_intermediario_codigo_y_porcentaje(doc)
@@ -6789,6 +6833,12 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
 
     # Aplicar correcciones manuales del operador (sobreescriben el clasificador OCR)
     manual_docs = (previous_manual_review or {}).get("documents") or {}
+    # Inyectar correcciones manuales de comisiones en los documentos
+    manual_comisiones = (previous_manual_review or {}).get("comisiones") or {}
+    for doc in docs:
+        fname = str(doc.get("filename") or "")
+        if fname in manual_comisiones:
+            doc["_manual_comisiones"] = manual_comisiones[fname]
     if manual_docs:
         for doc in docs:
             fname = str(doc.get("filename") or "")
