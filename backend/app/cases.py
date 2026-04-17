@@ -5546,6 +5546,53 @@ def _build_926_draft(profile: Dict[str, Any], checklist: Dict[str, Any], decisio
     }
 
 
+
+def _push_comisiones_to_legacy(lote: str, docs: List[Dict[str, Any]], base: str = "temporal") -> bool:
+    """Inserta datos de comisiones del Entrega Doc en la DB del compat-backend."""
+    if not lote:
+        return False
+    base_url = str(settings.legacy_backend_url or "").strip().rstrip("/")
+    if not base_url:
+        return False
+    entrega_docs = [d for d in docs if str(d.get("document_type") or "") == "entrega_documentos"]
+    if not entrega_docs:
+        return False
+    comision_rows = []
+    for doc in entrega_docs:
+        data = _extract_intermediario_codigo_y_porcentaje(doc)
+        codigo = only_digits(data.get("codigo_intermediario") or "")
+        porcentaje = normalize_text(data.get("porcentaje_venta") or "")
+        if not codigo:
+            continue
+        # Extraer cédula y nombre del consultor del OCR
+        text = normalize_text(doc.get("ocr_text") or doc.get("text_preview") or "")
+        vendedor_doc = ""
+        vendedor_nombre = ""
+        m = re.search(r"\b" + re.escape(codigo) + r"\s+(\d{7,12})\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]{5,50})\s+\d", text)
+        if m:
+            vendedor_doc = only_digits(m.group(1))
+            vendedor_nombre = normalize_text(m.group(2)).strip()
+        comision_rows.append({
+            "lote": lote,
+            "linea": str(len(comision_rows) + 1),
+            "vendedor": vendedor_doc or codigo,
+            "codigo_vendedor": codigo,
+            "venta": "1",
+            "porcentaje": porcentaje or "100",
+        })
+    if not comision_rows:
+        return False
+    try:
+        response = httpx.post(
+            f"{base_url}/legacy/db/import-real-lote",
+            json={"lote": lote, "base": base, "tables": {"wdcomisiones": comision_rows}},
+            timeout=30.0,
+        )
+        return response.status_code == 200
+    except Exception as exc:
+        logger.warning("No pude insertar comisiones en legacy DB: %s", exc)
+        return False
+
 def _build_926_output(case_id: str, xlsx_profile: Dict[str, Any], checklist: Dict[str, Any], decision: Dict[str, Any]) -> Dict[str, Any]:
     if decision.get("recommended_status") != "aprobable":
         return {
@@ -5560,6 +5607,9 @@ def _build_926_output(case_id: str, xlsx_profile: Dict[str, Any], checklist: Dic
     lote = normalize_text(profile.get("lote") or profile.get("idtramite") or "")
     legacy_result = {"available": False, "ok": False, "error": "Sin lote para bridge legacy."}
     if lote:
+        # Insertar datos de comisiones del Entrega Doc antes de generar el plano
+        docs = checklist.get("docs") or checklist.get("documents") or []
+        _push_comisiones_to_legacy(lote=lote, docs=docs)
         legacy_result = generate_legacy_flatfile_926_http(lote=lote)
         if not legacy_result.get("ok"):
             state_result = generate_legacy_flatfile_926(lote=lote)
@@ -5632,9 +5682,55 @@ def _extract_intermediario_codigo_y_porcentaje(doc: Dict[str, Any]) -> Dict[str,
         porcentaje_match = (
             re.search(r"porcentaje(?:\s+de\s+la\s+venta)?\s*[:\-]?\s*(\d{1,3}(?:[.,]\d{1,2})?\s*%?)", text, flags=re.IGNORECASE)
             or re.search(r"participacion\s*[:\-]?\s*(\d{1,3}(?:[.,]\d{1,2})?\s*%?)", text, flags=re.IGNORECASE)
+            or re.search(r"%\s+de\s+participaci[oó]n[^\d]{0,40}?(\d{1,3}(?:[.,]\d{1,2})?)", text, flags=re.IGNORECASE)
         )
         if porcentaje_match:
             porcentaje = normalize_text(porcentaje_match.group(1))
+
+    # Patrón tabular: CÓDIGO | DOCUMENTO | NOMBRE | % — línea del CPS-F-11
+    # Ej: "1 1000409427 CAROLINA MARULANDA GOMEZ 100"
+    if not codigo or not porcentaje:
+        # Buscar bloque después de encabezado de tabla de comisiones
+        tabla_match = re.search(
+            r"(?:codigo|código)[\s\S]{0,80}?(?:documento|nro)[\s\S]{0,80}?(?:nombre|apellido)[\s\S]{0,80}?(?:participaci[oó]n|porcentaje)"
+            r"[\s\S]{0,20}?\n?\s*(\d{1,2})\s+(\d{6,12})\s+[A-ZÁÉÍÓÚÑ][\w\s\.áéíóúñÁÉÍÓÚÑ]{5,60}?\s+(\d{1,3}(?:[.,]\d{1,2})?)",
+            text, flags=re.IGNORECASE
+        )
+        if tabla_match:
+            if not codigo:
+                codigo = only_digits(tabla_match.group(1))
+            if not porcentaje:
+                porcentaje = normalize_text(tabla_match.group(3))
+
+    # Patrón directo: número corto seguido de cédula larga seguido de nombre seguido de 100
+    # "1 1000409427 CAROLINA MARULANDA GOMEZ 100"
+    if not codigo or not porcentaje:
+        direct_match = re.search(
+            r"\b(\d{1,2})\s+(\d{7,12})\s+[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]{8,50}\s+(\d{1,3})\b",
+            text
+        )
+        if direct_match:
+            candidate_codigo = only_digits(direct_match.group(1))
+            candidate_pct = normalize_text(direct_match.group(3))
+            if candidate_codigo in {"1","2","3","4"} and int(candidate_pct or 0) <= 100:
+                if not codigo:
+                    codigo = candidate_codigo
+                if not porcentaje:
+                    porcentaje = candidate_pct
+
+    # Buscar "Código Pago de Comisiones" y extraer el código activo
+    if not codigo:
+        # "1 Consultor Comercial ARL" — el primero que aparece antes de "2 Referido" etc.
+        comision_block = re.search(
+            r"c[oó]digo\s+pago\s+de\s+comisiones[\s\S]{0,400}",
+            text, flags=re.IGNORECASE
+        )
+        if comision_block:
+            block = comision_block.group(0)
+            # Buscar el código marcado — normalmente el primero listado
+            first_code = re.search(r"\b([1-4])\b\s+(?:consultor|referido|corredor|convenio)", block, flags=re.IGNORECASE)
+            if first_code:
+                codigo = first_code.group(1)
 
     return {
         "codigo_intermediario": codigo,
@@ -6392,6 +6488,8 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
 
     try:
         gen926_started = perf_counter()
+        # Insertar comisiones del Entrega Doc antes de generar el plano
+        _push_comisiones_to_legacy(lote=lote, docs=docs, base=base)
         generated_926 = _legacy_build_926_http(
             lote=lote,
             base=base,
