@@ -1058,9 +1058,18 @@ function buildDocItems(payload) {
 function collectXlsxFiles(payload) {
     const a = payload?.analysis || {};
     const f = a.xlsx_profile?.filename || a.xlsx_filename;
-    const files = Array.isArray(a.xlsx_files) ? a.xlsx_files : [];
+    const files = Array.isArray(a.xlsx_files) ? [...a.xlsx_files] : [];
     if (f && !files.includes(f)) files.unshift(f);
-    return files.length ? files : (f ? [f] : []);
+    // También buscar en payload.files (archivos físicos del caso)
+    if (!files.length && Array.isArray(payload?.files)) {
+        for (const pf of payload.files) {
+            const name = pf.filename || pf.original_filename || pf.name || '';
+            if (/\.(xlsx|xlsm|xls)$/i.test(name) && !files.includes(name)) {
+                files.push(name);
+            }
+        }
+    }
+    return files;
 }
 
 function buildDocMetaMap(payload) {
@@ -1834,8 +1843,15 @@ function renderReporte(container, payload) {
                     `;
                 } else {
                     // Sin registros exactos — mostrar contexto del bloqueante
-                    // Buscar el XLSX del expediente para abrirlo directamente
-                    const xlsxDoc = docItems.find(d => d.kind === 'xlsx');
+                    // Buscar el XLSX del expediente — primero en docItems, luego en payload.files
+                    let xlsxDoc = docItems.find(d => d.kind === 'xlsx');
+                    if (!xlsxDoc && Array.isArray(payload?.files)) {
+                        const pf = payload.files.find(f => /\.(xlsx|xlsm|xls)$/i.test(f.filename||f.name||''));
+                        if (pf) {
+                            const fname = pf.filename || pf.name || '';
+                            xlsxDoc = { file: fname, kind: 'xlsx', displayName: fname };
+                        }
+                    }
                     panel.innerHTML = `
                         <div class="blocker-panel-head">
                             <span class="blocker-panel-title">📋 ${escapeHtml(sheet || 'XLSX')}</span>
