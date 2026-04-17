@@ -441,7 +441,7 @@ function filterCasesByTab(cases, tab) {
     if (tab === 'aprobables') return cases.filter(c => {
         const { status, finalStatus } = resolveCase(c);
         const s = normalizeText(status), f = normalizeText(finalStatus);
-        return s === 'completed' && (f.includes('aprob') || f === 'ok' || !f);
+        return s === 'completed' && (f.includes('aprob') || f === 'ok' || f === 'completed' || !f);
     });
     if (tab === 'observados') return cases.filter(c => {
         const { finalStatus } = resolveCase(c);
@@ -1037,8 +1037,10 @@ function buildDocItems(payload) {
             const effectiveType = reviewEntry?.verdict === 'no' && reviewEntry.expected_type
                 ? reviewEntry.expected_type
                 : (meta.document_type || group.label || 'pdf');
-            const legacyCode = meta.legacy_code ?? null;
-            items.push({ file: f, kind: 'document', type: effectiveType, label: getReviewTypeLabelWithCode(effectiveType, legacyCode), displayName: meta.display_name || f, corrected: reviewEntry?.verdict === 'no' });
+            // Si fue corregido manualmente usar el código del tipo nuevo, no el del documento original
+            const isCorrected = reviewEntry?.verdict === 'no';
+            const legacyCode = isCorrected ? null : (meta.legacy_code ?? null);
+            items.push({ file: f, kind: 'document', type: effectiveType, label: getReviewTypeLabelWithCode(effectiveType, legacyCode), displayName: meta.display_name || f, corrected: isCorrected });
         }
     }
     // Agregar documentos del análisis que no aparecieron en received_summary
