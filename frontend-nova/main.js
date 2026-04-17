@@ -1092,6 +1092,12 @@ function buildDocMetaMap(payload) {
 
 function getManualReviewEntry(manualReview, kind, file) {
     if (!manualReview || kind === 'xlsx') return null;
+    // Formato nuevo: manual_review.documents es un dict por filename
+    if (manualReview.documents && typeof manualReview.documents === 'object') {
+        const entry = manualReview.documents[file];
+        if (entry) return { file, expected_type: entry.expected_type, verdict: entry.verdict };
+    }
+    // Formato legacy: manual_review.reviews es un array
     return (Array.isArray(manualReview.reviews) ? manualReview.reviews : []).find(r => r.file === file) || null;
 }
 
