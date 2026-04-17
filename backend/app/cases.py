@@ -5593,7 +5593,7 @@ def _push_comisiones_to_legacy(lote: str, docs: List[Dict[str, Any]], base: str 
         logger.warning("No pude insertar comisiones en legacy DB: %s", exc)
         return False
 
-def _build_926_output(case_id: str, xlsx_profile: Dict[str, Any], checklist: Dict[str, Any], decision: Dict[str, Any]) -> Dict[str, Any]:
+def _build_926_output(case_id: str, xlsx_profile: Dict[str, Any], checklist: Dict[str, Any], decision: Dict[str, Any], docs: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     if decision.get("recommended_status") != "aprobable":
         return {
             "available": False,
@@ -5608,8 +5608,7 @@ def _build_926_output(case_id: str, xlsx_profile: Dict[str, Any], checklist: Dic
     legacy_result = {"available": False, "ok": False, "error": "Sin lote para bridge legacy."}
     if lote:
         # Insertar datos de comisiones del Entrega Doc antes de generar el plano
-        docs = checklist.get("docs") or checklist.get("documents") or []
-        _push_comisiones_to_legacy(lote=lote, docs=docs)
+        _push_comisiones_to_legacy(lote=lote, docs=docs or [], base="temporal")
         legacy_result = generate_legacy_flatfile_926_http(lote=lote)
         if not legacy_result.get("ok"):
             state_result = generate_legacy_flatfile_926(lote=lote)
@@ -5667,16 +5666,9 @@ def _extract_intermediario_codigo_y_porcentaje(doc: Dict[str, Any]) -> Dict[str,
     )
     text = normalize_text(doc.get("ocr_text") or doc.get("text_preview") or "")
 
-    # Patrón CPS-F-11: tabla con CODIGO | NRO DOCUMENTO | NOMBRE | % PARTICIPACION
-    # Ej: "CODIGO NRO. DE DOCUMENTO NOMBRES Y APELLIDOS % DE PARTICIPACION 1 1000409427 CAROLINA MARULANDA GOMEZ 100"
+    # Patron CPS-F-11: tabla CODIGO | NRO DOCUMENTO | NOMBRE | % PARTICIPACION
     tabla_cpsf11 = re.search(
-        r"(?:c[oó]digo|código)[^
-]{0,60}(?:documento|nro)[^
-]{0,60}(?:nombre|apellido)[^
-]{0,60}"
-        r"(?:participaci[oó]n|porcentaje)[^
-]{0,30}?"
-        r"\s*([1-4])\s+(\d{7,12})\s+[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]{5,60}?\s+(\d{2,3})\b",
+        r"(?:c[o]digo)[^\n]{0,80}(?:documento|nro)[^\n]{0,80}(?:nombre|apellido)[^\n]{0,80}(?:participaci[o]n|porcentaje)[^\n]{0,40}?\s*([1-4])\s+(\d{7,12})\s+[a-zA-Z][a-zA-Z\s]{5,60}?\s+(\d{2,3})\b",
         text, flags=re.IGNORECASE
     )
     if tabla_cpsf11:
@@ -6508,7 +6500,7 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
     try:
         gen926_started = perf_counter()
         # Insertar comisiones del Entrega Doc antes de generar el plano
-        _push_comisiones_to_legacy(lote=lote, docs=docs, base=base)
+        _push_comisiones_to_legacy(lote=lote, docs=docs, base=base)  # docs = analysis documents
         generated_926 = _legacy_build_926_http(
             lote=lote,
             base=base,
@@ -6780,7 +6772,7 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
         "next_step": next_step,
     }
     executive_report = _build_executive_report(payload.get("label", case_id), xlsx_profile, checklist, decision, validation_summary)
-    output_926 = _build_926_output(case_id, xlsx_profile, checklist, decision)
+    output_926 = _build_926_output(case_id, xlsx_profile, checklist, decision, docs=docs)
     validation_duration_ms = int((perf_counter() - validation_started) * 1000)
 
     analysis = {
