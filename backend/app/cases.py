@@ -5562,16 +5562,15 @@ def _push_comisiones_to_legacy(lote: str, docs: List[Dict[str, Any]], base: str 
         data = _extract_intermediario_codigo_y_porcentaje(doc)
         codigo = only_digits(data.get("codigo_intermediario") or "")
         porcentaje = normalize_text(data.get("porcentaje_venta") or "")
+        vendedor_doc = only_digits(data.get("vendedor_documento") or "")
         if not codigo:
             continue
-        # Extraer cédula y nombre del consultor del OCR
-        text = normalize_text(doc.get("ocr_text") or doc.get("text_preview") or "")
-        vendedor_doc = ""
-        vendedor_nombre = ""
-        m = re.search(r"\b" + re.escape(codigo) + r"\s+(\d{7,12})\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]{5,50})\s+\d", text)
-        if m:
-            vendedor_doc = only_digits(m.group(1))
-            vendedor_nombre = normalize_text(m.group(2)).strip()
+        # Si el extractor no encontró el documento del vendedor, buscar en el OCR
+        if not vendedor_doc:
+            text = normalize_text(doc.get("ocr_text") or doc.get("text_preview") or "")
+            m = re.search(r"\b" + re.escape(codigo) + r"\s+(\d{7,12})\s+", text)
+            if m:
+                vendedor_doc = only_digits(m.group(1))
         comision_rows.append({
             "lote": lote,
             "linea": str(len(comision_rows) + 1),
@@ -5579,13 +5578,14 @@ def _push_comisiones_to_legacy(lote: str, docs: List[Dict[str, Any]], base: str 
             "codigo_vendedor": codigo,
             "venta": "1",
             "porcentaje": porcentaje or "100",
+            "sr": "1",
         })
     if not comision_rows:
         return False
     try:
         response = httpx.post(
             f"{base_url}/legacy/db/import-real-lote",
-            json={"lote": lote, "base": base, "tables": {"wdcomisiones": comision_rows}},
+            json={"lote": lote, "base": base, "tables": {"brwdcomisiones": comision_rows}},
             timeout=30.0,
         )
         return response.status_code == 200
@@ -5666,6 +5666,25 @@ def _extract_intermediario_codigo_y_porcentaje(doc: Dict[str, Any]) -> Dict[str,
         or ""
     )
     text = normalize_text(doc.get("ocr_text") or doc.get("text_preview") or "")
+
+    # Patrón CPS-F-11: tabla con CODIGO | NRO DOCUMENTO | NOMBRE | % PARTICIPACION
+    # Ej: "CODIGO NRO. DE DOCUMENTO NOMBRES Y APELLIDOS % DE PARTICIPACION 1 1000409427 CAROLINA MARULANDA GOMEZ 100"
+    tabla_cpsf11 = re.search(
+        r"(?:c[oó]digo|código)[^
+]{0,60}(?:documento|nro)[^
+]{0,60}(?:nombre|apellido)[^
+]{0,60}"
+        r"(?:participaci[oó]n|porcentaje)[^
+]{0,30}?"
+        r"\s*([1-4])\s+(\d{7,12})\s+[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]{5,60}?\s+(\d{2,3})\b",
+        text, flags=re.IGNORECASE
+    )
+    if tabla_cpsf11:
+        return {
+            "codigo_intermediario": only_digits(tabla_cpsf11.group(1)),
+            "porcentaje_venta": normalize_text(tabla_cpsf11.group(3)),
+            "vendedor_documento": only_digits(tabla_cpsf11.group(2)),
+        }
 
     codigo = only_digits(direct_codigo)
     if not codigo:
