@@ -715,6 +715,42 @@ def _extract_name_from_cedula_text(text: str) -> str:
     return ""
 
 
+
+# ── Tabla asesores Colmena ──────────────────────────────────
+_ASESORES_CACHE: Dict[str, Any] = {}
+
+def _load_asesores_colmena() -> Dict[str, Any]:
+    global _ASESORES_CACHE
+    if _ASESORES_CACHE:
+        return _ASESORES_CACHE
+    try:
+        p = Path(settings.cases_dir).parent / "evals" / "asesores_colmena.json"
+        if p.exists():
+            data = json.loads(p.read_text(encoding="utf-8"))
+            comerciales = {only_digits(str(r.get("cedula",""))): r for r in data.get("comerciales", []) if r.get("cedula")}
+            intermediarios = {only_digits(str(r.get("cedula",""))): r for r in data.get("intermediarios", []) if r.get("cedula")}
+            _ASESORES_CACHE = {"comerciales": comerciales, "intermediarios": intermediarios, "loaded": True}
+        else:
+            _ASESORES_CACHE = {"comerciales": {}, "intermediarios": {}, "loaded": False}
+    except Exception:
+        _ASESORES_CACHE = {"comerciales": {}, "intermediarios": {}, "loaded": False}
+    return _ASESORES_CACHE
+
+
+def _validate_asesor_en_tabla(cedula: str, codigo_intermediario: str) -> bool:
+    if not cedula:
+        return True
+    asesores = _load_asesores_colmena()
+    if not asesores.get("loaded"):
+        return True
+    cedula_clean = only_digits(cedula)
+    if codigo_intermediario in {"1", "01"}:
+        return cedula_clean in asesores.get("comerciales", {})
+    elif codigo_intermediario in {"3", "03"}:
+        return cedula_clean in asesores.get("intermediarios", {})
+    return True
+
+
 def load_case(case_id: str) -> Dict[str, Any]:
     metadata_path = get_case_metadata_path(case_id)
     if not metadata_path.exists():
@@ -5393,6 +5429,19 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         if not ok:
             entrega_porcentaje_issue = validations[-1]
             alerts.append(validations[-1])
+        # Validar que el asesor esté en la tabla de comerciales/intermediarios
+        todos_intermediarios = _extract_todos_intermediarios(doc)
+        for interm in todos_intermediarios:
+            cedula_interm = interm.get("vendedor_documento", "")
+            codigo_interm = interm.get("codigo_intermediario", "")
+            if cedula_interm and codigo_interm:
+                en_tabla = _validate_asesor_en_tabla(cedula_interm, codigo_interm)
+                if not en_tabla:
+                    tipo_nombre = {"1": "Consultor", "3": "Corredor/Agencia"}.get(codigo_interm, "Intermediario")
+                    msg = f"El {tipo_nombre} con documento {cedula_interm} no se encuentra en la base de comerciales e intermediarios de Colmena."
+                    v = {"code": "ASESOR_NO_EN_TABLA", "status": "ALERTA", "severity": "blocker", "message": msg}
+                    validations.append(v)
+                    alerts.append(v)
         break
 
     precheck = _build_precheck_summary(xlsx_profile, docs, _build_required_documents(profile), missing_docs)
