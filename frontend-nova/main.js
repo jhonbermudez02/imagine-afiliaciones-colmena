@@ -196,9 +196,13 @@ function resolveCase(item) {
     const finalStatus = item?.final_status || resumen.estado || '';
     const fecha = resumen.fecha_proceso_human || item?.updated_at?.slice(0,10) || 'n/d';
     const has926 = Boolean(item?.has_926 || (wf.output_926||{}).legacy?.ok);
-    const filename = (wf.output_926||{}).legacy?.filename || item?.filename || 'archivo_core.txt';
+    const filename = (wf.output_926||{}).legacy?.filename || item?.filename || 'archivo_plano.txt';
     const blockers = Array.isArray(item?.blockers) ? item.blockers : [];
-    return { empresa, nit, status, finalStatus, fecha, has926, filename, blockers };
+    // Número de contrato / afiliación
+    const legacy = (wf.output_926||{}).legacy || {};
+    const nroAfiliacion = legacy.numero_afiliacion || legacy.nro_afiliacion || profile.numero_contrato || profile.nro_contrato || item?.nro_afiliacion || '';
+    const nroRadicacion = profile.numero_radicacion || profile.nro_radicacion || a.formulario_profile?.numero_radicacion || '';
+    return { empresa, nit, status, finalStatus, fecha, has926, filename, blockers, nroAfiliacion, nroRadicacion };
 }
 
 function caseStatusClass(status, finalStatus) {
@@ -304,8 +308,19 @@ function updateSidebarUser() {
 
 function showNavColmena() {
     const p = readProfile();
-    const el = document.getElementById('navColmena');
-    if (el) el.style.display = p === 'colmena' ? '' : 'none';
+    const isColmena = p === 'colmena';
+    // Grupos solo para Imagine
+    ['navOperacion', 'navRevision', 'navSistema'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = isColmena ? 'none' : '';
+    });
+    // Grupo Colmena solo para Colmena
+    const navColmena = document.getElementById('navColmena');
+    if (navColmena) navColmena.style.display = isColmena ? '' : 'none';
+    // Si perfil es Colmena y vista actual no es producción, redirigir
+    if (isColmena && currentView !== 'produccion') {
+        switchView('produccion');
+    }
 }
 
 // ── NAVEGACIÓN ───────────────────────────────────────────────
@@ -316,7 +331,7 @@ const VIEW_META = {
     validacion:    { title: 'Validación OCR',           breadcrumb: 'Revisión · comparación de fuentes' },
     visor:         { title: 'Visor documental',         breadcrumb: 'Revisión · documentos adjuntos' },
     reporte:       { title: 'Reporte ejecutivo',        breadcrumb: 'Revisión · resumen de decisión' },
-    produccion:    { title: 'Producción · Colmena',     breadcrumb: 'Colmena · lote 926' },
+    produccion:    { title: 'Producción · Colmena',     breadcrumb: 'Colmena · archivo plano' },
     entrenamiento: { title: 'Entrenamiento',            breadcrumb: 'Sistema · feedback del operador' },
     busqueda:      { title: 'Búsqueda',                 breadcrumb: 'Sistema · búsqueda documental' },
     admin:         { title: 'Administración',           breadcrumb: 'Sistema · estado y configuración' },
@@ -343,7 +358,11 @@ function switchView(viewId) {
     if (viewId === 'entrenamiento') { loadFeedbackNotes(); syncFeedbackName(); }
     if (viewId === 'busqueda') { doSearch(''); }
     if (viewId === 'admin') loadSystemStatus();
-    if (viewId === 'clasificacion') populateCaseSelect('classifCaseSelect', onClassifCaseChange);
+    if (viewId === 'clasificacion') {
+        populateCaseSelect('classifCaseSelect', onClassifCaseChange);
+        // Si hay un caso activo pendiente de cargar, cargarlo después del populate
+        if (activeCaseId) setTimeout(() => loadClassifForCase(activeCaseId), 100);
+    }
     if (viewId === 'validacion') populateCaseSelect('validacionCaseSelect', onValidacionCaseChange);
     if (viewId === 'visor') populateCaseSelect('visorCaseSelect', onVisorCaseChange);
     if (viewId === 'reporte') loadReporteSidebar();
@@ -404,7 +423,7 @@ function renderMetrics(cases) {
     document.getElementById('metricObservados').textContent = observados;
     document.getElementById('metricNoAprobados').textContent = noAprobados;
     document.getElementById('metricEnProcesoSub').textContent = enProceso ? 'en prevalidación' : '';
-    document.getElementById('metricAprobablesSub').textContent = aprobables ? 'listos para 926' : '';
+    document.getElementById('metricAprobablesSub').textContent = aprobables ? 'listos para plano' : '';
     document.getElementById('metricObservadosSub').textContent = observados ? 'requieren revisión' : '';
     document.getElementById('metricNoAprobadosSub').textContent = noAprobados ? 'no pasaron prevalidación' : '';
 }
@@ -729,7 +748,7 @@ async function runWorkflow() {
         { id: 'classify', label: 'Clasificando documentos...' },
         { id: 'precheck', label: 'Ejecutando prevalidación...' },
         { id: 'decision', label: 'Calculando decisión...' },
-        { id: 'legado',   label: 'Generando 926...' },
+        { id: 'legado',   label: 'Generando plano...' },
     ];
 
     function renderStep(index, state) {
@@ -926,7 +945,7 @@ function renderWorkflowResult(payload) {
             <div class="result-actions">
                 <button class="btn-secondary" data-action="reporte" data-case="${escapeHtml(payload.id||'')}" type="button">Ver reporte ejecutivo</button>
                 <button class="btn-secondary" data-action="clasificacion" data-case="${escapeHtml(payload.id||'')}" type="button">Ver documentos</button>
-                ${has926 ? `<button class="btn-primary" data-action="descargar926" data-case="${escapeHtml(payload.id||'')}" data-file="${escapeHtml(filename926)}" type="button">Descargar 926</button>` : ''}
+                ${has926 ? `<button class="btn-primary" data-action="descargar926" data-case="${escapeHtml(payload.id||'')}" data-file="${escapeHtml(filename926)}" type="button">Descargar plano</button>` : ''}
             </div>
         </div>
     `;
@@ -967,6 +986,15 @@ async function loadClassifForCase(caseId) {
         const payload = await r.json();
         activeCaseId = caseId;
         activeCasePayload = payload;
+
+        // Mostrar nombre del contrato como contexto fijo
+        const { empresa, nit } = resolveCase(payload);
+        const labelEl = document.getElementById('classifCaseLabel');
+        if (labelEl) {
+            labelEl.style.display = '';
+            labelEl.innerHTML = `📋 ${escapeHtml(empresa)}${nit !== 'n/d' ? ` · ${escapeHtml(nit)}` : ''}`;
+        }
+
         renderClassifDocList(payload);
     } catch(e) {
         if (listEl) listEl.innerHTML = `<div class="error-msg">${escapeHtml(e.message)}</div>`;
@@ -1157,12 +1185,48 @@ function renderClassifActions(item, payload) {
         const btn = document.getElementById('reclassifyBtn');
         const status = document.getElementById('reclassifyStatus');
         if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
-        if (status) status.textContent = '';
+        if (status) { status.textContent = ''; status.style.color = ''; }
         try {
-            await reclassifyDocument(payload.id, item, newType);
-            if (status) status.textContent = '✓ Reclasificado correctamente';
+            const r = await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(payload.id)}/manual-review`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file: item.file, expected_type: newType, verdict: 'no' }),
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+
+            const newLabel = getReviewTypeLabelWithCode(newType, null);
+
+            // Actualizar el item en memoria
+            item.type = newType;
+            item.label = newLabel;
+            item.corrected = true;
+
+            // Actualizar el elemento en la lista sin recargar todo
+            const activeDocItem = document.querySelector('.doc-item.active');
+            if (activeDocItem) {
+                const typeEl = activeDocItem.querySelector('.doc-item-type');
+                const nameEl = activeDocItem.querySelector('.doc-item-name');
+                if (typeEl) typeEl.textContent = newType.toUpperCase().slice(0,6);
+                if (nameEl) nameEl.textContent = newLabel;
+            }
+
+            // Actualizar el header del visor
+            const previewTitle = document.getElementById('classifPreviewTitle');
+            if (previewTitle) previewTitle.textContent = newLabel;
+
+            // Actualizar el panel de reclasificación
+            if (status) { status.style.color = 'var(--c-ok)'; status.textContent = `✓ Reclasificado como "${newLabel}"`; }
+            if (btn) { btn.disabled = false; btn.textContent = 'Reclasificar'; }
+
+            // Actualizar la clasificación actual mostrada
+            const currentEl = document.querySelector('.reclassify-value');
+            if (currentEl) { currentEl.textContent = `${newLabel} · corregido manualmente`; currentEl.classList.add('corrected'); }
+
+            // Recargar la lista en background para sincronizar
+            setTimeout(() => loadClassifForCase(payload.id), 1500);
+
         } catch(e) {
-            if (status) status.textContent = 'Error: ' + e.message;
+            if (status) { status.style.color = 'var(--c-err)'; status.textContent = 'Error: ' + e.message; }
             if (btn) { btn.disabled = false; btn.textContent = 'Reclasificar'; }
         }
     });
@@ -1250,7 +1314,7 @@ function renderValidacionOCR(container, payload) {
     const crossChecks = [];
     if (vrMatches.empresa_nombre) {
         const m = vrMatches.empresa_nombre;
-        crossChecks.push({ label: 'Razón social', camara: m.camara||'', formulario: m.formulario||m.xlsx||'', ok: m.match ?? (m.camara===m.formulario) });
+        crossChecks.push({ label: 'Razón social', camara: m.camara||'', formulario: m.formulario||m.xlsx||'', ok: m.ok ?? m.match ?? (m.camara_compare === m.formulario_compare) });
     }
     if (camara.nit || formulario.nit) {
         crossChecks.push({ label: 'NIT', camara: camara.nit||'', formulario: formulario.nit||profile.nit||'', ok: camara.nit===formulario.nit });
@@ -1415,7 +1479,7 @@ function renderReporteSidebar(cases) {
                 <div class="reporte-sidebar-item-meta">
                     <span class="reporte-sidebar-dot ${dotCls}"></span>
                     <span>${escapeHtml(lbl)}</span>
-                    ${nitStr ? `<span style="opacity:0.6">· ${escapeHtml(nitStr)}</span>` : ''}
+                    ${nitStr ? `<span style="opacity:0.7;font-weight:600">· ${escapeHtml(nitStr)}</span>` : ''}
                 </div>
             </div>
         `;
@@ -1480,7 +1544,7 @@ function renderReporte(container, payload) {
     // Resultado legacy APOLO
     const legacy926 = (wf.output_926||{}).legacy || (a.output_926||{}).legacy || {};
     const legacyOk = legacy926.ok || false;
-    const legacyNumAfil = legacy926.numero_afiliacion || legacy926.nro_afiliacion || '';
+    const legacyNumAfil = legacy926.numero_afiliacion || legacy926.nro_afiliacion || profile.numero_contrato || profile.nro_contrato || '';
     const legacyObs = legacy926.observacion || legacy926.observation || legacy926.message || '';
     const legacyFecha = legacy926.fecha || legacy926.processed_at || '';
     const legacyLote = legacy926.lote || legacy926.batch || '';
@@ -1565,11 +1629,15 @@ function renderReporte(container, payload) {
             <span class="report-state-badge ${stateClass}">${escapeHtml(estado)}</span>
             <div>
                 <div class="report-empresa">${escapeHtml(empresa)}</div>
-                <div class="report-nit">NIT: ${escapeHtml(nit)} · Procesado: ${escapeHtml(fecha)}</div>
+                <div class="report-nit">
+                    NIT: <strong>${escapeHtml(nit)}</strong>
+                    ${legacyNumAfil ? ` · Contrato: <strong>${escapeHtml(legacyNumAfil)}</strong>` : ''}
+                    · ${escapeHtml(fecha)}
+                </div>
             </div>
             <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
                 <button class="btn-secondary" data-action="clasificacion" data-case="${escapeHtml(caseId)}" type="button">Ver documentos</button>
-                ${has926 ? `<button class="btn-primary" data-action="descargar926" data-case="${escapeHtml(caseId)}" data-file="${escapeHtml(filename926)}" type="button">Descargar 926</button>` : ''}
+                ${has926 ? `<button class="btn-primary" data-action="descargar926" data-case="${escapeHtml(caseId)}" data-file="${escapeHtml(filename926)}" type="button">Descargar plano</button>` : ''}
                 ${!isAprobable ? `<button class="btn-warn" id="reprocesarBtn" data-case="${escapeHtml(caseId)}" type="button" title="Volver a ejecutar la prevalidación">↺ Reprocesar</button>` : ''}
             </div>
         </div>
@@ -1766,18 +1834,41 @@ function renderReporte(container, payload) {
                     `;
                 } else {
                     // Sin registros exactos — mostrar contexto del bloqueante
+                    // Buscar el XLSX del expediente para abrirlo directamente
+                    const xlsxDoc = docItems.find(d => d.kind === 'xlsx');
                     panel.innerHTML = `
                         <div class="blocker-panel-head">
                             <span class="blocker-panel-title">📋 ${escapeHtml(sheet || 'XLSX')}</span>
                             ${row ? `<span style="font-size:11px;color:var(--c-text-2)">Fila ${escapeHtml(row)}</span>` : ''}
                             <button class="btn-icon" id="blockerPanelClose">✕</button>
                         </div>
-                        <div style="padding:12px;font-size:12px;color:var(--c-text-2)">
-                            El dato fue tomado del archivo XLSX · hoja <strong>${escapeHtml(sheet||'Trabajadores')}</strong>${row ? `, fila <strong>${escapeHtml(row)}</strong>` : ''}.
-                            ${workerDoc ? `<br>Cédula/Documento: <strong>${escapeHtml(workerDoc)}</strong>` : ''}
-                            <br><br>Abre la vista <strong>Clasificación</strong> y selecciona el XLSX para ver el archivo completo.
+                        <div style="padding:14px 16px">
+                            <div style="font-size:12px;color:var(--c-text-2);margin-bottom:12px">
+                                Error detectado en el XLSX · hoja <strong>${escapeHtml(sheet||'Trabajadores')}</strong>${row ? `, fila <strong>${escapeHtml(row)}</strong>` : ''}.
+                                ${workerDoc ? `<br>Documento: <strong style="color:var(--c-err)">${escapeHtml(workerDoc)}</strong>` : ''}
+                            </div>
+                            ${xlsxDoc ? `
+                            <div style="display:flex;gap:8px;flex-wrap:wrap">
+                                <a class="btn-primary" href="${escapeHtml(caseFileUrl(caseId, xlsxDoc.file))}" 
+                                   download="${escapeHtml(xlsxDoc.displayName||xlsxDoc.file)}"
+                                   style="font-size:12px;padding:7px 14px;display:inline-flex;align-items:center;gap:6px">
+                                   ⬇ Descargar XLSX
+                                </a>
+                                <button class="btn-secondary" id="blockerOpenClassif" 
+                                    style="font-size:12px;padding:7px 14px" type="button">
+                                    📂 Ver en Clasificación
+                                </button>
+                            </div>` : `
+                            <div style="font-size:11px;color:var(--c-text-3)">
+                                XLSX no encontrado en el expediente.
+                            </div>`}
                         </div>
                     `;
+                    // Botón para ir a clasificación con este caso seleccionado
+                    panel.querySelector('#blockerOpenClassif')?.addEventListener('click', () => {
+                        switchView('clasificacion');
+                        loadClassifForCase(caseId);
+                    });
                 }
             } else if (sourceType === 'pdf_doc') {
                 // Buscar el PDF correspondiente y mostrarlo
@@ -1957,7 +2048,7 @@ async function loadProduccion() {
                         </label>
                         <button class="btn-secondary" data-action="reporte" data-case="${escapeHtml(id)}" type="button">Reporte</button>
                         <button class="btn-secondary" data-action="clasificacion" data-case="${escapeHtml(id)}" type="button">Docs</button>
-                        ${has926 ? `<button class="btn-primary" data-action="descargar926" data-case="${escapeHtml(id)}" data-file="${escapeHtml(filename)}" type="button">Descargar 926</button>` : ''}
+                        ${has926 ? `<button class="btn-primary" data-action="descargar926" data-case="${escapeHtml(id)}" data-file="${escapeHtml(filename)}" type="button">Descargar plano</button>` : ''}
                     </div>
                 </div>
             `;
@@ -2004,7 +2095,7 @@ async function downloadColmenaBatch() {
     } catch(e) {
         alert('Error descargando lote: ' + e.message);
     } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Descargar lote 926'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Descargar lote plano'; }
     }
 }
 
