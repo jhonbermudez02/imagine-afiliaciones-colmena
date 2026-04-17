@@ -116,7 +116,15 @@ async function fetchWithRetry(url, options = {}, attempts = 2) {
             if (!r.ok) {
                 const t = await r.text().catch(()=>'');
                 let detail = '';
-                try { detail = JSON.parse(t)?.detail || t; } catch { detail = t; }
+                try {
+                    const parsed = JSON.parse(t);
+                    if (Array.isArray(parsed?.detail)) {
+                        // Errores de validación Pydantic
+                        detail = parsed.detail.map(e => e.msg || JSON.stringify(e)).join('; ');
+                    } else {
+                        detail = parsed?.detail || parsed?.message || t;
+                    }
+                } catch { detail = t; }
                 throw new Error(detail || `HTTP ${r.status}`);
             }
             return r;
@@ -1199,9 +1207,19 @@ function renderClassifActions(item, payload) {
             const r = await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(payload.id)}/manual-review`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ file: item.file, expected_type: newType, verdict: 'no' }),
+                body: JSON.stringify({ 
+                    kind: item.kind || 'document',
+                    filename: item.file,
+                    file: item.file,
+                    expected_type: newType, 
+                    verdict: 'no' 
+                }),
             });
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            if (!r.ok) {
+                let errDetail = `HTTP ${r.status}`;
+                try { const ed = await r.json(); errDetail = ed.detail || ed.message || errDetail; } catch {}
+                throw new Error(errDetail);
+            }
 
             const newLabel = getReviewTypeLabelWithCode(newType, null);
 
@@ -1235,7 +1253,12 @@ function renderClassifActions(item, payload) {
             setTimeout(() => loadClassifForCase(payload.id), 1500);
 
         } catch(e) {
-            if (status) { status.style.color = 'var(--c-err)'; status.textContent = 'Error: ' + e.message; }
+            let errMsg = '';
+            if (typeof e === 'string') errMsg = e;
+            else if (e instanceof Error) errMsg = e.message;
+            else if (e?.detail) errMsg = String(e.detail);
+            else errMsg = JSON.stringify(e);
+            if (status) { status.style.color = 'var(--c-err)'; status.textContent = 'Error: ' + errMsg; }
             if (btn) { btn.disabled = false; btn.textContent = 'Reclasificar'; }
         }
     });
@@ -1246,7 +1269,7 @@ async function reclassifyDocument(caseId, item, newType) {
         const r = await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(caseId)}/manual-review`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ file: item.file, expected_type: newType, verdict: 'no' }),
+            body: JSON.stringify({ kind: item.kind||'document', filename: item.file, file: item.file, expected_type: newType, verdict: 'no' }),
         });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         await loadClassifForCase(caseId);
