@@ -437,7 +437,10 @@ def _normalize_tipo_trabajador(value: Any) -> str:
         "APRENDIZ": "APRENDIZ",
         "APRENDIZENETAPALECTIVA": "APRENDIZ",
         "APRENDIZENETAPAPRACTICA": "APRENDIZ",
+        "APRENDIZENETAPAPRODUCTIVA": "APRENDIZ",
+        "19": "APRENDIZ",
         "COOPERADO": "COOPERADO",
+        "31": "COOPERADO",
     }
     return aliases.get(text, text)
 
@@ -4615,6 +4618,8 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
                 }
             )
     for index, record in enumerate(records[:200], start=1):
+        row_excel = int(record.get("_row") or index + 1)  # fila real en el Excel
+        row_excel = int(record.get("_row") or index + 1)  # fila real en el Excel
         raw_document = normalize_text(
             record.get("documento")
             or record.get("numero_documento")
@@ -4640,23 +4645,23 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
             )
         )
         if not row_document:
-            row_errors.append({"row": index, "code": "DOCUMENTO_VACIO", "message": f"Documento vacío en fila {index}.", "documento": ""})
+            row_errors.append({"row": row_excel, "code": "DOCUMENTO_VACIO", "message": f"Documento vacío en fila {row_excel}.", "documento": ""})
         elif not _is_strict_numeric_value(raw_document):
             row_errors.append({
-                "row": index,
+                "row": row_excel,
                 "code": "DOCUMENTO_NO_NUMERICO",
-                "message": f"El número de identificación debe ser numérico en fila {index} ({raw_document}).",
+                "message": f"El número de identificación debe ser numérico en fila {row_excel} ({raw_document}).",
                 "documento": row_document,
             })
         if not full_name:
-            row_errors.append({"row": index, "code": "NOMBRE_VACIO", "message": f"Nombre vacío en fila {index}.", "documento": row_document})
+            row_errors.append({"row": row_excel, "code": "NOMBRE_VACIO", "message": f"Nombre vacío en fila {row_excel}.", "documento": row_document})
 
         doc_type_raw = record.get("tipo_de_documento", "")
         doc_type = normalize_haystack(doc_type_raw).upper()
         if not doc_type:
-            row_errors.append({"row": index, "code": "TIPO_DOCUMENTO_VACIO", "message": f"Tipo de documento vacío en fila {index}.", "documento": row_document})
+            row_errors.append({"row": row_excel, "code": "TIPO_DOCUMENTO_VACIO", "message": f"Tipo de documento vacío en fila {row_excel}.", "documento": row_document})
         elif doc_type not in valid_tipo_documento:
-            row_errors.append({"row": index, "code": "TIPO_DOCUMENTO_INVALIDO", "message": f"Tipo de documento inválido en fila {index} ({doc_type_raw}).", "documento": row_document})
+            row_errors.append({"row": row_excel, "code": "TIPO_DOCUMENTO_INVALIDO", "message": f"Tipo de documento inválido en fila {row_excel} ({doc_type_raw}).", "documento": row_document})
         elif row_document:
             doc_max_lengths = {
                 "CC": 10,
@@ -4672,16 +4677,16 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
             }
             if doc_type in doc_max_lengths and len(row_document) > doc_max_lengths[doc_type]:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "DOCUMENTO_LONGITUD_INVALIDA",
-                    "message": f"El documento tipo {doc_type} no puede tener más de {doc_max_lengths[doc_type]} dígitos en fila {index} ({row_document}).",
+                    "message": f"El documento tipo {doc_type} no puede tener más de {doc_max_lengths[doc_type]} dígitos en fila {row_excel} ({row_document}).",
                     "documento": row_document,
                 })
             elif doc_type in doc_exact_lengths and len(row_document) != doc_exact_lengths[doc_type]:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "DOCUMENTO_LONGITUD_INVALIDA",
-                    "message": f"El documento tipo {doc_type} debe tener exactamente {doc_exact_lengths[doc_type]} dígitos en fila {index} ({row_document}).",
+                    "message": f"El documento tipo {doc_type} debe tener exactamente {doc_exact_lengths[doc_type]} dígitos en fila {row_excel} ({row_document}).",
                     "documento": row_document,
                 })
 
@@ -4689,55 +4694,55 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
         birth_year_raw = only_digits(record.get("fecha_nacimiento_ano", ""))
         if birth_year_raw and len(birth_year_raw) == 4 and int(birth_year_raw) < 1905:
             row_errors.append({
-                "row": index,
+                "row": row_excel,
                 "code": "FECHA_NACIMIENTO_ANTIGUA_INVALIDA",
-                "message": f"El año de nacimiento no puede ser inferior a 1905 en fila {index} ({birth_year_raw}).",
+                "message": f"El año de nacimiento no puede ser inferior a 1905 en fila {row_excel} ({birth_year_raw}).",
                 "documento": row_document,
             })
         if birthdate:
             age = _age_years(birthdate, today)
             if age < 17:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "EDAD_MINIMA_INVALIDA",
-                    "message": f"La fecha de nacimiento en fila {index} deja una edad menor a 17 años ({birthdate.strftime('%d/%m/%Y')}).",
+                    "message": f"La fecha de nacimiento en fila {row_excel} deja una edad menor a 17 años ({birthdate.strftime('%d/%m/%Y')}).",
                     "documento": row_document,
                 })
 
         sexo_raw = record.get("sexo", "") or record.get("sexo_identificacion", "")
         sexo = _normalize_sexo_identificacion(sexo_raw)
         if not sexo:
-            row_errors.append({"row": index, "code": "SEXO_VACIO", "message": f"Sexo identificación vacío en fila {index}.", "documento": row_document})
+            row_errors.append({"row": row_excel, "code": "SEXO_VACIO", "message": f"Sexo identificación vacío en fila {row_excel}.", "documento": row_document})
         elif sexo not in valid_sexos:
-            row_errors.append({"row": index, "code": "SEXO_INVALIDO", "message": f"Sexo identificación inválido en fila {index} ({sexo_raw}). Usa solo M, F, T, NB u O.", "documento": row_document})
+            row_errors.append({"row": row_excel, "code": "SEXO_INVALIDO", "message": f"Sexo identificación inválido en fila {row_excel} ({sexo_raw}). Usa solo M, F, T, NB u O.", "documento": row_document})
 
         zona_raw = record.get("zona", "") or record.get("zona_rural_urbana", "") or record.get("zona_(rural/urbana)", "")
         zona = _normalize_zona(zona_raw)
         if not zona:
-            row_errors.append({"row": index, "code": "ZONA_VACIA", "message": f"Zona vacía en fila {index}.", "documento": row_document})
+            row_errors.append({"row": row_excel, "code": "ZONA_VACIA", "message": f"Zona vacía en fila {row_excel}.", "documento": row_document})
         elif zona not in valid_zonas:
-            row_errors.append({"row": index, "code": "ZONA_INVALIDA", "message": f"Zona inválida en fila {index} ({zona_raw}).", "documento": row_document})
+            row_errors.append({"row": row_excel, "code": "ZONA_INVALIDA", "message": f"Zona inválida en fila {row_excel} ({zona_raw}).", "documento": row_document})
 
         modalidad_raw = record.get("modalidad", "")
         modalidad = _normalize_modalidad(modalidad_raw)
         if not modalidad:
-            row_errors.append({"row": index, "code": "MODALIDAD_VACIA", "message": f"Modalidad vacía en fila {index}.", "documento": row_document})
+            row_errors.append({"row": row_excel, "code": "MODALIDAD_VACIA", "message": f"Modalidad vacía en fila {row_excel}.", "documento": row_document})
         elif modalidad not in valid_modalidades:
-            row_errors.append({"row": index, "code": "MODALIDAD_INVALIDA", "message": f"Modalidad inválida en fila {index} ({record.get('modalidad')}).", "documento": row_document})
+            row_errors.append({"row": row_excel, "code": "MODALIDAD_INVALIDA", "message": f"Modalidad inválida en fila {row_excel} ({record.get('modalidad')}).", "documento": row_document})
 
         jornada_raw = record.get("jornada", "")
         jornada = _normalize_jornada(jornada_raw)
         if not jornada:
-            row_errors.append({"row": index, "code": "JORNADA_VACIA", "message": f"Jornada vacía en fila {index}.", "documento": row_document})
+            row_errors.append({"row": row_excel, "code": "JORNADA_VACIA", "message": f"Jornada vacía en fila {row_excel}.", "documento": row_document})
         elif jornada not in valid_jornadas:
-            row_errors.append({"row": index, "code": "JORNADA_INVALIDA", "message": f"Jornada inválida en fila {index} ({record.get('jornada')}).", "documento": row_document})
+            row_errors.append({"row": row_excel, "code": "JORNADA_INVALIDA", "message": f"Jornada inválida en fila {row_excel} ({record.get('jornada')}).", "documento": row_document})
 
         tipo_trabajador_raw = record.get("tipo_de_trabajador", "")
         tipo_trabajador = _normalize_tipo_trabajador(tipo_trabajador_raw)
         if not tipo_trabajador:
-            row_errors.append({"row": index, "code": "TIPO_TRABAJADOR_VACIO", "message": f"Tipo de trabajador vacío en fila {index}.", "documento": row_document})
+            row_errors.append({"row": row_excel, "code": "TIPO_TRABAJADOR_VACIO", "message": f"Tipo de trabajador vacío en fila {row_excel}.", "documento": row_document})
         elif tipo_trabajador not in valid_tipo_trabajador:
-            row_errors.append({"row": index, "code": "TIPO_TRABAJADOR_INVALIDO", "message": f"Tipo de trabajador inválido en fila {index} ({tipo_trabajador_raw}).", "documento": row_document})
+            row_errors.append({"row": row_excel, "code": "TIPO_TRABAJADOR_INVALIDO", "message": f"Tipo de trabajador inválido en fila {row_excel} ({tipo_trabajador_raw}).", "documento": row_document})
         elif tipo_trabajador == "ESTUDIANTE":
             actividad_economica_estudiante_raw = (
                 record.get("codigo_actividad_economica")
@@ -4757,18 +4762,18 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
             if not actividad_economica_estudiante:
                 row_errors.append(
                     {
-                        "row": index,
+                        "row": row_excel,
                         "code": "ESTUDIANTE_ACTIVIDAD_ECONOMICA_VACIA",
-                        "message": f"Para tipo de trabajador estudiante, el código de actividad económica es obligatorio en fila {index}.",
+                        "message": f"Para tipo de trabajador estudiante, el código de actividad económica es obligatorio en fila {row_excel}.",
                         "documento": row_document,
                     }
                 )
             elif activity_catalog_codes and actividad_economica_estudiante not in activity_catalog_codes:
                 row_errors.append(
                     {
-                        "row": index,
+                        "row": row_excel,
                         "code": "ESTUDIANTE_ACTIVIDAD_ECONOMICA_INVALIDA",
-                        "message": f"Para tipo de trabajador estudiante, el código de actividad económica no existe en el catálogo del XLSX en fila {index} ({actividad_economica_estudiante}).",
+                        "message": f"Para tipo de trabajador estudiante, el código de actividad económica no existe en el catálogo del XLSX en fila {row_excel} ({actividad_economica_estudiante}).",
                         "documento": row_document,
                     }
                 )
@@ -4792,20 +4797,20 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
             if not fecha_inicio_cobertura_estudiante:
                 row_errors.append(
                     {
-                        "row": index,
+                        "row": row_excel,
                         "code": "ESTUDIANTE_COBERTURA_VACIA",
-                        "message": f"Para tipo de trabajador estudiante, la fecha de inicio de cobertura es obligatoria en fila {index}.",
+                        "message": f"Para tipo de trabajador estudiante, la fecha de inicio de cobertura es obligatoria en fila {row_excel}.",
                         "documento": row_document,
                     }
                 )
             elif afiliacion_inicio_cobertura and fecha_inicio_cobertura_estudiante.date() < afiliacion_inicio_cobertura.date():
                 row_errors.append(
                     {
-                        "row": index,
+                        "row": row_excel,
                         "code": "ESTUDIANTE_COBERTURA_INVALIDA",
                         "message": (
                             "La fecha de inicio de cobertura del estudiante no puede ser inferior a la fecha de inicio de cobertura "
-                            f"de la afiliación en fila {index}. Estudiante: {_format_date_value(fecha_inicio_cobertura_estudiante_raw)} "
+                            f"de la afiliación en fila {row_excel}. Estudiante: {_format_date_value(fecha_inicio_cobertura_estudiante_raw)} "
                             f"· Afiliación: {_format_date_value(form_fields.get('fecha_inicio_cobertura'))}."
                         ),
                         "documento": row_document,
@@ -4815,9 +4820,9 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
         tipo_salario_raw = record.get("tipo_de_salario", "")
         tipo_salario = _normalize_tipo_salario(tipo_salario_raw)
         if not tipo_salario:
-            row_errors.append({"row": index, "code": "TIPO_SALARIO_VACIO", "message": f"Tipo de salario vacío en fila {index}.", "documento": row_document})
+            row_errors.append({"row": row_excel, "code": "TIPO_SALARIO_VACIO", "message": f"Tipo de salario vacío en fila {row_excel}.", "documento": row_document})
         elif tipo_salario not in valid_tipo_salario:
-            row_errors.append({"row": index, "code": "TIPO_SALARIO_INVALIDO", "message": f"Tipo de salario inválido en fila {index} ({tipo_salario_raw}).", "documento": row_document})
+            row_errors.append({"row": row_excel, "code": "TIPO_SALARIO_INVALIDO", "message": f"Tipo de salario inválido en fila {row_excel} ({tipo_salario_raw}).", "documento": row_document})
 
         codigo_ct = only_digits(
             _record_first_value(
@@ -4830,9 +4835,9 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
         if not codigo_ct:
             row_errors.append(
                 {
-                    "row": index,
+                    "row": row_excel,
                     "code": "CENTRO_TRABAJO_CODIGO_VACIO",
-                    "message": f"El código del centro de trabajo es obligatorio en fila {index}.",
+                    "message": f"El código del centro de trabajo es obligatorio en fila {row_excel}.",
                     "documento": row_document,
                 }
             )
@@ -4867,125 +4872,125 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
 
             if not tipo_cotizante:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "INDEPENDIENTE_TIPO_COTIZANTE_VACIO",
-                    "message": f"Para independientes, el tipo de cotizante es obligatorio en fila {index}.",
+                    "message": f"Para independientes, el tipo de cotizante es obligatorio en fila {row_excel}.",
                     "documento": row_document,
                 })
             if not tipo_contrato:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "INDEPENDIENTE_TIPO_CONTRATO_VACIO",
-                    "message": f"Para independientes, el tipo de contrato es obligatorio en fila {index}.",
+                    "message": f"Para independientes, el tipo de contrato es obligatorio en fila {row_excel}.",
                     "documento": row_document,
                 })
             if not fecha_inicio_contrato_raw:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "INDEPENDIENTE_FECHA_INICIO_CONTRATO_VACIA",
-                    "message": f"Para independientes, la fecha de inicio del contrato es obligatoria en fila {index}.",
+                    "message": f"Para independientes, la fecha de inicio del contrato es obligatoria en fila {row_excel}.",
                     "documento": row_document,
                 })
             if not fecha_fin_contrato_raw:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "INDEPENDIENTE_FECHA_FIN_CONTRATO_VACIA",
-                    "message": f"Para independientes, la fecha de fin del contrato es obligatoria en fila {index}.",
+                    "message": f"Para independientes, la fecha de fin del contrato es obligatoria en fila {row_excel}.",
                     "documento": row_document,
                 })
             elif afiliacion_inicio_cobertura and fecha_fin_contrato and fecha_fin_contrato.date() < afiliacion_inicio_cobertura.date():
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "INDEPENDIENTE_FECHA_FIN_CONTRATO_INVALIDA",
                     "message": (
                         "Para independientes, la fecha de fin del contrato no puede ser inferior a la fecha de inicio de cobertura "
-                        f"de la afiliación en fila {index}. Fin contrato: {_format_date_value(fecha_fin_contrato_raw)} "
+                        f"de la afiliación en fila {row_excel}. Fin contrato: {_format_date_value(fecha_fin_contrato_raw)} "
                         f"· Afiliación: {_format_date_value(form_fields.get('fecha_inicio_cobertura'))}."
                     ),
                     "documento": row_document,
                 })
             if not actividad_economica:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_VACIA",
-                    "message": f"Para independientes, la actividad económica es obligatoria en fila {index}.",
+                    "message": f"Para independientes, la actividad económica es obligatoria en fila {row_excel}.",
                     "documento": row_document,
                 })
             elif activity_catalog_codes and actividad_economica not in activity_catalog_codes:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_INVALIDA",
-                    "message": f"Para independientes, la actividad económica no existe en el catálogo del XLSX en fila {index} ({actividad_economica}).",
+                    "message": f"Para independientes, la actividad económica no existe en el catálogo del XLSX en fila {row_excel} ({actividad_economica}).",
                     "documento": row_document,
                 })
             if not actividad_economica_ct:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_CT_VACIA",
-                    "message": f"Para independientes, la actividad económica del centro de trabajo es obligatoria en fila {index}.",
+                    "message": f"Para independientes, la actividad económica del centro de trabajo es obligatoria en fila {row_excel}.",
                     "documento": row_document,
                 })
             elif activity_catalog_codes and actividad_economica_ct not in activity_catalog_codes:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "INDEPENDIENTE_ACTIVIDAD_ECONOMICA_CT_INVALIDA",
-                    "message": f"Para independientes, la actividad económica del centro de trabajo no existe en el catálogo del XLSX en fila {index} ({actividad_economica_ct}).",
+                    "message": f"Para independientes, la actividad económica del centro de trabajo no existe en el catálogo del XLSX en fila {row_excel} ({actividad_economica_ct}).",
                     "documento": row_document,
                 })
             if not zona_ct:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "INDEPENDIENTE_ZONA_CT_VACIA",
-                    "message": f"Para independientes, la zona del centro de trabajo es obligatoria en fila {index}.",
+                    "message": f"Para independientes, la zona del centro de trabajo es obligatoria en fila {row_excel}.",
                     "documento": row_document,
                 })
             elif zona_ct not in valid_zonas:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "INDEPENDIENTE_ZONA_CT_INVALIDA",
-                    "message": f"Para independientes, la zona del centro de trabajo es inválida en fila {index} ({zona_ct_raw}).",
+                    "message": f"Para independientes, la zona del centro de trabajo es inválida en fila {row_excel} ({zona_ct_raw}).",
                     "documento": row_document,
                 })
             if not valor_contrato:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "INDEPENDIENTE_VALOR_CONTRATO_VACIO",
-                    "message": f"Para independientes, el valor del contrato es obligatorio en fila {index}.",
+                    "message": f"Para independientes, el valor del contrato es obligatorio en fila {row_excel}.",
                     "documento": row_document,
                 })
             elif valor_contrato < smmlv_value:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "INDEPENDIENTE_VALOR_CONTRATO_INVALIDO",
-                    "message": f"Para independientes, el valor del contrato no puede ser inferior al mínimo configurado ({smmlv_value}) en fila {index}.",
+                    "message": f"Para independientes, el valor del contrato no puede ser inferior al mínimo configurado ({smmlv_value}) en fila {row_excel}.",
                     "documento": row_document,
                 })
             if not valor_mensual:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "INDEPENDIENTE_VALOR_MENSUAL_VACIO",
-                    "message": f"Para independientes, el valor mensual es obligatorio en fila {index}.",
+                    "message": f"Para independientes, el valor mensual es obligatorio en fila {row_excel}.",
                     "documento": row_document,
                 })
             elif valor_mensual < smmlv_value:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "INDEPENDIENTE_VALOR_MENSUAL_INVALIDO",
-                    "message": f"Para independientes, el valor mensual no puede ser inferior al mínimo configurado ({smmlv_value}) en fila {index}.",
+                    "message": f"Para independientes, el valor mensual no puede ser inferior al mínimo configurado ({smmlv_value}) en fila {row_excel}.",
                     "documento": row_document,
                 })
             if not ibc:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "INDEPENDIENTE_IBC_VACIO",
-                    "message": f"Para independientes, el IBC es obligatorio en fila {index}.",
+                    "message": f"Para independientes, el IBC es obligatorio en fila {row_excel}.",
                     "documento": row_document,
                 })
             elif ibc < smmlv_value:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "INDEPENDIENTE_IBC_INVALIDO",
-                    "message": f"Para independientes, el IBC no puede ser inferior al mínimo configurado ({smmlv_value}) en fila {index}.",
+                    "message": f"Para independientes, el IBC no puede ser inferior al mínimo configurado ({smmlv_value}) en fila {row_excel}.",
                     "documento": row_document,
                 })
 
@@ -5001,39 +5006,39 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
         if phone and not phone_can_be_zero:
             if phone == "0":
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "TELEFONO_FORMATO_INVALIDO",
-                    "message": f"El teléfono debe ir en 0 solo cuando el celular esté diligenciado en fila {index}.",
+                    "message": f"El teléfono debe ir en 0 solo cuando el celular esté diligenciado en fila {row_excel}.",
                     "documento": row_document,
                 })
             elif phone.startswith("0"):
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "TELEFONO_FORMATO_INVALIDO",
-                    "message": f"El teléfono no puede iniciar en 0 en fila {index} ({phone}).",
+                    "message": f"El teléfono no puede iniciar en 0 en fila {row_excel} ({phone}).",
                     "documento": row_document,
                 })
             elif len(phone) not in {7, 10}:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "TELEFONO_FORMATO_INVALIDO",
-                    "message": f"El teléfono debe tener 7 dígitos o 10 si fue reportado como celular en fila {index} ({phone}).",
+                    "message": f"El teléfono debe tener 7 dígitos o 10 si fue reportado como celular en fila {row_excel} ({phone}).",
                     "documento": row_document,
                 })
 
         if effective_mobile:
             if effective_mobile.startswith("0"):
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "CELULAR_FORMATO_INVALIDO",
-                    "message": f"El celular no puede iniciar en 0 en fila {index} ({effective_mobile}).",
+                    "message": f"El celular no puede iniciar en 0 en fila {row_excel} ({effective_mobile}).",
                     "documento": row_document,
                 })
             elif len(effective_mobile) != 10:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "CELULAR_FORMATO_INVALIDO",
-                    "message": f"El celular debe tener 10 dígitos en fila {index} ({effective_mobile}).",
+                    "message": f"El celular debe tener 10 dígitos en fila {row_excel} ({effective_mobile}).",
                     "documento": row_document,
                 })
 
@@ -5042,9 +5047,9 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
             simple_email_ok = bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email))
             if not simple_email_ok:
                 row_errors.append({
-                    "row": index,
+                    "row": row_excel,
                     "code": "CORREO_FORMATO_INVALIDO",
-                    "message": f"Correo con formato no válido en fila {index} ({email}).",
+                    "message": f"Correo con formato no válido en fila {row_excel} ({email}).",
                     "documento": row_document,
                 })
 
