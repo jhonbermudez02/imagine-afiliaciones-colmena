@@ -438,6 +438,7 @@ def _normalize_tipo_trabajador(value: Any) -> str:
         "APRENDIZENETAPALECTIVA": "APRENDIZ",
         "APRENDIZENETAPAPRACTICA": "APRENDIZ",
         "APRENDIZENETAPAPRODUCTIVA": "APRENDIZ",
+        "APRENDICESENETAPAPRODUCTIVA": "APRENDIZ",
         "19": "APRENDIZ",
         "COOPERADO": "COOPERADO",
         "31": "COOPERADO",
