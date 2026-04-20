@@ -4783,6 +4783,8 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
                 record.get("fecha_inicio_cobertura")
                 or record.get("fecha_de_inicio_de_cobertura")
                 or record.get("inicio_cobertura")
+                or record.get("contrato_en_practica")
+                or record.get("fecha_inicio_contrato")
                 or record.get("fecha_inicio")
                 or record.get("fecha_inicio_estudiante")
                 or _record_value_by_tokens(
