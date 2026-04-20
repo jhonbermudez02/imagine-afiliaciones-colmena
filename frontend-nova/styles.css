@@ -966,6 +966,15 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
   transition: background 0.12s;
 }
 .table-action-link:hover { background: var(--c-info-bg); }
+.table-action-danger { color: var(--c-err) !important; }
+.table-action-danger:hover { background: var(--c-err-bg) !important; }
+.classif-sort-btn {
+  font-size: 10px; padding: 2px 7px; border-radius: 3px;
+  border: 1px solid var(--c-border); background: none;
+  color: var(--c-text-2); cursor: pointer; transition: all 0.12s;
+}
+.classif-sort-btn:hover { background: var(--c-info-bg); color: var(--c-blue); }
+.classif-sort-btn.active { background: var(--c-blue); color: #fff; border-color: var(--c-blue); }
 
 
 /* ============================================================ REPORTE LAYOUT */

@@ -454,7 +454,7 @@ function filterCasesByTab(cases, tab) {
     if (tab === 'cola') return cases.filter(c => {
         const { status } = resolveCase(c);
         const s = normalizeText(status);
-        return s === 'uploaded' || s === 'pending';
+        return ['uploaded','pending','processing','queued','analyzing','analyzed'].includes(s);
     });
     return cases;
 }
@@ -1117,26 +1117,57 @@ function getManualReviewEntry(manualReview, kind, file) {
     return (Array.isArray(manualReview.reviews) ? manualReview.reviews : []).find(r => r.file === file) || null;
 }
 
-function renderClassifDocList(payload) {
+function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
     const el = document.getElementById('classifDocList');
     const preview = document.getElementById('classifPreviewBody');
     const previewTitle = document.getElementById('classifPreviewTitle');
     if (!el) return;
-    const items = buildDocItems(payload);
+    let items = buildDocItems(payload);
     if (!items.length) {
         el.innerHTML = '<div class="empty-state">No hay documentos en este contrato</div>';
         return;
     }
-    // Header con conteo
+
+    // Ordenar según columna seleccionada
+    if (sortBy === 'tipo') {
+        items = [...items].sort((a,b) => sortDir * (a.type||'').localeCompare(b.type||''));
+    } else if (sortBy === 'nombre') {
+        items = [...items].sort((a,b) => sortDir * (a.label||'').localeCompare(b.label||''));
+    } else if (sortBy === 'estado') {
+        items = [...items].sort((a,b) => sortDir * (Number(b.corrected||0) - Number(a.corrected||0)));
+    }
+
+    // Header con conteo y botones de ordenamiento
     const headerEl = el.previousElementSibling;
     if (headerEl && headerEl.classList.contains('classif-doc-header')) {
         headerEl.remove();
     }
     const header = document.createElement('div');
     header.className = 'classif-doc-header';
-    header.style.cssText = 'padding:6px 8px 2px;font-size:11px;color:var(--c-text-2);display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--c-border);margin-bottom:2px';
-    header.innerHTML = `<span>${items.length} documentos</span><span style="font-size:10px;opacity:0.7">↕ scroll</span>`;
+    header.style.cssText = 'padding:6px 8px 2px;font-size:11px;color:var(--c-text-2);border-bottom:1px solid var(--c-border);margin-bottom:2px';
+    const dirs = (col) => sortBy === col ? (sortDir === 1 ? ' ↑' : ' ↓') : '';
+    header.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <span>${items.length} documentos</span><span style="font-size:10px;opacity:0.7">↕ scroll</span>
+        </div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+            <span style="font-size:10px;opacity:0.6;margin-right:2px">Ordenar:</span>
+            <button class="classif-sort-btn ${sortBy==='default'?'active':''}" data-sort="default" type="button">Original</button>
+            <button class="classif-sort-btn ${sortBy==='tipo'?'active':''}" data-sort="tipo" type="button">Tipo${dirs('tipo')}</button>
+            <button class="classif-sort-btn ${sortBy==='nombre'?'active':''}" data-sort="nombre" type="button">Nombre${dirs('nombre')}</button>
+            <button class="classif-sort-btn ${sortBy==='estado'?'active':''}" data-sort="estado" type="button">Estado${dirs('estado')}</button>
+        </div>
+    `;
     el.parentElement?.insertBefore(header, el);
+
+    // Listeners de ordenamiento
+    header.querySelectorAll('.classif-sort-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const col = btn.dataset.sort;
+            const newDir = (sortBy === col) ? -sortDir : 1;
+            renderClassifDocList(payload, col, newDir);
+        });
+    });
 
     el.innerHTML = items.map((item, i) => `
         <div class="doc-item" data-index="${i}" data-file="${escapeHtml(item.file)}">
