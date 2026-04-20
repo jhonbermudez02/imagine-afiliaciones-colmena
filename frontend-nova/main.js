@@ -420,10 +420,9 @@ function renderMetrics(cases) {
         const { status, finalStatus } = resolveCase(c);
         const s = normalizeText(status);
         const f = normalizeText(finalStatus);
+        if (s === 'completed' && (f.includes('aprob') || f === 'ok' || f === 'completed' || !f)) { aprobables++; continue; }
         if (s === 'stopped_prevalidacion') { noAprobados++; continue; }
-        if (s === 'completed' && (f.includes('aprob') || f === 'ok' || !f)) { aprobables++; continue; }
-        if (f.includes('observ')) { observados++; continue; }
-        if (s === 'uploaded' || s === 'pending' || !s) { enProceso++; continue; }
+        if (f.includes('observ') || s === 'completed') { observados++; continue; }
         enProceso++;
     }
     document.getElementById('metricEnProceso').textContent = enProceso;
@@ -444,17 +443,20 @@ function filterCasesByTab(cases, tab) {
         return s === 'completed' && (f.includes('aprob') || f === 'ok' || f === 'completed' || !f);
     });
     if (tab === 'observados') return cases.filter(c => {
-        const { finalStatus } = resolveCase(c);
-        return normalizeText(finalStatus).includes('observ');
+        const { status, finalStatus } = resolveCase(c);
+        const s = normalizeText(status), f = normalizeText(finalStatus);
+        return f.includes('observ') || (s === 'completed' && !f.includes('aprob') && f !== 'ok' && f !== 'completed');
     });
     if (tab === 'no-aprobados') return cases.filter(c => {
         const { status } = resolveCase(c);
         return normalizeText(status) === 'stopped_prevalidacion';
     });
     if (tab === 'cola') return cases.filter(c => {
-        const { status } = resolveCase(c);
-        const s = normalizeText(status);
-        return ['uploaded','pending','processing','queued','analyzing','analyzed'].includes(s);
+        const { status, finalStatus } = resolveCase(c);
+        const s = normalizeText(status), f = normalizeText(finalStatus);
+        // Casos que NO están terminados ni rechazados — pendientes de acción
+        return !['completed','stopped_prevalidacion'].includes(s) || 
+               (['uploaded','pending','processing','queued','analyzing','analyzed'].includes(s));
     });
     return cases;
 }
@@ -1033,6 +1035,8 @@ function buildDocItems(payload) {
     const docMeta = buildDocMetaMap(payload);
     const received = Array.isArray(a.checklist?.received_summary) ? a.checklist.received_summary : [];
     const seen = new Set();
+    // Orden del workspace
+    const workspaceOrder = Array.isArray(a.document_workspace?.order) ? a.document_workspace.order : [];
 
     // XLSX primero
     const xlsxFiles = collectXlsxFiles(payload);
@@ -1051,7 +1055,6 @@ function buildDocItems(payload) {
             const effectiveType = reviewEntry?.verdict === 'no' && reviewEntry.expected_type
                 ? reviewEntry.expected_type
                 : (meta.document_type || group.label || 'pdf');
-            // Si fue corregido manualmente usar el código del tipo nuevo, no el del documento original
             const isCorrected = reviewEntry?.verdict === 'no';
             const legacyCode = isCorrected ? null : (meta.legacy_code ?? null);
             items.push({ file: f, kind: 'document', type: effectiveType, label: getReviewTypeLabelWithCode(effectiveType, legacyCode), displayName: meta.display_name || f, corrected: isCorrected });
@@ -1075,6 +1078,17 @@ function buildDocItems(payload) {
         if (lower.endsWith('.xlsx') || lower.endsWith('.xls') || lower.endsWith('.xlsm')) continue;
         seen.add(f);
         items.push({ file: f, kind: 'document', type: 'pdf', label: f.replace(/\.[^.]+$/, ''), displayName: f, corrected: false });
+    }
+    // Aplicar orden del workspace si existe
+    if (workspaceOrder.length) {
+        const byFile = Object.fromEntries(items.map(it => [it.file, it]));
+        const ordered = [];
+        for (const f of workspaceOrder) {
+            if (byFile[f]) { ordered.push(byFile[f]); delete byFile[f]; }
+        }
+        // Agregar los que no están en el orden al final
+        for (const it of Object.values(byFile)) ordered.push(it);
+        return ordered;
     }
     return items;
 }
@@ -1169,17 +1183,26 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
         });
     });
 
-    el.innerHTML = items.map((item, i) => `
+    el.innerHTML = items.map((item, i) => {
+        const orderNum = i + 1;
+        const orderOptions = items.map((_, j) => 
+            `<option value="${j+1}" ${j+1===orderNum?'selected':''}>${j+1}</option>`
+        ).join('');
+        return `
         <div class="doc-item" data-index="${i}" data-file="${escapeHtml(item.file)}">
+            <span class="doc-item-order">
+                <select class="doc-order-select" data-file="${escapeHtml(item.file)}" title="Cambiar orden">${orderOptions}</select>
+            </span>
             <span class="doc-item-type ${item.kind==='xlsx'?'ok':''}">
                 ${item.kind==='xlsx'?'XLSX':escapeHtml(item.type?.toUpperCase().slice(0,6)||'DOC')}
             </span>
             <span class="doc-item-name" title="${escapeHtml(item.displayName||item.file)}">${escapeHtml(item.label)}</span>
             ${item.corrected ? '<span class="doc-item-corrected">corregido</span>' : ''}
         </div>
-    `).join('');
+    `}).join('');
     el.querySelectorAll('.doc-item').forEach(el => {
-        el.addEventListener('click', async () => {
+        el.addEventListener('click', async (e) => {
+            if (e.target.classList.contains('doc-order-select')) return; // no abrir al cambiar orden
             el.closest('.doc-list')?.querySelectorAll('.doc-item').forEach(d => d.classList.remove('active'));
             el.classList.add('active');
             const idx = parseInt(el.dataset.index);
@@ -1191,6 +1214,33 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
                 await renderDocPreview(preview, payload.id, item);
             }
             renderClassifActions(item, payload);
+        });
+    });
+
+    // Listeners de reordenamiento
+    el.querySelectorAll('.doc-order-select').forEach(sel => {
+        sel.addEventListener('change', async () => {
+            const file = sel.dataset.file;
+            const newPos = parseInt(sel.value) - 1;
+            // Reordenar items
+            const currentIdx = items.findIndex(it => it.file === file);
+            if (currentIdx === newPos) return;
+            const newItems = [...items];
+            const [moved] = newItems.splice(currentIdx, 1);
+            newItems.splice(newPos, 0, moved);
+            const newOrder = newItems.map(it => it.file);
+            try {
+                await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(payload.id)}/document-workspace`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'set_order', order: newOrder }),
+                });
+                // Recargar la lista con el nuevo orden
+                payload.analysis = payload.analysis || {};
+                payload.analysis.document_workspace = payload.analysis.document_workspace || {};
+                payload.analysis.document_workspace.order = newOrder;
+                renderClassifDocList(payload, sortBy, sortDir);
+            } catch(e) { console.warn('Error reordenando:', e); }
         });
     });
 }
