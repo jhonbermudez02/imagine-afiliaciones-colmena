@@ -1870,12 +1870,7 @@ function renderReporte(container, payload) {
             <div class="report-section">
                 <div class="report-section-title">Datos del contrato</div>
                 <div class="report-grid">
-                    <div class="report-kv clickable" data-panel="workers" role="button" tabindex="0" title="Ver lista de trabajadores">
-                        <div class="report-kv-label">Trabajadores</div>
-                        <div class="report-kv-val">${escapeHtml(String(trabajadores))}</div>
-                        <div class="report-kv-hint">Ver lista →</div>
-                    </div>
-                    <div class="report-kv clickable" data-panel="sedes" role="button" tabindex="0" title="Ver sedes y centros de trabajo">
+                    <div class="report-kv clickable" data-panel="sedes" role="button" tabindex="0" title="Ver sedes, centros de trabajo y trabajadores">
                         <div class="report-kv-label">Sedes</div>
                         <div class="report-kv-val">${escapeHtml(String(sedes))}</div>
                         <div class="report-kv-hint">Ver sedes →</div>
@@ -2176,30 +2171,91 @@ function renderReporte(container, payload) {
                     `;
                 }
             } else if (panelType === 'sedes') {
-                const sedesData = a.xlsx_profile?.sedes || a.sedes || [];
-                if (!sedesData.length) {
+                // Leer registros del XLSX agrupados por sede (_sheet)
+                const xlsxRecords = a.xlsx_profile?.records || [];
+                const workerCounts = a.xlsx_profile?.worker_sheet_counts || {};
+                const salaryCounts = a.xlsx_profile?.worker_sheet_salary_totals || {};
+                
+                // Agrupar trabajadores por sede
+                const bySede = {};
+                for (const r of xlsxRecords) {
+                    const sede = r._sheet || 'Sin sede';
+                    if (!bySede[sede]) bySede[sede] = [];
+                    bySede[sede].push(r);
+                }
+                
+                const sedeNames = Object.keys(workerCounts).length ? Object.keys(workerCounts) : Object.keys(bySede);
+                
+                if (!sedeNames.length && !xlsxRecords.length) {
                     dataPanel.innerHTML = `<div style="padding:12px;font-size:12px;color:var(--c-text-2)">No hay información de sedes disponible.</div>`;
                 } else {
+                    const sedeBlocks = sedeNames.map((sedeName, si) => {
+                        const workers = bySede[sedeName] || [];
+                        const total = workerCounts[sedeName] ?? workers.length;
+                        const salarioTotal = salaryCounts[sedeName] ? 
+                            '$ ' + Number(salaryCounts[sedeName]).toLocaleString('es-CO') : '';
+                        
+                        if (!workers.length) return `
+                            <div style="margin-bottom:16px">
+                                <div style="font-weight:600;font-size:12px;color:var(--c-text-1);margin-bottom:4px">
+                                    🏢 ${escapeHtml(sedeName)} · ${total} trabajador(es)
+                                    ${salarioTotal ? `<span style="color:var(--c-text-2);font-weight:400;margin-left:8px">${escapeHtml(salarioTotal)}</span>` : ''}
+                                </div>
+                                <div style="font-size:11px;color:var(--c-text-2);padding:6px">Sin trabajadores registrados en esta sede.</div>
+                            </div>`;
+                        
+                        const cols = [
+                            {k: 'numero_de_identificacion', l: 'Documento'},
+                            {k: ['primer_nombre','segundo_nombre','primer_apellido','segundo_apellido'], l: 'Nombre'},
+                            {k: 'cargo', l: 'Cargo'},
+                            {k: 'codigo_del_centro_de_trabajo', l: 'Centro'},
+                            {k: 'tipo_de_trabajador', l: 'Tipo'},
+                            {k: 'salario', l: 'Salario'},
+                            {k: 'eps', l: 'EPS'},
+                            {k: 'pension', l: 'Pensión'},
+                            {k: 'direccion', l: 'Dirección'},
+                        ];
+                        
+                        const rows = workers.map(w => {
+                            return '<tr>' + cols.map(col => {
+                                let val = '';
+                                if (Array.isArray(col.k)) {
+                                    val = col.k.map(k => w[k]||'').filter(Boolean).join(' ');
+                                } else {
+                                    val = String(w[col.k] ?? '');
+                                }
+                                if (col.k === 'salario' && val) {
+                                    val = '$ ' + Number(val).toLocaleString('es-CO');
+                                }
+                                return `<td>${escapeHtml(val)}</td>`;
+                            }).join('') + '</tr>';
+                        }).join('');
+                        
+                        return `
+                            <div style="margin-bottom:20px">
+                                <div style="font-weight:600;font-size:12px;color:var(--c-text-1);margin-bottom:6px;padding:6px 8px;background:var(--c-info-bg);border-radius:4px">
+                                    🏢 ${escapeHtml(sedeName)} · ${total} trabajador(es)
+                                    ${salarioTotal ? `<span style="color:var(--c-text-2);font-weight:400;margin-left:8px">${escapeHtml(salarioTotal)}</span>` : ''}
+                                </div>
+                                <div style="overflow-x:auto">
+                                <table class="blocker-table">
+                                    <thead><tr>${cols.map(c=>`<th>${c.l}</th>`).join('')}</tr></thead>
+                                    <tbody>${rows}</tbody>
+                                </table>
+                                </div>
+                            </div>`;
+                    }).join('');
+                    
                     dataPanel.innerHTML = `
                         <div class="blocker-panel-head">
-                            <span class="blocker-panel-title">🏢 Sedes (${sedesData.length})</span>
+                            <span class="blocker-panel-title">🏢 Sedes (${sedeNames.length})</span>
                             <button class="btn-icon" id="dataPanelClose">✕</button>
                         </div>
-                        <div style="overflow-x:auto">
-                        <table class="blocker-table">
-                            <thead><tr><th>Código</th><th>Nombre</th><th>Dirección</th><th>Ciudad</th><th>Trabajadores</th></tr></thead>
-                            <tbody>${sedesData.map(s => `<tr>
-                                <td>${escapeHtml(String(s.codigo||s.code||s.id||''))}</td>
-                                <td>${escapeHtml(String(s.nombre||s.name||''))}</td>
-                                <td>${escapeHtml(String(s.direccion||s.address||''))}</td>
-                                <td>${escapeHtml(String(s.ciudad||s.city||''))}</td>
-                                <td>${escapeHtml(String(s.trabajadores||s.workers||''))}</td>
-                            </tr>`).join('')}</tbody>
-                        </table>
+                        <div style="padding:12px;max-height:500px;overflow-y:auto">
+                            ${sedeBlocks}
                         </div>
                     `;
                 }
-            }
             dataPanel.querySelector('#dataPanelClose')?.addEventListener('click', () => {
                 dataPanel.classList.add('hidden');
                 kv.classList.remove('active');
