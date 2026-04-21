@@ -540,7 +540,7 @@ function renderCasesTable(cases, tab = 'todos') {
     }
     let hasProcessing = false;
     wrap.innerHTML = `<div class="case-cards">${filtered.map(item => {
-        const { empresa, nit, fecha, status, finalStatus, has926, filename } = resolveCase(item);
+        const { empresa, nit, fecha, status, finalStatus, has926, filename, nroAfiliacion } = resolveCase(item);
         const wfStatus = normalizeText(status);
         const isProcessing = ['processing','pending','uploaded','queued'].includes(wfStatus);
         if (isProcessing) hasProcessing = true;
@@ -560,7 +560,7 @@ function renderCasesTable(cases, tab = 'todos') {
                 aria-label="Ver reporte de ${escapeHtml(empresa)}">
                 <div class="case-card-main" style="flex:1;min-width:0">
                     <div class="case-card-empresa">${escapeHtml(empresa)}</div>
-                    <div class="case-card-meta">NIT ${escapeHtml(nit)} · ${escapeHtml(fechaHora)}</div>
+                    <div class="case-card-meta">NIT ${escapeHtml(nit)}${nroAfiliacion ? ` · Contrato ${escapeHtml(nroAfiliacion)}` : ''} · ${escapeHtml(fechaHora)}</div>
                     ${isProcessing ? `
                         <div class="case-card-live-status">
                             <span class="spin-dot"></span>
@@ -1655,10 +1655,15 @@ async function loadReporteSidebar() {
         const cases = Array.isArray(data.cases) ? data.cases : [];
         cases.sort((a,b) => String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
         renderReporteSidebar(cases);
-        // Si hay un caso activo, seleccionarlo
+        // Si hay un caso activo, seleccionarlo — pero NO recargar el reporte si ya se está mostrando
         if (activeCaseId) {
             highlightSidebarItem(activeCaseId);
-            loadReporteForCase(activeCaseId);
+            // Solo recargar si el reporte actual no es del caso correcto
+            const reporteContent = document.getElementById('reporteContent');
+            const currentCaseShown = reporteContent?.dataset?.caseId;
+            if (currentCaseShown !== activeCaseId) {
+                loadReporteForCase(activeCaseId);
+            }
         } else if (cases.length) {
             // Seleccionar el primero automáticamente
             const first = cases[0];
@@ -1722,10 +1727,12 @@ function highlightSidebarItem(caseId) {
 async function loadReporteForCase(caseId) {
     const el = document.getElementById('reporteContent');
     if (!el) return;
+    el.dataset.caseId = caseId;  // marcar qué caso se está mostrando
     el.innerHTML = '<div class="loading-msg">Cargando reporte...</div>';
     try {
         const r = await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(caseId)}`);
         const payload = await r.json();
+        el.dataset.caseId = caseId;  // confirmar después de cargar
         renderReporte(el, payload);
     } catch(e) {
         el.innerHTML = `<div class="error-msg">${escapeHtml(e.message)}</div>`;
