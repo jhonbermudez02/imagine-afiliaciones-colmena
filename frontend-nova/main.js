@@ -208,8 +208,9 @@ function resolveCase(item) {
     const blockers = Array.isArray(item?.blockers) ? item.blockers : [];
     // Número de contrato / afiliación
     const legacy = (wf.output_926||{}).legacy || {};
-    const nroAfiliacion = legacy.numero_afiliacion || legacy.nro_afiliacion || profile.numero_contrato || profile.nro_contrato || item?.nro_afiliacion || '';
-    const nroRadicacion = profile.numero_radicacion || profile.nro_radicacion || a.formulario_profile?.numero_radicacion || '';
+    const formFields = a.xlsx_profile?.form_fields || {};
+    const nroAfiliacion = legacy.numero_afiliacion || legacy.nro_afiliacion || profile.numero_contrato || profile.nro_contrato || formFields.numero_radicacion || item?.nro_afiliacion || '';
+    const nroRadicacion = formFields.numero_radicacion || profile.numero_radicacion || profile.nro_radicacion || a.formulario_profile?.numero_radicacion || '';
     return { empresa, nit, status, finalStatus, fecha, has926, filename, blockers, nroAfiliacion, nroRadicacion };
 }
 
