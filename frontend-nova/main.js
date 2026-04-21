@@ -2256,6 +2256,7 @@ function renderReporte(container, payload) {
                         </div>
                     `;
                 }
+            }
             dataPanel.querySelector('#dataPanelClose')?.addEventListener('click', () => {
                 dataPanel.classList.add('hidden');
                 kv.classList.remove('active');
