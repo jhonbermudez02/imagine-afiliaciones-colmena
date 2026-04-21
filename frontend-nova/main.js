@@ -2314,13 +2314,13 @@ async function loadProduccion() {
         cases.sort((a,b) => String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
         if (!cases.length) { el.innerHTML = '<div class="empty-state">No hay contratos aprobados para Colmena</div>'; return; }
         el.innerHTML = `<div class="production-cards">${cases.map(item => {
-            const { empresa, nit, fecha, has926, filename } = resolveCase(item);
+            const { empresa, nit, fecha, has926, filename, nroAfiliacion } = resolveCase(item);
             const id = item.id || '';
             return `
                 <div class="prod-card">
                     <div class="prod-card-head">
                         <div>
-                            <div class="prod-card-title">Contrato ${escapeHtml(nit)}</div>
+                            <div class="prod-card-title">${nroAfiliacion ? `Contrato ${escapeHtml(nroAfiliacion)}` : `NIT ${escapeHtml(nit)}`}</div>
                             <div class="prod-card-empresa">${escapeHtml(empresa)}</div>
                             <div class="prod-card-meta">${escapeHtml(fecha)}</div>
                         </div>

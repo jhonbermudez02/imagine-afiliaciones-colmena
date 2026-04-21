@@ -2857,7 +2857,7 @@ async def consolidated_926(request: Consolidated926Request):
         profile = ((analysis.get("xlsx_profile") or {}).get("profile") or {})
         company = str(resumen.get("empresa") or profile.get("empresa") or case_id)
         nit = str(resumen.get("nit") or profile.get("nit") or "")
-        chunks.append(f";; INICIO {company} {nit}\n{content}\n;; FIN {company} {nit}")
+        chunks.append(content)
         selected_cases.append(case_id)
 
     if not chunks:
