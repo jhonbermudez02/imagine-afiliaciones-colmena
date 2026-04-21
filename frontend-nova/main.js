@@ -87,7 +87,7 @@ function localizeStatus(v) {
     const map = {
         uploaded:'cargado', completed:'completado', blocked:'bloqueado',
         failed:'fallido', pending:'pendiente', analyzed:'analizado',
-        stopped_prevalidacion:'No aprobado prevalidación', ok:'ok', degraded:'degradado',
+        stopped_prevalidacion:'No pasó validación', ok:'ok', degraded:'degradado',
     };
     return map[String(v||'').toLowerCase()] || String(v||'n/d');
 }
@@ -228,8 +228,8 @@ function caseStatusClass(status, finalStatus) {
 function casePillLabel(status, finalStatus) {
     const s = normalizeText(status);
     const f = normalizeText(finalStatus);
-    if (s === 'stopped_prevalidacion') return 'Rechazado';
-    if (f.includes('rechaz')) return 'Rechazado';
+    if (s === 'stopped_prevalidacion') return 'No pasó validación';
+    if (f.includes('rechaz')) return 'No pasó validación';
     if (f.includes('aprob') || (s === 'completed' && (f === 'completed' || !f))) return 'Aprobable';
     if (f.includes('observ')) return 'Observado';
     if (f.includes('bloque')) return 'Bloqueado';
@@ -432,7 +432,7 @@ function renderMetrics(cases) {
     document.getElementById('metricEnProcesoSub').textContent = enProceso ? 'en prevalidación' : '';
     document.getElementById('metricAprobablesSub').textContent = aprobables ? 'listos para plano' : '';
     document.getElementById('metricObservadosSub').textContent = observados ? 'requieren revisión' : '';
-    document.getElementById('metricNoAprobadosSub').textContent = noAprobados ? 'no pasaron prevalidación' : '';
+    document.getElementById('metricNoAprobadosSub').textContent = noAprobados ? 'no pasaron validación' : '';
 }
 
 function filterCasesByTab(cases, tab) {
@@ -893,7 +893,7 @@ async function runWorkflow() {
 
         if (statusPill) {
             statusPill.className = 'status-pill ' + (finalWfStatus === 'completed' ? 'ok' : finalWfStatus === 'stopped_prevalidacion' ? 'warn' : 'err');
-            statusPill.textContent = finalWfStatus === 'completed' ? 'Completado' : finalWfStatus === 'stopped_prevalidacion' ? 'No aprobado' : localizeStatus(finalWfStatus);
+            statusPill.textContent = finalWfStatus === 'completed' ? 'Completado' : finalWfStatus === 'stopped_prevalidacion' ? 'No pasó validación' : localizeStatus(finalWfStatus);
         }
         if (progressMsg) progressMsg.innerHTML = '';
 
@@ -941,7 +941,7 @@ function renderWorkflowResult(payload) {
     const filename926 = (wf.output_926||{}).legacy?.filename || 'archivo_core.txt';
 
     const stateClass = isNoAprobado ? 'err' : (isAprobable ? 'ok' : 'warn');
-    const stateLabel = isNoAprobado ? 'No aprobado · prevalidación' : (isAprobable ? 'Aprobable' : 'Observado');
+    const stateLabel = isNoAprobado ? 'No pasó validación' : (isAprobable ? 'Aprobable' : 'Observado');
     const stateIcon = isNoAprobado ? '✗' : (isAprobable ? '✓' : '⚠');
 
     el.innerHTML = `
