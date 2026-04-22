@@ -5875,8 +5875,8 @@ def _extract_todos_intermediarios(doc: Dict[str, Any]) -> List[Dict[str, str]]:
     text = normalize_text(doc.get("ocr_text") or doc.get("text_preview") or "")
     results = []
     tabla_start = re.search(
-        r"(?:c[o]digo)[^\n]{0,80}(?:documento|nro)[^\n]{0,80}(?:nombre|apellido)[^\n]{0,80}(?:participaci[o]n|porcentaje)",
-        text, flags=re.IGNORECASE
+        r"c[oó]digo.{0,40}(?:nro|n[uú]mero|documento).{0,60}(?:nombre|apellido).{0,60}(?:participaci[oó]n|porcentaje)",
+        text, flags=re.IGNORECASE|re.DOTALL
     )
     if not tabla_start:
         return results
