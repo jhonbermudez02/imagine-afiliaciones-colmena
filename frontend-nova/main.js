@@ -108,6 +108,25 @@ function getReviewTypeLabelWithCode(type, legacyCode) {
     return code ? `${label} ·${code}` : label;
 }
 
+
+// ── Notificaciones elegantes (reemplaza alert) ──────────────
+function showToast(msg, type = 'info', duration = 4000) {
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:360px';
+        document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    const colors = {info:'var(--c-blue)', ok:'var(--c-ok)', err:'var(--c-err)', warn:'#f59e0b'};
+    const icons = {info:'ℹ️', ok:'✅', err:'❌', warn:'⚠️'};
+    toast.style.cssText = `background:var(--c-bg-2);border:1px solid var(--c-border);border-left:4px solid ${colors[type]||colors.info};border-radius:8px;padding:12px 16px;font-size:13px;color:var(--c-text-1);box-shadow:0 4px 16px rgba(0,0,0,0.12);display:flex;gap:10px;align-items:flex-start;animation:slideIn 0.2s ease`;
+    toast.innerHTML = `<span style="flex-shrink:0">${icons[type]||icons.info}</span><span style="flex:1">${escapeHtml(msg)}</span><button onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;color:var(--c-text-2);font-size:16px;padding:0;line-height:1">×</button>`;
+    container.appendChild(toast);
+    if (duration > 0) setTimeout(() => toast.remove(), duration);
+}
+
 async function fetchWithRetry(url, options = {}, attempts = 2) {
     let lastErr;
     for (let i = 0; i < attempts; i++) {
@@ -635,18 +654,17 @@ async function handleCaseAction(action, caseId, file) {
         }
     } else if (action === 'eliminar') {
         const empresa = document.querySelector(`[data-action="eliminar"][data-case="${caseId}"]`)?.dataset?.empresa || caseId;
-        if (!confirm(`¿Eliminar el contrato de ${empresa}?\n\nEsta acción eliminará el expediente y todos sus archivos adjuntos. No se puede deshacer.`)) return;
+        if (!confirm(`¿Eliminar el contrato de ${empresa}?\n\nSe eliminarán todos los archivos adjuntos. No se puede deshacer.`)) return;
         try {
             const r = await fetch(`${API_URL}/api/cases/${encodeURIComponent(caseId)}`, { method: 'DELETE' });
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
-            // Remover tarjeta del DOM inmediatamente
             const card = document.querySelector(`[data-default-case="${caseId}"]`);
-            if (card) card.remove();
-            // Actualizar métricas
+            if (card) { card.style.opacity = '0'; card.style.transition = 'opacity 0.3s'; setTimeout(() => card.remove(), 300); }
             allCases = allCases.filter(c => c.id !== caseId);
             renderMetrics(allCases);
+            showToast(`Contrato de ${empresa} eliminado`, 'ok');
         } catch(e) {
-            alert('No se pudo eliminar el contrato: ' + e.message);
+            showToast('No se pudo eliminar: ' + e.message, 'err');
         }
     }
 }
@@ -757,7 +775,7 @@ async function runWorkflow() {
     const files = window.__uploadFiles || [];
     if (!files.length) return;
     const tester = readTester();
-    if (!tester.email) { alert('Por favor selecciona tu usuario antes de continuar.'); return; }
+    if (!tester.email) { showToast('Por favor selecciona tu usuario antes de continuar.', 'warn'); return; }
 
     const btn = document.getElementById('runWorkflowBtn');
     const progressCard = document.getElementById('workflowProgressCard');
@@ -1475,7 +1493,7 @@ async function reclassifyDocument(caseId, item, newType) {
         await loadClassifForCase(caseId);
     } catch(e) {
         console.error('reclassifyDocument:', e);
-        alert('No pude reclasificar el documento: ' + e.message);
+        showToast('No se pudo reclasificar: ' + e.message, 'err');
     }
 }
 
@@ -2308,24 +2326,24 @@ function renderReporte(container, payload) {
         if (!confirm('¿Reprocesar este contrato? Se volverá a ejecutar la prevalidación completa.')) return;
         btn.disabled = true;
         btn.textContent = '↺ Enviando...';
-        if (statusBar) { statusBar.style.display = ''; statusBar.textContent = 'Enviando a la cola de procesamiento...'; }
+        if (statusBar) { statusBar.style.display = ''; statusBar.textContent = 'Enviando a la cola...'; }
         try {
             const r = await fetch(`${API_URL}/api/cases/${encodeURIComponent(id)}/run-workflow`, { method: 'POST' });
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
             if (statusBar) {
-                statusBar.textContent = '✓ En cola — el contrato será reprocesado automáticamente. Puedes ver el progreso en la Bandeja.';
+                statusBar.textContent = '✓ En cola — puedes ver el progreso en la Bandeja.';
                 statusBar.style.background = 'var(--c-ok-bg)';
                 statusBar.style.color = 'var(--c-ok)';
             }
             btn.textContent = 'En cola ✓';
-            // Actualizar sidebar después de 3s
+            showToast('Contrato enviado a reprocesar. RAG aprenderá del resultado.', 'info');
             setTimeout(() => loadReporteSidebar(), 3000);
-            // Activar live polling en bandeja
             startBandejaLivePolling();
         } catch(e) {
             if (statusBar) { statusBar.textContent = 'Error: ' + e.message; statusBar.style.background = 'var(--c-err-bg)'; statusBar.style.color = 'var(--c-err)'; }
             btn.disabled = false;
             btn.textContent = '↺ Reprocesar';
+            showToast('Error al reprocesar: ' + e.message, 'err');
         }
     });
 }
@@ -2396,7 +2414,7 @@ async function loadProduccion() {
 
 async function downloadColmenaBatch() {
     const ids = Array.from(selectedColmenaCaseIds);
-    if (!ids.length) { alert('Selecciona al menos un contrato para el lote'); return; }
+    if (!ids.length) { showToast('Selecciona al menos un contrato para el lote', 'warn'); return; }
     const btn = document.getElementById('downloadColmenaBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'Descargando...'; }
     try {
@@ -2416,7 +2434,7 @@ async function downloadColmenaBatch() {
         document.body.appendChild(a); a.click(); a.remove();
         URL.revokeObjectURL(url);
     } catch(e) {
-        alert('Error descargando lote: ' + e.message);
+        showToast('Error descargando lote: ' + e.message, 'err');
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Descargar lote plano'; }
     }
@@ -2506,7 +2524,7 @@ async function saveFeedbackNote() {
     const text = String(document.getElementById('feedbackNote')?.value||'').trim();
     const category = String(document.getElementById('feedbackCategory')?.value||'').trim();
     const caseId = String(document.getElementById('feedbackCaseSelect')?.value||'').trim();
-    if (!name || !text) { alert('Completa tu nombre y la observación'); return; }
+    if (!name || !text) { showToast('Completa tu nombre y la observación', 'warn'); return; }
     const btn = document.getElementById('saveFeedbackBtn');
     const status = document.getElementById('feedbackSaveStatus');
     if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
@@ -2627,10 +2645,10 @@ async function reindexKnowledge() {
         const r = await fetch(`${API_URL}/api/system/reindex`, { method: 'POST' });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const data = await r.json();
-        alert(`Reindexado: ${data.documents||0} documentos, ${data.chunks||0} chunks`);
+        showToast(`Reindexado: ${data.documents||0} documentos`, 'ok');
         loadSystemStatus();
     } catch(e) {
-        alert('Error reindexando: ' + e.message);
+        showToast('Error reindexando: ' + e.message, 'err');
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Reindexar conocimiento'; }
     }
@@ -2648,7 +2666,7 @@ async function exportReviews() {
         document.body.appendChild(a); a.click(); a.remove();
         URL.revokeObjectURL(url);
     } catch(e) {
-        alert('Error exportando: ' + e.message);
+        showToast('Error exportando: ' + e.message, 'err');
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Exportar revisiones'; }
     }
