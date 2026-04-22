@@ -1059,7 +1059,7 @@ function buildDocItems(payload) {
                 : (meta.document_type || group.label || 'pdf');
             const isCorrected = reviewEntry?.verdict === 'no';
             const legacyCode = isCorrected ? null : (meta.legacy_code ?? null);
-            items.push({ file: f, kind: 'document', type: effectiveType, label: getReviewTypeLabelWithCode(effectiveType, legacyCode), displayName: meta.display_name || f, corrected: isCorrected });
+            items.push({ file: f, kind: 'document', type: effectiveType, label: getReviewTypeLabelWithCode(effectiveType, legacyCode), displayName: meta.display_name || f, corrected: isCorrected, codeSource: meta.code_source || '' });
         }
     }
     // Agregar documentos del análisis que no aparecieron en received_summary
@@ -1190,6 +1190,7 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
         const orderOptions = items.map((_, j) => 
             `<option value="${j+1}" ${j+1===orderNum?'selected':''}>${j+1}</option>`
         ).join('');
+        const isRag = item.codeSource === 'rag_classification';
         return `
         <div class="doc-item" data-index="${i}" data-file="${escapeHtml(item.file)}">
             <span class="doc-item-order">
@@ -1199,6 +1200,7 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
                 ${item.kind==='xlsx'?'XLSX':escapeHtml(item.type?.toUpperCase().slice(0,6)||'DOC')}
             </span>
             <span class="doc-item-name" title="${escapeHtml(item.displayName||item.file)}">${escapeHtml(item.label)}</span>
+            ${isRag ? '<span class="doc-item-corrected" style="background:var(--c-info-bg);color:var(--c-blue)" title="Clasificado por RAG">🧠</span>' : ''}
             ${item.corrected ? '<span class="doc-item-corrected">corregido</span>' : ''}
         </div>
     `}).join('');
@@ -1337,6 +1339,13 @@ function renderClassifActions(item, payload) {
                 throw new Error(errDetail);
             }
 
+            // Leer respuesta para ver si RAG aprendió
+            let ragMensaje = '';
+            try {
+                const respData = await r.json();
+                ragMensaje = respData?.rag_mensaje || '';
+            } catch {}
+
             const newLabel = getReviewTypeLabelWithCode(newType, null);
 
             // Actualizar el item en memoria
@@ -1357,8 +1366,12 @@ function renderClassifActions(item, payload) {
             const previewTitle = document.getElementById('classifPreviewTitle');
             if (previewTitle) previewTitle.textContent = newLabel;
 
-            // Actualizar el panel de reclasificación
-            if (status) { status.style.color = 'var(--c-ok)'; status.textContent = `✓ Reclasificado como "${newLabel}"`; }
+            // Mostrar confirmación + mensaje RAG
+            if (status) {
+                status.style.color = 'var(--c-ok)';
+                status.innerHTML = `✓ Reclasificado como "${escapeHtml(newLabel)}"` +
+                    (ragMensaje ? `<div style="margin-top:6px;padding:8px 10px;background:var(--c-info-bg);border-radius:6px;font-size:11px;color:var(--c-blue);border-left:3px solid var(--c-blue)">🧠 ${escapeHtml(ragMensaje)}</div>` : '');
+            }
             if (btn) { btn.disabled = false; btn.textContent = 'Reclasificar'; }
 
             // Actualizar la clasificación actual mostrada

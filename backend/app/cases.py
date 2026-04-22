@@ -720,6 +720,94 @@ def _extract_name_from_cedula_text(text: str) -> str:
 
 
 
+
+# ── RAG: Clasificador basado en experiencia ──────────────────
+_rag_client = None
+
+def _get_rag_client():
+    global _rag_client
+    if _rag_client is None:
+        try:
+            from qdrant_client import QdrantClient
+            _rag_client = QdrantClient(host="imagine_qdrant", port=6333)
+        except Exception:
+            pass
+    return _rag_client
+
+def _rag_classify_document(ocr_text: str, min_score: float = 0.82) -> Optional[Dict[str, Any]]:
+    """Busca en RAG el tipo de documento mas similar al OCR dado.
+    Retorna el tipo si la similitud supera min_score, None si no."""
+    if not ocr_text or len(ocr_text.strip()) < 30:
+        return None
+    try:
+        qdrant = _get_rag_client()
+        if not qdrant:
+            return None
+        import httpx as _httpx
+        qdrant_url = str(settings.legacy_backend_url or "").replace("8000", "11434").replace("imagine_compat_backend", "imagine_ollama")
+        ollama_url = "http://imagine_ollama:11434"
+        r = _httpx.post(f"{ollama_url}/api/embeddings",
+            json={"model": "nomic-embed-text", "prompt": ocr_text[:1500]},
+            timeout=30)
+        vector = r.json().get("embedding", [])
+        if not vector:
+            return None
+        results = qdrant.search(
+            collection_name="afi_doc_clasificaciones",
+            query_vector=vector,
+            limit=3,
+            score_threshold=min_score,
+        )
+        if not results:
+            return None
+        # Votar por el tipo mas frecuente entre los top resultados
+        from collections import Counter
+        tipos = Counter(r.payload.get("document_type") for r in results if r.payload.get("document_type"))
+        if not tipos:
+            return None
+        best_type, count = tipos.most_common(1)[0]
+        best_score = results[0].score
+        logger.info("RAG clasifico documento como '%s' (score=%.3f, votos=%d)", best_type, best_score, count)
+        return {
+            "document_type": best_type,
+            "legacy_code": results[0].payload.get("legacy_code", 99),
+            "code_source": "rag_classification",
+            "rag_score": best_score,
+            "rag_votes": count,
+        }
+    except Exception as exc:
+        logger.debug("RAG classify error: %s", exc)
+        return None
+
+
+def _rag_index_document(case_id: str, filename: str, ocr_text: str, document_type: str, legacy_code: int = 99) -> bool:
+    """Indexa un documento en RAG para aprendizaje futuro."""
+    if not ocr_text or len(ocr_text.strip()) < 30:
+        return False
+    try:
+        qdrant = _get_rag_client()
+        if not qdrant:
+            return False
+        import httpx as _httpx, uuid as _uuid
+        from qdrant_client.models import PointStruct
+        ollama_url = "http://imagine_ollama:11434"
+        r = _httpx.post(f"{ollama_url}/api/embeddings",
+            json={"model": "nomic-embed-text", "prompt": ocr_text[:1500]},
+            timeout=30)
+        vector = r.json().get("embedding", [])
+        if not vector:
+            return False
+        qdrant.upsert("afi_doc_clasificaciones", points=[PointStruct(
+            id=str(_uuid.uuid4()), vector=vector,
+            payload={"case_id": case_id, "filename": filename,
+                "document_type": document_type, "legacy_code": legacy_code,
+                "source": "auto_index", "ocr_preview": ocr_text[:200]}
+        )])
+        return True
+    except Exception as exc:
+        logger.debug("RAG index error: %s", exc)
+        return False
+
 # ── Tabla asesores Colmena ──────────────────────────────────
 _ASESORES_CACHE: Dict[str, Any] = {}
 
@@ -797,6 +885,22 @@ def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, exp
     if payload.get("analysis") is None:
         payload["analysis"] = analysis
     review_store = analysis.setdefault("manual_review", {})
+
+    # Cuando el operador corrige una clasificacion, RAG aprende
+    if normalize_haystack(kind) != "comisiones" and normalize_haystack(verdict) == "no" and expected_type:
+        try:
+            payload_tmp = load_case(case_id)
+            docs_tmp = (payload_tmp.get("analysis") or {}).get("documents") or []
+            doc_tmp = next((d for d in docs_tmp if d.get("filename") == filename), None)
+            if doc_tmp:
+                ocr_tmp = str(doc_tmp.get("ocr_text") or doc_tmp.get("text_preview") or "")
+                code_tmp = DOC_TYPE_TO_PRIMARY_CODE.get(normalize_haystack(expected_type).replace(" ", "_"), 99)
+                _rag_index_document(case_id, filename, ocr_tmp, normalize_haystack(expected_type).replace(" ", "_"), code_tmp)
+                logger.info("RAG aprendio correccion: %s -> %s", filename, expected_type)
+                review_store["rag_aprendio"] = True
+                review_store["rag_mensaje"] = f"Gracias. RAG ha aprendido que este documento es '{expected_type}'. Lo recordaré para futuros contratos similares."
+        except Exception as _rag_exc:
+            logger.debug("RAG learn error: %s", _rag_exc)
 
     # Corrección manual de comisiones
     if normalize_haystack(kind) == "comisiones" and comisiones is not None:
@@ -2365,6 +2469,12 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
 
 
 def _classify_document(filename: str, text: str) -> Dict[str, Any]:
+    # 1. Intentar clasificar con RAG primero (aprendizaje acumulado)
+    if text and len(text.strip()) > 50:
+        rag_result = _rag_classify_document(text, min_score=0.85)
+        if rag_result:
+            return rag_result
+    # 2. Fallback a clasificacion por reglas
     name_txt = normalize_haystack(filename)
     text_txt = normalize_haystack(text)
     haystack = f"{name_txt} {text_txt}".strip()
