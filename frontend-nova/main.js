@@ -1904,6 +1904,7 @@ function renderReporte(container, payload) {
             </div>
             <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
                 <button class="btn-secondary" data-action="clasificacion" data-case="${escapeHtml(caseId)}" type="button">Ver documentos</button>
+                <button class="btn-secondary" data-panel="comisiones" id="btnComisiones" type="button">Comisiones</button>
                 ${has926 ? `<button class="btn-primary" data-action="descargar926" data-case="${escapeHtml(caseId)}" data-file="${escapeHtml(filename926)}" type="button">Descargar plano</button>` : ''}
                 ${!isAprobable ? `<button class="btn-warn" id="reprocesarBtn" data-case="${escapeHtml(caseId)}" type="button" title="Volver a ejecutar la prevalidación">↺ Reprocesar</button>` : ''}
             </div>
@@ -2242,9 +2243,18 @@ function renderReporte(container, payload) {
                         {k: 'numero_de_identificacion', l: 'Documento'},
                         {k: ['primer_nombre','segundo_nombre','primer_apellido','segundo_apellido'], l: 'Nombre'},
                         {k: 'cargo', l: 'Cargo'},
+                        {k: 'tipo_de_trabajador', l: 'Tipo'},
                         {k: 'salario', l: 'Salario'},
+                        {k: 'tipo_de_salario', l: 'T.Salario'},
                         {k: 'eps', l: 'EPS'},
                         {k: 'pension', l: 'Pensión'},
+                        {k: 'municipio/distrito', l: 'Municipio'},
+                        {k: 'departamento', l: 'Depto'},
+                        {k: 'direccion', l: 'Dirección'},
+                        {k: 'celular', l: 'Celular'},
+                        {k: 'correo_electronico', l: 'Correo'},
+                        {k: 'jornada', l: 'Jornada'},
+                        {k: 'modalidad', l: 'Modalidad'},
                     ];
 
                     function buildWorkerTable(workers) {
@@ -2263,13 +2273,25 @@ function renderReporte(container, payload) {
                         return sedeNames.map(sedeName => {
                             const workers = bySede[sedeName] || [];
                             const total = workerCounts[sedeName] ?? workers.length;
-                            if (!total && !workers.length) return ''; // Ocultar sedes sin trabajadores
+                            if (!total && !workers.length) return '';
                             const sal = salaryCounts[sedeName] ? '· $ ' + Number(salaryCounts[sedeName]).toLocaleString('es-CO') : '';
-                            return `<div style="margin-bottom:16px">
-                                <div style="font-weight:600;font-size:12px;color:var(--c-text-1);padding:6px 8px;background:var(--c-info-bg);border-radius:4px;margin-bottom:6px">
+                            // Agrupar por centro dentro de la sede
+                            const porCentro = {};
+                            for (const w of workers) {
+                                const c = String(w.codigo_del_centro_de_trabajo || 'Sin centro');
+                                if (!porCentro[c]) porCentro[c] = [];
+                                porCentro[c].push(w);
+                            }
+                            const centrosHTML = Object.entries(porCentro).map(([centro, cWorkers]) => `
+                                <div style="margin-bottom:12px;padding-left:12px;border-left:2px solid var(--c-border)">
+                                    <div style="font-size:11px;font-weight:600;color:var(--c-text-2);margin-bottom:6px">🏭 Centro de trabajo ${escapeHtml(centro)} · ${cWorkers.length} trabajador(es)</div>
+                                    ${buildWorkerTable(cWorkers)}
+                                </div>`).join('');
+                            return `<div style="margin-bottom:20px">
+                                <div style="font-weight:600;font-size:12px;color:var(--c-text-1);padding:6px 8px;background:var(--c-info-bg);border-radius:4px;margin-bottom:8px">
                                     🏢 ${escapeHtml(sedeName)} · ${total} trabajador(es) ${escapeHtml(sal)}
                                 </div>
-                                ${buildWorkerTable(workers)}
+                                ${centrosHTML || buildWorkerTable(workers)}
                             </div>`;
                         }).filter(Boolean).join('');
                     }
@@ -2309,13 +2331,129 @@ function renderReporte(container, payload) {
                         dataPanel.querySelector('#btnVerSedes').classList.remove('active');
                     });
                 }
+            } else if (panelType === 'comisiones') {
+                // Panel de comisiones con visor de documento
+                const mr = a.manual_review || {};
+                const comisionesManuales = mr.comisiones || {};
+                const docs = a.documents || [];
+                const entregaDocs = docs.filter(d => d.document_type === 'entrega_documentos');
+                const intermediarios = a.validacion_resumen?.matches?.entrega_documentos_intermediario || {};
+
+                let comisionHTML = `
+                    <div class="blocker-panel-head">
+                        <span class="blocker-panel-title">💰 Comisiones e intermediación</span>
+                        <button class="btn-icon" id="dataPanelClose">✕</button>
+                    </div>
+                    <div style="padding:12px;max-height:500px;overflow-y:auto">`;
+
+                if (Object.keys(comisionesManuales).length) {
+                    comisionHTML += `<div style="font-size:12px;font-weight:600;margin-bottom:8px">Comisiones registradas manualmente:</div>`;
+                    for (const [fname, rows] of Object.entries(comisionesManuales)) {
+                        comisionHTML += `<div style="font-size:11px;color:var(--c-text-2);margin-bottom:4px">📄 ${escapeHtml(fname)}</div>`;
+                        comisionHTML += `<table class="blocker-table" style="margin-bottom:12px">
+                            <thead><tr><th>Código</th><th>Documento</th><th>Porcentaje</th></tr></thead>
+                            <tbody>${(rows||[]).map(r => `<tr>
+                                <td>${escapeHtml(String(r.codigo||''))}</td>
+                                <td>${escapeHtml(String(r.cedula||''))}</td>
+                                <td>${escapeHtml(String(r.porcentaje||''))}%</td>
+                            </tr>`).join('')}</tbody></table>`;
+                    }
+                } else if (intermediarios.codigo_intermediario) {
+                    comisionHTML += `<div style="font-size:12px;font-weight:600;margin-bottom:8px">Comisiones leídas del OCR:</div>
+                        <table class="blocker-table"><thead><tr><th>Código</th><th>% Participación</th><th>Archivo</th></tr></thead>
+                        <tbody><tr>
+                            <td>${escapeHtml(String(intermediarios.codigo_intermediario||''))}</td>
+                            <td>${escapeHtml(String(intermediarios.porcentaje_venta||''))}%</td>
+                            <td>${escapeHtml(String(intermediarios.filename||''))}</td>
+                        </tr></tbody></table>`;
+                } else {
+                    comisionHTML += `<div style="color:var(--c-text-2);font-size:12px">No se encontró información de comisiones. Verifica el documento Entrega Doc.</div>`;
+                }
+
+                // Mostrar documentos Entrega Doc para validación visual
+                if (entregaDocs.length) {
+                    comisionHTML += `<div style="font-size:12px;font-weight:600;margin-top:16px;margin-bottom:8px">Documentos fuente (Entrega Doc):</div>
+                        <div style="display:flex;flex-wrap:wrap;gap:8px">`;
+                    for (const doc of entregaDocs) {
+                        const url = `/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(doc.filename||'')}`;
+                        comisionHTML += `<a href="${escapeHtml(url)}" target="_blank" class="btn-secondary" style="font-size:11px;padding:5px 10px">
+                            📄 ${escapeHtml(doc.filename||'Entrega Doc')}
+                        </a>`;
+                    }
+                    comisionHTML += `</div>`;
+                }
+
+                comisionHTML += `</div>`;
+                dataPanel.innerHTML = comisionHTML;
             }
             dataPanel.querySelector('#dataPanelClose')?.addEventListener('click', () => {
                 dataPanel.classList.add('hidden');
-                kv.classList.remove('active');
+                document.getElementById('btnComisiones')?.classList.remove('active');
             });
             dataPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         });
+    });
+
+    // ── Botón Comisiones ──────────────────────────────────────
+    document.getElementById('btnComisiones')?.addEventListener('click', function() {
+        const dataPanel = document.getElementById('reportDataPanel');
+        if (!dataPanel) return;
+        if (!dataPanel.classList.contains('hidden') && dataPanel.dataset.panel === 'comisiones') {
+            dataPanel.classList.add('hidden');
+            this.classList.remove('active');
+            return;
+        }
+        dataPanel.dataset.panel = 'comisiones';
+        dataPanel.classList.remove('hidden');
+        this.classList.add('active');
+        // Disparar el evento de panel para reusar la lógica
+        const mr = a.manual_review || {};
+        const comisionesManuales = mr.comisiones || {};
+        const docs = a.documents || [];
+        const entregaDocs = docs.filter(d => d.document_type === 'entrega_documentos');
+        const intermediarios = a.validacion_resumen?.matches?.entrega_documentos_intermediario || {};
+        let comisionHTML = `
+            <div class="blocker-panel-head">
+                <span class="blocker-panel-title">💰 Comisiones e intermediación</span>
+                <button class="btn-icon" id="dataPanelClose2">✕</button>
+            </div>
+            <div style="padding:12px;max-height:500px;overflow-y:auto">`;
+        if (Object.keys(comisionesManuales).length) {
+            for (const [fname, rows] of Object.entries(comisionesManuales)) {
+                comisionHTML += `<div style="font-size:11px;color:var(--c-text-2);margin-bottom:4px">📄 ${escapeHtml(fname)}</div>
+                    <table class="blocker-table" style="margin-bottom:12px">
+                    <thead><tr><th>Código</th><th>Documento</th><th>Porcentaje</th></tr></thead>
+                    <tbody>${(rows||[]).map(r => `<tr>
+                        <td>${escapeHtml(String(r.codigo||''))}</td>
+                        <td>${escapeHtml(String(r.cedula||''))}</td>
+                        <td>${escapeHtml(String(r.porcentaje||''))}%</td>
+                    </tr>`).join('')}</tbody></table>`;
+            }
+        } else if (intermediarios.codigo_intermediario) {
+            comisionHTML += `<table class="blocker-table"><thead><tr><th>Código</th><th>% Participación</th><th>Archivo</th></tr></thead>
+                <tbody><tr>
+                    <td>${escapeHtml(String(intermediarios.codigo_intermediario||''))}</td>
+                    <td>${escapeHtml(String(intermediarios.porcentaje_venta||''))}%</td>
+                    <td>${escapeHtml(String(intermediarios.filename||''))}</td>
+                </tr></tbody></table>`;
+        } else {
+            comisionHTML += `<div style="color:var(--c-text-2);font-size:12px">No se encontró información de comisiones.</div>`;
+        }
+        if (entregaDocs.length) {
+            comisionHTML += `<div style="font-size:12px;font-weight:600;margin-top:16px;margin-bottom:8px">📄 Documentos fuente — clic para ver:</div><div style="display:flex;flex-wrap:wrap;gap:8px">`;
+            for (const doc of entregaDocs) {
+                const url = `/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(doc.filename||'')}`;
+                comisionHTML += `<a href="${escapeHtml(url)}" target="_blank" class="btn-secondary" style="font-size:11px;padding:5px 10px">📄 ${escapeHtml(doc.filename||'Entrega Doc')}</a>`;
+            }
+            comisionHTML += `</div>`;
+        }
+        comisionHTML += `</div>`;
+        dataPanel.innerHTML = comisionHTML;
+        dataPanel.querySelector('#dataPanelClose2')?.addEventListener('click', () => {
+            dataPanel.classList.add('hidden');
+            document.getElementById('btnComisiones')?.classList.remove('active');
+        });
+        dataPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
     // ── Botón Reprocesar ─────────────────────────────────────
     document.getElementById('reprocesarBtn')?.addEventListener('click', async function() {
