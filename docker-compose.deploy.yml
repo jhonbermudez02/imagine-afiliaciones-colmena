@@ -54,7 +54,7 @@ services:
       timeout: 5s
       retries: 20
     volumes:
-      - imagine_postgres_data:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
     networks:
       - imagine_net
 
@@ -177,7 +177,6 @@ services:
       - imagine_net
 
 volumes:
-  imagine_postgres_data:
   imagine_compat_postgres_data:
   imagine_qdrant_data:
   imagine_ollama_data:
