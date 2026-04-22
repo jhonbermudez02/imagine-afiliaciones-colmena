@@ -578,8 +578,6 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
             invalid_eps.append((documento, eps_value, sheet, row))
         if afp_value and afp_norm not in afp_catalog:
             invalid_afp.append((documento, afp_value, sheet, row))
-        if len(invalid_eps) >= 5 and len(invalid_afp) >= 5:
-            break
     if invalid_eps:
         blockers.append(
             {
