@@ -5559,11 +5559,13 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
                 ),
             }
         )
+        todos_intermediarios_full = _extract_todos_intermediarios(doc)
         matches["entrega_documentos_intermediario"] = {
             "codigo_intermediario": codigo_intermediario.zfill(2),
             "porcentaje_venta": porcentaje_venta,
             "filename": str(doc.get("filename") or ""),
             "ok": ok,
+            "todos_intermediarios": todos_intermediarios_full,
         }
         if not ok:
             entrega_porcentaje_issue = validations[-1]
@@ -5880,7 +5882,7 @@ def _extract_todos_intermediarios(doc: Dict[str, Any]) -> List[Dict[str, str]]:
         return results
     tabla_text = text[tabla_start.end():]
     fila_pattern = re.compile(
-        r"\b(0?[1-4])\s+([\d]{6,12})\s+[\w\s\-\.]{4,60}?\s+(\d{1,3})\s*%?(?=\s|$)",
+        r"\b(0?[1-4])\s+([\d]{6,12})\s+([\w\s\-\.]{4,60}?)\s+(\d{1,3})\s*%?(?=\s|$)",
         re.IGNORECASE
     )
     for m in fila_pattern.finditer(tabla_text):
@@ -5888,11 +5890,13 @@ def _extract_todos_intermediarios(doc: Dict[str, Any]) -> List[Dict[str, str]]:
         if codigo_raw == "2":
             continue
         codigo_plano = {"1": "2", "3": "3", "4": "4"}.get(codigo_raw, "2")
+        nombre = m.group(3).strip() if m.group(3) else ""
         results.append({
             "codigo_intermediario": codigo_raw,
             "codigo_vendedor": codigo_plano,
             "vendedor_documento": only_digits(m.group(2)),
-            "porcentaje_venta": m.group(3),
+            "nombre_intermediario": nombre,
+            "porcentaje_venta": m.group(4),
         })
     return results
 

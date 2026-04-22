@@ -2406,49 +2406,72 @@ function renderReporte(container, payload) {
         dataPanel.dataset.panel = 'comisiones';
         dataPanel.classList.remove('hidden');
         this.classList.add('active');
-        // Disparar el evento de panel para reusar la lógica
+
         const mr = a.manual_review || {};
         const comisionesManuales = mr.comisiones || {};
         const docs = a.documents || [];
         const entregaDocs = docs.filter(d => d.document_type === 'entrega_documentos');
         const intermediarios = a.validacion_resumen?.matches?.entrega_documentos_intermediario || {};
-        let comisionHTML = `
+        const todosInterm = intermediarios.todos_intermediarios || [];
+
+        // Construir tabla de intermediarios
+        let tablaHTML = '';
+        if (Object.keys(comisionesManuales).length) {
+            for (const [fname, rows] of Object.entries(comisionesManuales)) {
+                tablaHTML += `<div style="font-size:11px;color:var(--c-text-2);margin-bottom:4px">📄 ${escapeHtml(fname)} (manual)</div>
+                    <table class="blocker-table" style="margin-bottom:12px">
+                    <thead><tr><th>Código</th><th>Documento</th><th>Nombre</th><th>% Participación</th></tr></thead>
+                    <tbody>${(rows||[]).map(r => `<tr>
+                        <td>${escapeHtml(String(r.codigo||''))}</td>
+                        <td>${escapeHtml(String(r.cedula||''))}</td>
+                        <td>${escapeHtml(String(r.nombre||''))}</td>
+                        <td>${escapeHtml(String(r.porcentaje||''))}%</td>
+                    </tr>`).join('')}</tbody></table>`;
+            }
+        } else if (todosInterm.length) {
+            tablaHTML += `<table class="blocker-table" style="margin-bottom:12px">
+                <thead><tr><th>Código</th><th>Documento</th><th>Nombre</th><th>% Participación</th></tr></thead>
+                <tbody>${todosInterm.map(r => `<tr>
+                    <td>${escapeHtml(String(r.codigo_intermediario||''))}</td>
+                    <td>${escapeHtml(String(r.vendedor_documento||''))}</td>
+                    <td>${escapeHtml(String(r.nombre_intermediario||''))}</td>
+                    <td>${escapeHtml(String(r.porcentaje_venta||''))}%</td>
+                </tr>`).join('')}</tbody></table>`;
+        } else if (intermediarios.codigo_intermediario) {
+            tablaHTML += `<table class="blocker-table" style="margin-bottom:12px">
+                <thead><tr><th>Código</th><th>% Participación</th></tr></thead>
+                <tbody><tr>
+                    <td>${escapeHtml(String(intermediarios.codigo_intermediario||''))}</td>
+                    <td>${escapeHtml(String(intermediarios.porcentaje_venta||''))}%</td>
+                </tr></tbody></table>`;
+        } else {
+            tablaHTML = `<div style="color:var(--c-text-2);font-size:12px;margin-bottom:12px">No se encontró información de comisiones. Verifica el documento Entrega Doc.</div>`;
+        }
+
+        // Visor PDF inline del primer documento Entrega Doc
+        let visorHTML = '';
+        if (entregaDocs.length) {
+            const firstDoc = entregaDocs[0];
+            const pdfUrl = `${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(firstDoc.filename||'')}`;
+            visorHTML = `
+                <div style="font-size:12px;font-weight:600;margin-top:12px;margin-bottom:6px">📄 Documento fuente — ${escapeHtml(firstDoc.filename||'Entrega Doc')}</div>
+                <iframe src="${escapeHtml(pdfUrl)}" style="width:100%;height:480px;border:1px solid var(--c-border);border-radius:6px" title="Entrega Doc"></iframe>
+                ${entregaDocs.length > 1 ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${entregaDocs.slice(1).map(d => {
+                    const u = `${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(d.filename||'')}`;
+                    return `<button class="btn-secondary" style="font-size:11px" onclick="this.closest('.report-data-panel').querySelector('iframe').src='${escapeHtml(u)}'">📄 ${escapeHtml(d.filename||'')}</button>`;
+                }).join('')}</div>` : ''}`;
+        }
+
+        dataPanel.innerHTML = `
             <div class="blocker-panel-head">
                 <span class="blocker-panel-title">💰 Comisiones e intermediación</span>
                 <button class="btn-icon" id="dataPanelClose2">✕</button>
             </div>
-            <div style="padding:12px;max-height:500px;overflow-y:auto">`;
-        if (Object.keys(comisionesManuales).length) {
-            for (const [fname, rows] of Object.entries(comisionesManuales)) {
-                comisionHTML += `<div style="font-size:11px;color:var(--c-text-2);margin-bottom:4px">📄 ${escapeHtml(fname)}</div>
-                    <table class="blocker-table" style="margin-bottom:12px">
-                    <thead><tr><th>Código</th><th>Documento</th><th>Porcentaje</th></tr></thead>
-                    <tbody>${(rows||[]).map(r => `<tr>
-                        <td>${escapeHtml(String(r.codigo||''))}</td>
-                        <td>${escapeHtml(String(r.cedula||''))}</td>
-                        <td>${escapeHtml(String(r.porcentaje||''))}%</td>
-                    </tr>`).join('')}</tbody></table>`;
-            }
-        } else if (intermediarios.codigo_intermediario) {
-            comisionHTML += `<table class="blocker-table"><thead><tr><th>Código</th><th>% Participación</th><th>Archivo</th></tr></thead>
-                <tbody><tr>
-                    <td>${escapeHtml(String(intermediarios.codigo_intermediario||''))}</td>
-                    <td>${escapeHtml(String(intermediarios.porcentaje_venta||''))}%</td>
-                    <td>${escapeHtml(String(intermediarios.filename||''))}</td>
-                </tr></tbody></table>`;
-        } else {
-            comisionHTML += `<div style="color:var(--c-text-2);font-size:12px">No se encontró información de comisiones.</div>`;
-        }
-        if (entregaDocs.length) {
-            comisionHTML += `<div style="font-size:12px;font-weight:600;margin-top:16px;margin-bottom:8px">📄 Documentos fuente — clic para ver:</div><div style="display:flex;flex-wrap:wrap;gap:8px">`;
-            for (const doc of entregaDocs) {
-                const url = `/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(doc.filename||'')}`;
-                comisionHTML += `<a href="${escapeHtml(url)}" target="_blank" class="btn-secondary" style="font-size:11px;padding:5px 10px">📄 ${escapeHtml(doc.filename||'Entrega Doc')}</a>`;
-            }
-            comisionHTML += `</div>`;
-        }
-        comisionHTML += `</div>`;
-        dataPanel.innerHTML = comisionHTML;
+            <div style="padding:12px;overflow-y:auto;max-height:700px">
+                ${tablaHTML}
+                ${visorHTML}
+            </div>`;
+
         dataPanel.querySelector('#dataPanelClose2')?.addEventListener('click', () => {
             dataPanel.classList.add('hidden');
             document.getElementById('btnComisiones')?.classList.remove('active');
