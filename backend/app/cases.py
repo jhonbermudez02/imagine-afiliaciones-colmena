@@ -767,7 +767,7 @@ def _rag_classify_document(ocr_text: str, min_score: float = 0.82) -> Optional[D
             return None
         best_type, count = tipos.most_common(1)[0]
         best_score = results[0].score
-        logger.info("RAG clasifico documento como '%s' (score=%.3f, votos=%d)", best_type, best_score, count)
+        import logging as _logging; _logging.getLogger("afi.rag").info("RAG clasifico documento como '%s' (score=%.3f, votos=%d)", best_type, best_score, count)
         return {
             "document_type": best_type,
             "legacy_code": results[0].payload.get("legacy_code", 99),
@@ -776,7 +776,7 @@ def _rag_classify_document(ocr_text: str, min_score: float = 0.82) -> Optional[D
             "rag_votes": count,
         }
     except Exception as exc:
-        logger.debug("RAG classify error: %s", exc)
+        import logging as _logging; _logging.getLogger("afi.rag").debug("RAG classify error: %s", exc)
         return None
 
 
@@ -805,7 +805,7 @@ def _rag_index_document(case_id: str, filename: str, ocr_text: str, document_typ
         )])
         return True
     except Exception as exc:
-        logger.debug("RAG index error: %s", exc)
+        import logging as _logging; _logging.getLogger("afi.rag").debug("RAG index error: %s", exc)
         return False
 
 # ── Tabla asesores Colmena ──────────────────────────────────
@@ -896,7 +896,7 @@ def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, exp
                 ocr_tmp = str(doc_tmp.get("ocr_text") or doc_tmp.get("text_preview") or "")
                 code_tmp = DOC_TYPE_TO_PRIMARY_CODE.get(normalize_haystack(expected_type).replace(" ", "_"), 99)
                 _rag_index_document(case_id, filename, ocr_tmp, normalize_haystack(expected_type).replace(" ", "_"), code_tmp)
-                logger.info("RAG aprendio correccion: %s -> %s", filename, expected_type)
+                import logging as _logging; _logging.getLogger("afi.rag").info("RAG aprendio correccion: %s -> %s", filename, expected_type)
                 review_store["rag_aprendio"] = True
                 review_store["rag_mensaje"] = f"Gracias. RAG ha aprendido que este documento es '{expected_type}'. Lo recordaré para futuros contratos similares."
         except Exception as _rag_exc:
