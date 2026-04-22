@@ -574,10 +574,16 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
         row = normalize_text(record.get("_row", ""))
         eps_norm = _normalize_catalog_name(eps_value) if eps_value else ""
         afp_norm = _normalize_catalog_name(afp_value) if afp_value else ""
-        if eps_value and eps_norm not in eps_catalog:
-            invalid_eps.append((documento, eps_value, sheet, row))
-        if afp_value and afp_norm not in afp_catalog:
-            invalid_afp.append((documento, afp_value, sheet, row))
+        # Verificar EPS: coincidencia exacta o parcial (nombre largo en XLSX vs nombre corto en catalogo)
+        if eps_value:
+            eps_match = eps_norm in eps_catalog or any(cat in eps_norm for cat in eps_catalog if len(cat) >= 5)
+            if not eps_match:
+                invalid_eps.append((documento, eps_value, sheet, row))
+        # Verificar AFP: coincidencia exacta o parcial
+        if afp_value:
+            afp_match = afp_norm in afp_catalog or any(cat in afp_norm for cat in afp_catalog if len(cat) >= 5)
+            if not afp_match:
+                invalid_afp.append((documento, afp_value, sheet, row))
     if invalid_eps:
         blockers.append(
             {
