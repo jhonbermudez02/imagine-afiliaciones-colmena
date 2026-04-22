@@ -1653,7 +1653,15 @@ async function loadReporteSidebar() {
     try {
         const r = await fetchWithRetry(`${API_URL}/api/cases/production-summary`);
         const data = await r.json();
-        const cases = Array.isArray(data.cases) ? data.cases : [];
+        let cases = Array.isArray(data.cases) ? data.cases : [];
+        // Perfil Colmena: solo mostrar contratos aprobables
+        if (readProfile() === 'colmena') {
+            cases = cases.filter(c => {
+                const { status, finalStatus } = resolveCase(c);
+                const s = normalizeText(status), f = normalizeText(finalStatus);
+                return s === 'completed' && (f.includes('aprob') || f === 'ok' || f === 'completed' || !f);
+            });
+        }
         cases.sort((a,b) => String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
         renderReporteSidebar(cases);
         // Si hay un caso activo, seleccionarlo — pero NO recargar el reporte si ya se está mostrando
