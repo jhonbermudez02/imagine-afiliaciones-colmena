@@ -933,6 +933,7 @@ function renderWorkflowResult(payload) {
     const trabajadores = resumen.numero_trabajadores ?? profile.numero_trabajadores ?? 'n/d';
     const sedes = resumen.numero_sedes ?? profile.numero_sedes ?? 'n/d';
     const nomina = profile.nomina_total ? formatCurrency(profile.nomina_total) : 'n/d';
+    const nroAfiliacion = (a.xlsx_profile?.form_fields?.numero_radicacion) || profile.numero_contrato || profile.nro_contrato || '';
     const isAprobable = normalizeText(estado).includes('aprob') || normalizeText(wf.status||'') === 'completed';
     const isNoAprobado = normalizeText(wf.status||'') === 'stopped_prevalidacion';
     const decision = a.decision || {};
@@ -951,7 +952,7 @@ function renderWorkflowResult(payload) {
             <div>
                 <div style="margin-bottom:6px"><span class="pill pill-${stateClass}">${escapeHtml(stateLabel)}</span></div>
                 <div class="result-empresa">${escapeHtml(empresa)}</div>
-                <div class="result-nit">NIT: ${escapeHtml(nit)}</div>
+                <div class="result-nit">NIT: ${escapeHtml(nit)}${nroAfiliacion ? ` · Contrato ${escapeHtml(nroAfiliacion)}` : ''}</div>
             </div>
         </div>
         <div class="result-body">
@@ -1498,6 +1499,7 @@ function renderValidacionOCR(container, payload) {
     const profile = (a.xlsx_profile || {}).profile || {};
     const empresa = profile.empresa || payload.label || 'n/d';
     const nit = profile.nit || 'n/d';
+    const nroAfiliacion = a.xlsx_profile?.form_fields?.numero_radicacion || profile.numero_contrato || '';
 
     // Extraer validaciones adicionales de múltiples fuentes
     const vrMatches = a.validacion_resumen?.matches || a.reporte_ejecutivo?.matches || {};
@@ -1511,7 +1513,7 @@ function renderValidacionOCR(container, payload) {
         <button class="btn-secondary" id="validacionBackBtn" type="button" style="font-size:11px;padding:5px 10px">← Otro contrato</button>
         <div>
             <div style="font-size:13px;font-weight:700">${escapeHtml(empresa)}</div>
-            <div style="font-size:12px;color:var(--c-text-2)">NIT: ${escapeHtml(nit)}</div>
+            <div style="font-size:12px;color:var(--c-text-2)">NIT: ${escapeHtml(nit)}${nroAfiliacion ? ` · Contrato ${escapeHtml(nroAfiliacion)}` : ''}</div>
         </div>
     </div>`;
 
@@ -1759,6 +1761,7 @@ function renderReporte(container, payload) {
 
     const empresa = resumen.empresa || profile.empresa || payload.label || 'n/d';
     const nit = resumen.nit || profile.nit || 'n/d';
+    const nroAfiliacion = a.xlsx_profile?.form_fields?.numero_radicacion || profile.numero_contrato || profile.nro_contrato || '';
     const estado = resumen.estado || decision.recommended_status || wf.status || 'n/d';
     const trabajadores = resumen.numero_trabajadores ?? profile.numero_trabajadores ?? 'n/d';
     const sedes = resumen.numero_sedes ?? profile.numero_sedes ?? 'n/d';
@@ -1863,7 +1866,7 @@ function renderReporte(container, payload) {
             <div>
                 <div class="report-empresa">${escapeHtml(empresa)}</div>
                 <div class="report-nit">
-                    NIT: <strong>${escapeHtml(nit)}</strong>
+                    NIT: <strong>${escapeHtml(nit)}</strong>${nroAfiliacion ? ` · Contrato <strong>${escapeHtml(nroAfiliacion)}</strong>` : ''}
                     ${legacyNumAfil ? ` · Contrato: <strong>${escapeHtml(legacyNumAfil)}</strong>` : ''}
                     · ${escapeHtml(fecha)}
                 </div>
@@ -2551,7 +2554,7 @@ async function doSearch(query) {
                     <div class="search-result-main">
                         <div class="search-result-empresa">${escapeHtml(empresa)}</div>
                         <div class="search-result-meta">
-                            ${nit !== 'n/d' ? `NIT ${escapeHtml(nit)} · ` : ''}${escapeHtml(fecha)}
+                            ${nit !== 'n/d' ? `NIT ${escapeHtml(nit)}` : ''}${nroAfiliacion ? ` · Contrato ${escapeHtml(nroAfiliacion)}` : ''} · ${escapeHtml(fecha)}
                         </div>
                         ${blockers.length ? `<div style="font-size:11px;color:var(--c-err);margin-top:3px">
                             ${blockers.length} bloqueante${blockers.length>1?'s':''}: ${escapeHtml(String(blockers[0]).slice(0,60))}${blockers[0]?.length>60?'...':''}
