@@ -2452,12 +2452,12 @@ function renderReporte(container, payload) {
         let visorHTML = '';
         if (entregaDocs.length) {
             const firstDoc = entregaDocs[0];
-            const pdfUrl = `${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(firstDoc.filename||'')}`;
+            const pdfUrl = `${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(firstDoc.filename||'')}?inline=true`;
             visorHTML = `
                 <div style="font-size:12px;font-weight:600;margin-top:12px;margin-bottom:6px">📄 Documento fuente — ${escapeHtml(firstDoc.filename||'Entrega Doc')}</div>
                 <iframe src="${escapeHtml(pdfUrl)}" style="width:100%;height:480px;border:1px solid var(--c-border);border-radius:6px" title="Entrega Doc"></iframe>
                 ${entregaDocs.length > 1 ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${entregaDocs.slice(1).map(d => {
-                    const u = `${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(d.filename||'')}`;
+                    const u = `${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(d.filename||'')}?inline=true`;
                     return `<button class="btn-secondary" style="font-size:11px" onclick="this.closest('.report-data-panel').querySelector('iframe').src='${escapeHtml(u)}'">📄 ${escapeHtml(d.filename||'')}</button>`;
                 }).join('')}</div>` : ''}`;
         }
