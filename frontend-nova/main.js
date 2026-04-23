@@ -2269,12 +2269,51 @@ function renderReporte(container, payload) {
                             <tbody>${rows}</tbody></table></div>`;
                     }
 
+                    // Datos de sede desde form_fields
+                    const formFields = a.xlsx_profile?.form_fields || {};
+                    function getSedeInfo(sedeName) {
+                        // Sede 01 → sede_principal, Sede 02 → buscar campo alternativo
+                        const num = sedeName.match(/\d+/)?.[0] || '01';
+                        const prefix = num === '01' ? 'sede_principal' : `sede_${num}`;
+                        const info = {
+                            codigo: formFields[`${prefix}_codigo`] || formFields.sede_principal_codigo || '',
+                            nombre: formFields[`${prefix}_nombre`] || formFields.sede_principal_nombre || '',
+                            direccion: formFields[`${prefix}_direccion`] || formFields.sede_principal_direccion || '',
+                            municipio: formFields[`${prefix}_municipio_distrito`] || formFields.sede_principal_municipio_distrito || '',
+                            departamento: formFields[`${prefix}_departamento`] || formFields.sede_principal_departamento || '',
+                            telefono: formFields[`${prefix}_telefono`] || formFields.sede_principal_telefono || '',
+                            correo: formFields[`${prefix}_correo`] || formFields.sede_principal_correo || '',
+                            zona: formFields[`${prefix}_zona`] || formFields.sede_principal_zona || '',
+                            responsable: formFields[`responsable_${prefix}_nombre_completo`] || formFields.responsable_sede_principal_nombre_completo || '',
+                            doc_responsable: formFields[`responsable_${prefix}_numero_documento`] || formFields.responsable_sede_principal_numero_documento || '',
+                        };
+                        return info;
+                    }
+
+                    function renderSedeInfoCard(info) {
+                        const fields = [
+                            ['Código', info.codigo], ['Nombre', info.nombre],
+                            ['Dirección', info.direccion], ['Municipio', info.municipio],
+                            ['Departamento', info.departamento], ['Zona', info.zona],
+                            ['Teléfono', info.telefono], ['Correo', info.correo],
+                            ['Responsable', info.responsable], ['Doc. Responsable', info.doc_responsable],
+                        ].filter(([,v]) => v);
+                        if (!fields.length) return '';
+                        return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;margin-bottom:12px;padding:10px;background:var(--c-bg);border-radius:6px;border:1px solid var(--c-border)">
+                            ${fields.map(([k,v]) => `<div style="font-size:11px">
+                                <span style="color:var(--c-text-2);font-weight:600">${escapeHtml(k)}: </span>
+                                <span style="color:var(--c-text-1)">${escapeHtml(String(v))}</span>
+                            </div>`).join('')}
+                        </div>`;
+                    }
+
                     function renderBySede() {
                         return sedeNames.map(sedeName => {
                             const workers = bySede[sedeName] || [];
                             const total = workerCounts[sedeName] ?? workers.length;
                             if (!total && !workers.length) return '';
                             const sal = salaryCounts[sedeName] ? '· $ ' + Number(salaryCounts[sedeName]).toLocaleString('es-CO') : '';
+                            const sedeInfo = getSedeInfo(sedeName);
                             // Agrupar por centro dentro de la sede
                             const porCentro = {};
                             for (const w of workers) {
@@ -2291,6 +2330,7 @@ function renderReporte(container, payload) {
                                 <div style="font-weight:600;font-size:12px;color:var(--c-text-1);padding:6px 8px;background:var(--c-info-bg);border-radius:4px;margin-bottom:8px">
                                     🏢 ${escapeHtml(sedeName)} · ${total} trabajador(es) ${escapeHtml(sal)}
                                 </div>
+                                ${renderSedeInfoCard(sedeInfo)}
                                 ${centrosHTML || buildWorkerTable(workers)}
                             </div>`;
                         }).filter(Boolean).join('');

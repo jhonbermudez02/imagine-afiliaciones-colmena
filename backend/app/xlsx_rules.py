@@ -222,6 +222,51 @@ def _rag_validate_eps_afp(value: str, tipo: str) -> bool:
     except Exception:
         return True  # Si falla RAG, no bloquear
 
+
+# Palabras válidas en nombres de EPS/AFP del dominio colombiano
+_EPS_AFP_DOMAIN_WORDS = {
+    "FONDO","PENSIONES","INSTITUTO","SEGUROS","SOCIALES","PROMOTORA",
+    "ENTIDAD","MOVILIDAD","NUEVA","SALUD","TOTAL","ALIANZA","NACIONAL",
+    "COLOMBIA","COLOMBIANA","INTEGRAL","VIDA","MEDICA","COMPANEROS",
+    "COMPENSAR","COLPENSIONES","COLPATRIA","COLFONDOS","SKANDIA","PORVENIR",
+    "PROTECCION","HORIZONTE","SURA","CAFAM","SANITAS","COOSALUD",
+    "COOEMSSANAR","MALLAMAS","MUTUAL","COOPERATIVA","FAMILIAR","REGIONAL",
+    "OCCIDENTAL","NORTE","SUROCCIDENTE","LITORAL","CAPITAL","MEDIMAS",
+    "COOSALUD","NUEVA","COMFENALCO","SAVIA","ALIANSALUD","GOLDEN","GROUP"
+}
+_EPS_AFP_VALID_TOKENS: set = set()  # se llena al cargar catalogos
+
+def _get_entity_tokens(value: str) -> set:
+    import unicodedata as _ud
+    text = str(value).strip().upper()
+    text = "".join(ch for ch in _ud.normalize("NFKD", text) if not _ud.combining(ch))
+    stop = {"S","A","SA","SAS","LTDA","EPS","AFP","DE","DEL","LA","LOS","Y","E","EL","EN","CON","AL"}
+    return set(t for t in re.split(r"[^A-Z0-9]+", text) if t and t not in stop and len(t) >= 3)
+
+def _build_valid_tokens(eps_catalog_path: Path, afp_catalog_path: Path) -> set:
+    global _EPS_AFP_VALID_TOKENS
+    if _EPS_AFP_VALID_TOKENS:
+        return _EPS_AFP_VALID_TOKENS
+    valid = set(_EPS_AFP_DOMAIN_WORDS)
+    for path_c in [eps_catalog_path, afp_catalog_path]:
+        try:
+            for item in json.loads(path_c.read_text(encoding="utf-8")):
+                if isinstance(item, dict) and item.get("nombre"):
+                    valid.update(_get_entity_tokens(item["nombre"]))
+        except Exception:
+            pass
+    _EPS_AFP_VALID_TOKENS = valid
+    return valid
+
+def _check_entity_valid(value: str, catalog_token_sets: list, valid_tokens: set) -> bool:
+    val_tokens = _get_entity_tokens(value)
+    if not val_tokens:
+        return True
+    unknown = val_tokens - valid_tokens
+    if unknown:
+        return False
+    return any(cat and cat.issubset(val_tokens) for cat in catalog_token_sets)
+
 def _normalize_catalog_name(value: Any) -> str:
     text = normalize_text(value).upper()
     text = "".join(ch for ch in unicodedata.normalize("NFKD", text) if not unicodedata.combining(ch))
@@ -597,14 +642,14 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
         row = normalize_text(record.get("_row", ""))
         eps_norm = _normalize_catalog_name(eps_value) if eps_value else ""
         afp_norm = _normalize_catalog_name(afp_value) if afp_value else ""
-        # Verificar EPS via RAG (semantico) con fallback a catalogo
+        # Verificar EPS via tokens del dominio
         if eps_value:
-            eps_match = eps_norm in eps_catalog or _rag_validate_eps_afp(eps_value, "eps")
+            eps_match = eps_norm in eps_catalog or _check_entity_valid(eps_value, eps_token_sets, valid_tokens)
             if not eps_match:
                 invalid_eps.append((documento, eps_value, sheet, row))
-        # Verificar AFP via RAG (semantico) con fallback a catalogo
+        # Verificar AFP via tokens del dominio
         if afp_value:
-            afp_match = afp_norm in afp_catalog or _rag_validate_eps_afp(afp_value, "afp")
+            afp_match = afp_norm in afp_catalog or _check_entity_valid(afp_value, afp_token_sets, valid_tokens)
             if not afp_match:
                 invalid_afp.append((documento, afp_value, sheet, row))
     if invalid_eps:
