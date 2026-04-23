@@ -3097,6 +3097,38 @@ function init() {
     } else {
         openLogin();
     }
+
+    // Widget flotante de recursos — polling cada 20s
+    async function updateResourceWidget() {
+        try {
+            const [hR, cR] = await Promise.all([
+                fetch(`${API_URL}/health`).catch(() => null),
+                fetch(`${API_URL}/api/cases/production-summary`).catch(() => null),
+            ]);
+            const h = hR?.ok ? await hR.json() : {};
+            const c = cR?.ok ? await cR.json() : {};
+            const res = h.resources || {};
+            const cases = c.cases || [];
+            const enCola = cases.filter(x => ['queued','processing','pending'].includes(String(x.status||''))).length;
+            const isOk = h.api === 'healthy';
+
+            const dot = document.getElementById('rwDot');
+            const status = document.getElementById('rwStatus');
+            const ram = document.getElementById('rwRam');
+            const rss = document.getElementById('rwRss');
+            const queueEl = document.getElementById('rwQueue');
+            const queueVal = document.getElementById('rwQueueVal');
+
+            if (dot) dot.style.background = isOk ? 'var(--c-ok)' : 'var(--c-err)';
+            if (status) status.textContent = isOk ? 'OK' : 'Error';
+            if (ram) ram.textContent = res.mem_used_mb ? `${res.mem_used_mb}MB` : '—';
+            if (rss) rss.textContent = res.process_rss_mb ? `${res.process_rss_mb}MB` : '—';
+            if (queueEl) queueEl.style.display = enCola > 0 ? '' : 'none';
+            if (queueVal) queueVal.textContent = enCola;
+        } catch {}
+    }
+    updateResourceWidget();
+    setInterval(updateResourceWidget, 20000);
 }
 
 init();
