@@ -2215,20 +2215,20 @@ function renderReporte(container, payload) {
                     `;
                 }
             } else if (panelType === 'sedes') {
-                const xlsxRecords = a.xlsx_profile?.records || [];
+                const sedeRecords = a.xlsx_profile?.records || [];
                 const workerCounts = a.xlsx_profile?.worker_sheet_counts || {};
                 const salaryCounts = a.xlsx_profile?.worker_sheet_salary_totals || {};
 
                 // Agrupar por sede
                 const bySede = {};
-                for (const r of xlsxRecords) {
+                for (const r of sedeRecords) {
                     const sede = r._sheet || 'Sin sede';
                     if (!bySede[sede]) bySede[sede] = [];
                     bySede[sede].push(r);
                 }
                 // Agrupar por centro de trabajo
                 const byCentro = {};
-                for (const r of xlsxRecords) {
+                for (const r of sedeRecords) {
                     const centro = String(r.codigo_del_centro_de_trabajo || 'Sin centro');
                     if (!byCentro[centro]) byCentro[centro] = [];
                     byCentro[centro].push(r);
@@ -2236,7 +2236,7 @@ function renderReporte(container, payload) {
 
                 const sedeNames = Object.keys(workerCounts).length ? Object.keys(workerCounts) : Object.keys(bySede);
 
-                if (!sedeNames.length && !xlsxRecords.length) {
+                if (!sedeNames.length && !sedeRecords.length) {
                     dataPanel.innerHTML = `<div style="padding:12px;font-size:12px;color:var(--c-text-2)">No hay información de sedes disponible.</div>`;
                 } else {
                     const cols = [
