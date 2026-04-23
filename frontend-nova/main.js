@@ -2338,14 +2338,27 @@ function renderReporte(container, payload) {
                                 </div>
                                 <div style="padding:12px">
                                     ${infoCard}
-                                    ${Object.entries(porCentro).map(([centro, cWorkers]) => `
-                                        <details style="margin-bottom:8px;border-left:3px solid var(--c-blue);padding-left:10px">
-                                            <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--c-text-1);padding:6px 0;list-style:none;display:flex;align-items:center;justify-content:space-between">
-                                                <span>🏭 Centro de costo ${escapeHtml(centro)}</span>
-                                                <span style="font-weight:400;color:var(--c-text-2)">${cWorkers.length} trabajador(es) ▼</span>
-                                            </summary>
-                                            <div style="padding-top:8px">${buildWorkerTable(cWorkers)}</div>
-                                        </details>`).join('')}
+                                    ${Object.entries(porCentro).map(([centro, cWorkers], ci) => {
+                                        const cId = `ct_${si}_${ci}`;
+                                        return `<div style="margin-bottom:10px;border:0.5px solid var(--c-border);border-radius:6px;overflow:hidden">
+                                            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--c-bg-2)">
+                                                <span style="font-size:12px;font-weight:600;color:var(--c-text-1)">🏭 Centro de costo ${escapeHtml(centro)}</span>
+                                                <div style="display:flex;gap:6px">
+                                                    <button class="classif-sort-btn" onclick="
+                                                        var t=document.getElementById('${cId}_trab');
+                                                        var i=document.getElementById('${cId}_info');
+                                                        var open=t.style.display!=='none';
+                                                        t.style.display=open?'none':'';
+                                                        if(!open&&i)i.style.display='none';
+                                                        this.classList.toggle('active',!open);
+                                                        var ib=this.previousElementSibling;
+                                                        if(ib)ib.classList.remove('active');
+                                                    " type="button">👷 Trabajadores (${cWorkers.length})</button>
+                                                </div>
+                                            </div>
+                                            <div id="${cId}_trab" style="display:none;padding:10px">${buildWorkerTable(cWorkers)}</div>
+                                        </div>`;
+                                    }).join('')}
                                 </div>
                             </div>`;
                         });
