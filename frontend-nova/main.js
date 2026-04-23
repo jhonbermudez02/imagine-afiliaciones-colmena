@@ -2322,19 +2322,23 @@ function renderReporte(container, payload) {
                             }
                             const numCentros = Object.keys(porCentro).length;
                             const infoCard = renderSedeInfoCard(sedeInfo);
-                            const sedeId = `sp${si}`;
 
-                            html += `<div style="margin-bottom:12px;border:0.5px solid var(--c-border);border-radius:8px;overflow:hidden">
-                                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--c-info-bg)">
-                                    <span style="font-weight:600;font-size:12px;color:var(--c-text-1)">🏢 ${escapeHtml(sedeName.replace(' - Trabajadores',''))}</span>
-                                    <span style="font-size:11px;color:var(--c-text-2)">Centros: <strong>${numCentros}</strong> · Trabajadores: <strong>${total}</strong>${sal ? ' · ' + escapeHtml(sal) : ''}</span>
+                            html += `<div style="margin-bottom:16px;border:0.5px solid var(--c-border);border-radius:8px;overflow:hidden">
+                                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--c-info-bg)">
+                                    <span style="font-weight:600;font-size:13px;color:var(--c-text-1)">🏢 ${escapeHtml(sedeName.replace(' - Trabajadores',''))}</span>
+                                    <span style="font-size:12px;color:var(--c-text-2);display:flex;gap:16px">
+                                        <span>Centros: <strong>${numCentros}</strong></span>
+                                        <span>Trabajadores: <strong>${total}</strong></span>
+                                        ${sal ? `<span style="color:var(--c-text-1);font-weight:500">${escapeHtml(sal)}</span>` : ''}
+                                    </span>
                                 </div>
                                 <div style="padding:12px">
-                                    ${infoCard ? `<details style="margin-bottom:8px"><summary style="cursor:pointer;font-size:11px;font-weight:600;color:var(--c-text-2);padding:4px 0">Ver info sede</summary><div style="padding-top:8px">${infoCard}</div></details>` : ''}
-                                    ${Object.entries(porCentro).map(([centro, cWorkers], ci) => `
-                                        <details style="margin-bottom:6px;border-left:3px solid var(--c-blue);padding-left:10px">
-                                            <summary style="cursor:pointer;font-size:11px;font-weight:600;color:var(--c-text-1);padding:4px 0">
-                                                🏭 Centro de costo ${escapeHtml(centro)} · ${cWorkers.length} trabajador(es)
+                                    ${infoCard}
+                                    ${Object.entries(porCentro).map(([centro, cWorkers]) => `
+                                        <details style="margin-bottom:8px;border-left:3px solid var(--c-blue);padding-left:10px">
+                                            <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--c-text-1);padding:6px 0;list-style:none;display:flex;align-items:center;justify-content:space-between">
+                                                <span>🏭 Centro de costo ${escapeHtml(centro)}</span>
+                                                <span style="font-weight:400;color:var(--c-text-2)">${cWorkers.length} trabajador(es) ▼</span>
                                             </summary>
                                             <div style="padding-top:8px">${buildWorkerTable(cWorkers)}</div>
                                         </details>`).join('')}
