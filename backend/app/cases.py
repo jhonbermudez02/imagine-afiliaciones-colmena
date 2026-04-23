@@ -3786,7 +3786,7 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
     return {
         "sheets": sheets,
         "profile": profile,
-        "form_fields": {**form_fields, **{k:v for sede in (sede_info_extra if "sede_info_extra" in dir() else {}).values() for k,v in sede.items() if v}},
+        "form_fields": {**form_fields, **{k:v for sede in (clean_preview.get("sede_info_extra") or {}).values() for k,v in sede.items() if v}},
         "flat_pairs": flat_pairs,
         "records": records,
         "worker_sheet_counts": worker_sheet_counts,
@@ -3905,6 +3905,7 @@ def _generate_clean_from_workbook(workbook: Any, excel_filename: str) -> Dict[st
     return {
         "ok": bool(contrato_lines),
         "source_sheets": {"main_sheet": main_sheet, "worker_sheets": worker_sheets},
+        "sede_info_extra": sede_info_extra,
         "contrato_clean": {
             "filename": f"contrato_{safe_name}_clean.txt",
             "lines": len(contrato_lines),
