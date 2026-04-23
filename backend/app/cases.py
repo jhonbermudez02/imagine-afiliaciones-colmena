@@ -3786,7 +3786,7 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
     return {
         "sheets": sheets,
         "profile": profile,
-        "form_fields": {**form_fields, **{k:v for sede in sede_info_extra.values() for k,v in sede.items() if v}},
+        "form_fields": {**form_fields, **{k:v for sede in (sede_info_extra if "sede_info_extra" in dir() else {}).values() for k,v in sede.items() if v}},
         "flat_pairs": flat_pairs,
         "records": records,
         "worker_sheet_counts": worker_sheet_counts,
