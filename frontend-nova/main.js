@@ -2404,15 +2404,6 @@ function renderReporte(container, payload) {
                     `;
                     dataPanel.querySelector('#btnVerSedes')?.addEventListener('click', () => {
                         dataPanel.querySelector('#sedesContent').innerHTML = renderBySede();
-                        dataPanel.querySelectorAll('.sede-toggle-btn').forEach(btn => {
-                            btn.addEventListener('click', () => {
-                                const target = document.getElementById(btn.dataset.target);
-                                if (!target) return;
-                                const open = target.style.display !== 'none';
-                                target.style.display = open ? 'none' : '';
-                                btn.textContent = open ? btn.textContent.replace('▲','▼') : btn.textContent.replace('▼','▲');
-                            });
-                        });
                         dataPanel.querySelector('#btnVerSedes')?.classList.add('active');
                         dataPanel.querySelector('#btnVerCentros')?.classList.remove('active');
                     });
@@ -2422,18 +2413,20 @@ function renderReporte(container, payload) {
                         dataPanel.querySelector('#btnVerSedes').classList.remove('active');
                     });
 
-                    // Listeners iniciales para la vista por sede
-                    setTimeout(() => {
-                        dataPanel.querySelectorAll('.sede-toggle-btn').forEach(btn => {
-                            btn.addEventListener('click', () => {
-                                const target = document.getElementById(btn.dataset.target);
-                                if (!target) return;
-                                const open = target.style.display !== 'none';
-                                target.style.display = open ? 'none' : '';
-                                btn.textContent = open ? btn.textContent.replace('▲','▼') : btn.textContent.replace('▼','▲');
-                            });
-                        });
-                    }, 100);
+                    // Event delegation para toggles de sede
+                    dataPanel.addEventListener('click', function(e) {
+                        const btn = e.target.closest('.sede-toggle-btn');
+                        if (!btn) return;
+                        const targetId = btn.dataset.target;
+                        if (!targetId) return;
+                        const target = document.getElementById(targetId);
+                        if (!target) return;
+                        const open = target.style.display !== 'none';
+                        target.style.display = open ? 'none' : '';
+                        btn.textContent = open
+                            ? btn.textContent.replace('▲','▼')
+                            : btn.textContent.replace('▼','▲');
+                    }, { once: false });
                 }
             } else if (panelType === 'comisiones') {
                 // Panel de comisiones con visor de documento
