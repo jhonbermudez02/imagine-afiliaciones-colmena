@@ -2272,22 +2272,21 @@ function renderReporte(container, payload) {
                     // Datos de sede desde form_fields
                     const formFields = a.xlsx_profile?.form_fields || {};
                     function getSedeInfo(sedeName) {
-                        // Sede 01 → sede_principal, Sede 02 → buscar campo alternativo
-                        const num = sedeName.match(/\d+/)?.[0] || '01';
-                        const prefix = num === '01' ? 'sede_principal' : `sede_${num}`;
-                        const info = {
-                            codigo: formFields[`${prefix}_codigo`] || formFields.sede_principal_codigo || '',
-                            nombre: formFields[`${prefix}_nombre`] || formFields.sede_principal_nombre || '',
-                            direccion: formFields[`${prefix}_direccion`] || formFields.sede_principal_direccion || '',
-                            municipio: formFields[`${prefix}_municipio_distrito`] || formFields.sede_principal_municipio_distrito || '',
-                            departamento: formFields[`${prefix}_departamento`] || formFields.sede_principal_departamento || '',
-                            telefono: formFields[`${prefix}_telefono`] || formFields.sede_principal_telefono || '',
-                            correo: formFields[`${prefix}_correo`] || formFields.sede_principal_correo || '',
-                            zona: formFields[`${prefix}_zona`] || formFields.sede_principal_zona || '',
-                            responsable: formFields[`responsable_${prefix}_nombre_completo`] || formFields.responsable_sede_principal_nombre_completo || '',
-                            doc_responsable: formFields[`responsable_${prefix}_numero_documento`] || formFields.responsable_sede_principal_numero_documento || '',
+                        const num = parseInt(sedeName.match(/\d+/)?.[0] || '1');
+                        // La sede 01 siempre es sede_principal
+                        const prefix = num === 1 ? 'sede_principal' : `sede_0${num}`;
+                        return {
+                            codigo: formFields[`${prefix}_codigo`] || '',
+                            nombre: formFields[`${prefix}_nombre`] || '',
+                            direccion: formFields[`${prefix}_direccion`] || '',
+                            municipio: formFields[`${prefix}_municipio_distrito`] || '',
+                            departamento: formFields[`${prefix}_departamento`] || '',
+                            telefono: formFields[`${prefix}_telefono`] || '',
+                            correo: formFields[`${prefix}_correo`] || '',
+                            zona: formFields[`${prefix}_zona`] || '',
+                            responsable: formFields[`responsable_${prefix}_nombre_completo`] || '',
+                            doc_responsable: formFields[`responsable_${prefix}_numero_documento`] || '',
                         };
-                        return info;
                     }
 
                     function renderSedeInfoCard(info) {
