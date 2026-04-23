@@ -2307,32 +2307,74 @@ function renderReporte(container, payload) {
                     }
 
                     function renderBySede() {
-                        return sedeNames.map(sedeName => {
+                        let html = '';
+                        sedeNames.forEach((sedeName, si) => {
                             const workers = bySede[sedeName] || [];
                             const total = workerCounts[sedeName] ?? workers.length;
-                            if (!total && !workers.length) return '';
-                            const sal = salaryCounts[sedeName] ? '· $ ' + Number(salaryCounts[sedeName]).toLocaleString('es-CO') : '';
+                            if (!total && !workers.length) return;
+                            const sal = salaryCounts[sedeName] ? '$ ' + Number(salaryCounts[sedeName]).toLocaleString('es-CO') : '';
                             const sedeInfo = getSedeInfo(sedeName);
-                            // Agrupar por centro dentro de la sede
+                            const sedeId = `sede_${si}`;
+
+                            // Agrupar por centro
                             const porCentro = {};
                             for (const w of workers) {
                                 const c = String(w.codigo_del_centro_de_trabajo || 'Sin centro');
                                 if (!porCentro[c]) porCentro[c] = [];
                                 porCentro[c].push(w);
                             }
-                            const centrosHTML = Object.entries(porCentro).map(([centro, cWorkers]) => `
-                                <div style="margin-bottom:12px;padding-left:12px;border-left:2px solid var(--c-border)">
-                                    <div style="font-size:11px;font-weight:600;color:var(--c-text-2);margin-bottom:6px">🏭 Centro de trabajo ${escapeHtml(centro)} · ${cWorkers.length} trabajador(es)</div>
-                                    ${buildWorkerTable(cWorkers)}
-                                </div>`).join('');
-                            return `<div style="margin-bottom:20px">
-                                <div style="font-weight:600;font-size:12px;color:var(--c-text-1);padding:6px 8px;background:var(--c-info-bg);border-radius:4px;margin-bottom:8px">
-                                    🏢 ${escapeHtml(sedeName)} · ${total} trabajador(es) ${escapeHtml(sal)}
+                            const numCentros = Object.keys(porCentro).length;
+
+                            // Encabezado de sede con resumen y botones
+                            html += `<div style="margin-bottom:16px;border:0.5px solid var(--c-border);border-radius:8px;overflow:hidden">
+                                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--c-info-bg);cursor:pointer" onclick="
+                                    var p=document.getElementById('${sedeId}_content');
+                                    p.style.display=p.style.display==='none'?'':'none';
+                                ">
+                                    <div style="font-weight:600;font-size:12px;color:var(--c-text-1)">
+                                        🏢 ${escapeHtml(sedeName.replace(' - Trabajadores',''))}
+                                    </div>
+                                    <div style="display:flex;gap:12px;font-size:11px;color:var(--c-text-2)">
+                                        <span>Centros de costo: <strong>${numCentros}</strong></span>
+                                        <span>Trabajadores: <strong>${total}</strong></span>
+                                        ${sal ? `<span>${escapeHtml(sal)}</span>` : ''}
+                                    </div>
                                 </div>
-                                ${renderSedeInfoCard(sedeInfo)}
-                                ${centrosHTML || buildWorkerTable(workers)}
+                                <div id="${sedeId}_content" style="display:none;padding:12px">
+                                    
+                                    <!-- Info sede -->
+                                    <div style="margin-bottom:10px">
+                                        <button class="classif-sort-btn" style="margin-bottom:8px" onclick="
+                                            var p=document.getElementById('${sedeId}_info');
+                                            p.style.display=p.style.display==='none'?'':'none';
+                                            this.textContent=p.style.display===''?'▲ Ocultar info sede':'▼ Ver info sede';
+                                        ">▼ Ver info sede</button>
+                                        <div id="${sedeId}_info" style="display:none">
+                                            ${renderSedeInfoCard(sedeInfo)}
+                                        </div>
+                                    </div>
+
+                                    <!-- Centros de costo -->
+                                    ${Object.entries(porCentro).map(([centro, cWorkers], ci) => {
+                                        const centroId = `${sedeId}_centro_${ci}`;
+                                        return `<div style="margin-bottom:10px;border-left:3px solid var(--c-blue);padding-left:10px">
+                                            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                                                <span style="font-size:11px;font-weight:600;color:var(--c-text-1)">🏭 Centro de costo ${escapeHtml(centro)}</span>
+                                                <button class="classif-sort-btn" onclick="
+                                                    var p=document.getElementById('${centroId}');
+                                                    p.style.display=p.style.display==='none'?'':'none';
+                                                    this.textContent=p.style.display===''?'▲ Ocultar trabajadores':'▼ Ver ${cWorkers.length} trabajador(es)';
+                                                ">▼ Ver ${cWorkers.length} trabajador(es)</button>
+                                            </div>
+                                            <div id="${centroId}" style="display:none">
+                                                ${buildWorkerTable(cWorkers)}
+                                            </div>
+                                        </div>`;
+                                    }).join('')}
+                                </div>
                             </div>`;
-                        }).filter(Boolean).join('');
+                        });
+                        return html || '<div style="color:var(--c-text-2);font-size:12px">Sin sedes con trabajadores.</div>';
                     }
 
                     function renderByCentro() {
