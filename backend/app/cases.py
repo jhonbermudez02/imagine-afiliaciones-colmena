@@ -3523,9 +3523,9 @@ def _extract_sede_info_from_sheet(sheet_obj: Any, sede_num: int) -> Dict[str, An
         f"{prefix}_zona": sv(14, 9),
         f"{prefix}_telefono": only_digits(sv(15, 6)),
         f"{prefix}_correo": sv(16, 6),
-        f"responsable_{prefix}_nombre_completo": " ".join(filter(None, [sv(12,13), sv(12,15), sv(13,13), sv(13,15)])).strip(),
+        f"responsable_{prefix}_nombre_completo": " ".join(filter(None, [sv(12,13), sv(12,17), sv(13,13), sv(13,17)])).strip(),
         f"responsable_{prefix}_tipo_documento": sv(14,13),
-        f"responsable_{prefix}_numero_documento": only_digits(sv(14,15)),
+        f"responsable_{prefix}_numero_documento": only_digits(sv(14,17)),
     }
 
 def _extract_worker_sheet_control_totals(rows: List[tuple[Any, ...]]) -> Dict[str, int]:
