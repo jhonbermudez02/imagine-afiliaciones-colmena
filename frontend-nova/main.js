@@ -2314,7 +2314,6 @@ function renderReporte(container, payload) {
                             if (!total && !workers.length) return;
                             const sal = salaryCounts[sedeName] ? '$ ' + Number(salaryCounts[sedeName]).toLocaleString('es-CO') : '';
                             const sedeInfo = getSedeInfo(sedeName);
-                            const sedeId = `sede_panel_${si}`;
                             const porCentro = {};
                             for (const w of workers) {
                                 const c = String(w.codigo_del_centro_de_trabajo || 'Sin centro');
@@ -2323,58 +2322,25 @@ function renderReporte(container, payload) {
                             }
                             const numCentros = Object.keys(porCentro).length;
                             const infoCard = renderSedeInfoCard(sedeInfo);
+                            const sedeId = `sp${si}`;
 
                             html += `<div style="margin-bottom:12px;border:0.5px solid var(--c-border);border-radius:8px;overflow:hidden">
-                                <div class="sede-toggle-btn" data-target="${sedeId}_body" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--c-info-bg);cursor:pointer;user-select:none">
+                                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--c-info-bg)">
                                     <span style="font-weight:600;font-size:12px;color:var(--c-text-1)">🏢 ${escapeHtml(sedeName.replace(' - Trabajadores',''))}</span>
-                                    <span style="display:flex;gap:16px;font-size:11px;color:var(--c-text-2)">
-                                        <span>Centros: <strong>${numCentros}</strong></span>
-                                        <span>Trabajadores: <strong>${total}</strong></span>
-                                        ${sal ? `<span>${escapeHtml(sal)}</span>` : ''}
-                                        <span>▼</span>
-                                    </span>
+                                    <span style="font-size:11px;color:var(--c-text-2)">Centros: <strong>${numCentros}</strong> · Trabajadores: <strong>${total}</strong>${sal ? ' · ' + escapeHtml(sal) : ''}</span>
                                 </div>
-                                <div id="${sedeId}_body" style="display:none;padding:12px">
-                                    ${infoCard ? `
-                                    <div style="margin-bottom:10px">
-                                        <button class="classif-sort-btn sede-info-toggle" data-target="${sedeId}_info" style="margin-bottom:6px">▼ Ver info sede</button>
-                                        <div id="${sedeId}_info" style="display:none">${infoCard}</div>
-                                    </div>` : ''}
-                                    ${Object.entries(porCentro).map(([centro, cWorkers], ci) => {
-                                        const centroId = `${sedeId}_c${ci}`;
-                                        return `<div style="margin-bottom:8px;border-left:3px solid var(--c-blue);padding-left:10px">
-                                            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-                                                <span style="font-size:11px;font-weight:600;color:var(--c-text-1)">🏭 Centro de costo ${escapeHtml(centro)}</span>
-                                                <button class="classif-sort-btn sede-info-toggle" data-target="${centroId}">▼ Ver ${cWorkers.length} trabajador(es)</button>
-                                            </div>
-                                            <div id="${centroId}" style="display:none">${buildWorkerTable(cWorkers)}</div>
-                                        </div>`;
-                                    }).join('')}
+                                <div style="padding:12px">
+                                    ${infoCard ? `<details style="margin-bottom:8px"><summary style="cursor:pointer;font-size:11px;font-weight:600;color:var(--c-text-2);padding:4px 0">Ver info sede</summary><div style="padding-top:8px">${infoCard}</div></details>` : ''}
+                                    ${Object.entries(porCentro).map(([centro, cWorkers], ci) => `
+                                        <details style="margin-bottom:6px;border-left:3px solid var(--c-blue);padding-left:10px">
+                                            <summary style="cursor:pointer;font-size:11px;font-weight:600;color:var(--c-text-1);padding:4px 0">
+                                                🏭 Centro de costo ${escapeHtml(centro)} · ${cWorkers.length} trabajador(es)
+                                            </summary>
+                                            <div style="padding-top:8px">${buildWorkerTable(cWorkers)}</div>
+                                        </details>`).join('')}
                                 </div>
                             </div>`;
                         });
-                        // Agregar listeners después de insertar en DOM
-                        setTimeout(() => {
-                            dataPanel.querySelectorAll('.sede-toggle-btn').forEach(btn => {
-                                btn.addEventListener('click', () => {
-                                    const target = document.getElementById(btn.dataset.target);
-                                    if (!target) return;
-                                    const open = target.style.display !== 'none';
-                                    target.style.display = open ? 'none' : '';
-                                    const arr = btn.querySelector('span:last-child') || btn;
-                                    if (btn.classList.contains('classif-sort-btn')) {
-                                        btn.textContent = open ? btn.textContent.replace('▲','▼') : btn.textContent.replace('▼','▲');
-                                    }
-                                });
-                            });
-                            dataPanel.querySelectorAll('.sede-toggle-btn[data-target]').forEach(btn => {
-                                const arrow = btn.closest('[style*="background:var(--c-info-bg)"]');
-                                if (arrow) arrow.addEventListener('click', () => {
-                                    const target = document.getElementById(btn.dataset.target);
-                                    if (target) target.style.display = target.style.display === 'none' ? '' : 'none';
-                                });
-                            });
-                        }, 50);
                         return html || '<div style="color:var(--c-text-2);font-size:12px">Sin sedes con trabajadores.</div>';
                     }
 
@@ -2412,21 +2378,6 @@ function renderReporte(container, payload) {
                         dataPanel.querySelector('#btnVerCentros').classList.add('active');
                         dataPanel.querySelector('#btnVerSedes').classList.remove('active');
                     });
-
-                    // Event delegation para toggles de sede
-                    dataPanel.addEventListener('click', function(e) {
-                        const btn = e.target.closest('.sede-toggle-btn');
-                        if (!btn) return;
-                        const targetId = btn.dataset.target;
-                        if (!targetId) return;
-                        const target = document.getElementById(targetId);
-                        if (!target) return;
-                        const open = target.style.display !== 'none';
-                        target.style.display = open ? 'none' : '';
-                        btn.textContent = open
-                            ? btn.textContent.replace('▲','▼')
-                            : btn.textContent.replace('▼','▲');
-                    }, { once: false });
                 }
             } else if (panelType === 'comisiones') {
                 // Panel de comisiones con visor de documento
