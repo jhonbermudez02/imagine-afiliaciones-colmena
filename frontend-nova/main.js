@@ -2312,7 +2312,11 @@ function renderReporte(container, payload) {
                             const workers = bySede[sedeName] || [];
                             const total = workerCounts[sedeName] ?? workers.length;
                             if (!total && !workers.length) return;
-                            const sal = salaryCounts[sedeName] ? '$ ' + Number(salaryCounts[sedeName]).toLocaleString('es-CO') : '';
+                            // Calcular nómina sumando salarios de los trabajadores
+                            const nominaSede = workers.reduce((sum, w) => sum + (Number(w.salario) || 0), 0);
+                            const sal = nominaSede > 0
+                                ? '$ ' + nominaSede.toLocaleString('es-CO')
+                                : salaryCounts[sedeName] ? '$ ' + Number(salaryCounts[sedeName]).toLocaleString('es-CO') : '';
                             const sedeInfo = getSedeInfo(sedeName);
                             const porCentro = {};
                             for (const w of workers) {
