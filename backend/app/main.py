@@ -2221,6 +2221,44 @@ async def root():
     return {"message": f"{settings.app_name} - Control Plane"}
 
 
+
+def build_runtime_resources() -> dict:
+    """Lee metricas del contenedor desde cgroups y procfs."""
+    import os, time
+    result = {}
+    try:
+        mem_current = int(open("/sys/fs/cgroup/memory.current").read().strip())
+        mem_max_raw = open("/sys/fs/cgroup/memory.max").read().strip()
+        mem_max = int(mem_max_raw) if mem_max_raw != "max" else 0
+        result["mem_used_mb"] = round(mem_current / 1024 / 1024, 1)
+        result["mem_max_mb"] = round(mem_max / 1024 / 1024, 1) if mem_max else 0
+        result["mem_pct"] = round(mem_current / mem_max * 100, 1) if mem_max else 0
+    except Exception:
+        result["mem_used_mb"] = 0
+        result["mem_max_mb"] = 0
+        result["mem_pct"] = 0
+    try:
+        cpu_lines = open("/sys/fs/cgroup/cpu.stat").read().strip().splitlines()
+        cpu_data = {}
+        for line in cpu_lines:
+            parts = line.split()
+            if len(parts) == 2:
+                cpu_data[parts[0]] = int(parts[1])
+        result["cpu_usage_usec"] = cpu_data.get("usage_usec", 0)
+    except Exception:
+        result["cpu_usage_usec"] = 0
+    try:
+        rss = 0
+        for line in open("/proc/self/status").readlines():
+            if line.startswith("VmRSS:"):
+                rss = int(line.split()[1])
+                break
+        result["process_rss_mb"] = round(rss / 1024, 1)
+    except Exception:
+        result["process_rss_mb"] = 0
+    result["timestamp"] = time.time()
+    return result
+
 @app.get("/health")
 async def health():
     return await get_system_health()

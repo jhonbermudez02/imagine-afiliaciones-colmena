@@ -2810,32 +2810,120 @@ async function doSearch(query) {
 }
 
 // ── ADMIN ─────────────────────────────────────────────────────
+let _monitorTimer = null;
+
 async function loadSystemStatus() {
     const statusVal = document.getElementById('adminStatusVal');
     const statusSub = document.getElementById('adminStatusSub');
     const detail = document.getElementById('adminStatusDetail');
     if (statusVal) statusVal.textContent = '...';
     try {
-        const r = await fetch(`${API_URL}/api/system/status`);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = await r.json();
-        const overall = data.overall || 'ok';
+        const [sysR, healthR, casesR] = await Promise.all([
+            fetch(`${API_URL}/api/system/status`).catch(() => null),
+            fetch(`${API_URL}/health`).catch(() => null),
+            fetch(`${API_URL}/api/cases/production-summary`).catch(() => null),
+        ]);
+        const sysData = sysR?.ok ? await sysR.json() : {};
+        const healthData = healthR?.ok ? await healthR.json() : {};
+        const casesData = casesR?.ok ? await casesR.json() : {};
+        const cases = casesData?.cases || [];
+        const res = healthData?.resources || {};
+
+        const overall = sysData.overall || 'ok';
         const isOk = normalizeText(overall) === 'ok';
         if (statusVal) { statusVal.textContent = isOk ? 'OK' : overall; statusVal.style.color = isOk ? 'var(--c-ok)' : 'var(--c-err)'; }
-        if (statusSub) statusSub.textContent = data.description || (isOk ? 'Todos los servicios operativos' : 'Revisar servicios');
-        const services = Array.isArray(data.services) ? data.services : [];
-        if (detail && services.length) {
-            detail.innerHTML = `<div style="padding:0 16px 16px">${services.map(s => `
-                <div class="admin-service-row">
-                    <span class="admin-service-name">${escapeHtml(s.name||s.id||'Servicio')}</span>
-                    <span class="admin-service-status ${normalizeText(s.status||'')}">${escapeHtml(s.status||'n/d')}</span>
+        if (statusSub) statusSub.textContent = `Backend v${healthData.version||'?'} · RAM ${res.mem_used_mb||0} MB · RSS ${res.process_rss_mb||0} MB`;
+
+        // Métricas de cola
+        const cola = cases.filter(c => ['queued','uploaded','pending'].includes(String(c.status||'').toLowerCase())).length;
+        const procesando = cases.filter(c => ['processing'].includes(String(c.status||'').toLowerCase())).length;
+        const aprobables = cases.filter(c => c.status === 'completed').length;
+        const rechazados = cases.filter(c => c.status === 'stopped_prevalidacion').length;
+
+        const now = new Date().toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+
+        // Barra de memoria
+        const memPct = res.mem_pct || 0;
+        const memColor = memPct > 80 ? 'var(--c-err)' : memPct > 60 ? '#f59e0b' : 'var(--c-ok)';
+
+        // Servicios
+        const svcs = [
+            {name:'API Backend', ok: healthData.api === 'healthy', detail: `v${healthData.version||'?'}`},
+            {name:'RAG Qdrant', ok: healthData.qdrant === 'ok', detail: healthData.qdrant === 'ok' ? '3 colecciones' : 'error'},
+            {name:'Ollama LLM', ok: healthData.ollama === 'ok', detail: healthData.ollama === 'ok' ? 'nomic-embed-text' : 'error'},
+            {name:'PostgreSQL', ok: healthData.postgres === 'ok', detail: healthData.postgres === 'ok' ? 'conectado' : 'error'},
+        ];
+
+        if (detail) detail.innerHTML = `
+            <div style="padding:0 16px 16px">
+                <div style="font-size:11px;color:var(--c-text-2);margin-bottom:10px;text-align:right">Actualizado: ${now}</div>
+
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+                    ${[
+                        ['En cola', cola, 'var(--c-blue)'],
+                        ['Procesando', procesando, '#f59e0b'],
+                        ['Aprobables', aprobables, 'var(--c-ok)'],
+                        ['Rechazados', rechazados, 'var(--c-err)'],
+                    ].map(([label, val, color]) => `
+                        <div style="background:var(--c-bg-2);border-radius:6px;padding:10px;text-align:center">
+                            <div style="font-size:22px;font-weight:500;color:${color}">${val}</div>
+                            <div style="font-size:10px;color:var(--c-text-2)">${label}</div>
+                        </div>`).join('')}
                 </div>
-            `).join('')}</div>`;
-        }
+
+                <div style="margin-bottom:14px">
+                    <div style="font-size:11px;font-weight:600;color:var(--c-text-2);margin-bottom:6px">Memoria del contenedor</div>
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <div style="flex:1;height:10px;background:var(--c-border);border-radius:5px;overflow:hidden">
+                            <div style="height:100%;width:${Math.min(100,memPct||30)}%;background:${memColor};border-radius:5px;transition:width 0.5s"></div>
+                        </div>
+                        <span style="font-size:12px;color:var(--c-text-1);min-width:80px">${res.mem_used_mb||0} MB usados</span>
+                    </div>
+                    <div style="font-size:10px;color:var(--c-text-2);margin-top:3px">RSS proceso Python: ${res.process_rss_mb||0} MB</div>
+                </div>
+
+                <div style="margin-bottom:14px">
+                    <div style="font-size:11px;font-weight:600;color:var(--c-text-2);margin-bottom:6px">Servicios</div>
+                    ${svcs.map(s => `
+                        <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:0.5px solid var(--c-border);font-size:12px">
+                            <span style="display:flex;align-items:center;gap:6px">
+                                <span style="width:7px;height:7px;border-radius:50%;background:${s.ok ? 'var(--c-ok)' : 'var(--c-err)'}"></span>
+                                ${escapeHtml(s.name)}
+                            </span>
+                            <span style="color:${s.ok ? 'var(--c-ok)' : 'var(--c-err)'}">${escapeHtml(s.detail)}</span>
+                        </div>`).join('')}
+                </div>
+
+                ${cases.length ? `
+                <div>
+                    <div style="font-size:11px;font-weight:600;color:var(--c-text-2);margin-bottom:6px">Contratos recientes</div>
+                    ${cases.slice(0,6).map(c => {
+                        const st = String(c.status||'');
+                        const color = st==='completed'?'var(--c-ok)':st==='stopped_prevalidacion'?'var(--c-err)':'#f59e0b';
+                        const label = st==='completed'?'aprobable':st==='stopped_prevalidacion'?'no aprobado':st||'?';
+                        const emp = escapeHtml((c.empresa||c.label||'—').slice(0,28));
+                        const ago = c.updated_at ? Math.floor((Date.now()-new Date(c.updated_at))/60000) : 0;
+                        return `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:0.5px solid var(--c-border);font-size:12px">
+                            <span style="color:var(--c-text-1)">${emp}</span>
+                            <span style="display:flex;gap:8px;align-items:center">
+                                <span style="font-size:10px;color:var(--c-text-2)">${ago}m</span>
+                                <span style="font-size:10px;padding:2px 6px;border-radius:99px;background:var(--c-bg-2);color:${color}">${label}</span>
+                            </span>
+                        </div>`;
+                    }).join('')}
+                </div>` : ''}
+            </div>`;
+
     } catch(e) {
         if (statusVal) { statusVal.textContent = 'Error'; statusVal.style.color = 'var(--c-err)'; }
         if (statusSub) statusSub.textContent = e.message;
     }
+
+    // Auto-refresh cada 15s mientras Admin esté visible
+    clearTimeout(_monitorTimer);
+    _monitorTimer = setTimeout(() => {
+        if (document.getElementById('adminView')?.style.display !== 'none') loadSystemStatus();
+    }, 15000);
 }
 
 async function reindexKnowledge() {

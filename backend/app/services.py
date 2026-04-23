@@ -39,12 +39,14 @@ async def check_postgres() -> str:
 
 
 async def get_system_health() -> Dict[str, str]:
+    from app.main import build_runtime_resources
     return {
         "api": "healthy",
         "version": settings.app_version,
         "qdrant": await check_http_service(settings.qdrant_url, "/healthz"),
         "ollama": await check_http_service(settings.ollama_url, "/api/tags"),
         "postgres": await check_postgres(),
+        "resources": build_runtime_resources(),
     }
 
 
