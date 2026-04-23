@@ -199,6 +199,29 @@ def _resolve_smmlv_value(form_fields: Dict[str, Any]) -> tuple[str, int]:
     return latest_year, table[latest_year]
 
 
+
+def _rag_validate_eps_afp(value: str, tipo: str) -> bool:
+    """Valida EPS o AFP usando RAG (Qdrant + nomic-embed-text). 
+    Retorna True si es válido, False si no."""
+    if not value or len(value.strip()) < 3:
+        return True  # Sin valor, no validar
+    try:
+        from qdrant_client import QdrantClient
+        import httpx as _httpx
+        qdrant = QdrantClient(host="imagine_qdrant", port=6333)
+        col = "afi_eps_catalog" if tipo == "eps" else "afi_afp_catalog"
+        r = _httpx.post("http://imagine_ollama:11434/api/embeddings",
+            json={"model": "nomic-embed-text", 
+                  "prompt": f"{'EPS entidad de salud' if tipo=='eps' else 'AFP fondo de pensiones'}: {value}"},
+            timeout=15)
+        vector = r.json().get("embedding", [])
+        if not vector:
+            return True  # Si falla RAG, no bloquear
+        results = qdrant.search(collection_name=col, query_vector=vector, limit=1, score_threshold=0.82)
+        return bool(results)
+    except Exception:
+        return True  # Si falla RAG, no bloquear
+
 def _normalize_catalog_name(value: Any) -> str:
     text = normalize_text(value).upper()
     text = "".join(ch for ch in unicodedata.normalize("NFKD", text) if not unicodedata.combining(ch))
@@ -574,14 +597,14 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
         row = normalize_text(record.get("_row", ""))
         eps_norm = _normalize_catalog_name(eps_value) if eps_value else ""
         afp_norm = _normalize_catalog_name(afp_value) if afp_value else ""
-        # Verificar EPS: coincidencia exacta o parcial (nombre largo en XLSX vs nombre corto en catalogo)
+        # Verificar EPS via RAG (semantico) con fallback a catalogo
         if eps_value:
-            eps_match = eps_norm in eps_catalog or any(cat in eps_norm for cat in eps_catalog if len(cat) >= 5)
+            eps_match = eps_norm in eps_catalog or _rag_validate_eps_afp(eps_value, "eps")
             if not eps_match:
                 invalid_eps.append((documento, eps_value, sheet, row))
-        # Verificar AFP: coincidencia exacta o parcial
+        # Verificar AFP via RAG (semantico) con fallback a catalogo
         if afp_value:
-            afp_match = afp_norm in afp_catalog or any(cat in afp_norm for cat in afp_catalog if len(cat) >= 5)
+            afp_match = afp_norm in afp_catalog or _rag_validate_eps_afp(afp_value, "afp")
             if not afp_match:
                 invalid_afp.append((documento, afp_value, sheet, row))
     if invalid_eps:
