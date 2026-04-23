@@ -3504,6 +3504,30 @@ def _extract_worker_records_from_rows(rows: List[tuple[Any, ...]]) -> tuple[List
     return records, header_index
 
 
+
+def _extract_sede_info_from_sheet(sheet_obj: Any, sede_num: int) -> Dict[str, Any]:
+    """Extrae datos de la sede desde las filas 11-16 de la hoja de trabajadores."""
+    def sv(row, col):
+        try:
+            v = sheet_obj.cell(row, col).value
+            return str(v).strip() if v is not None else ""
+        except Exception:
+            return ""
+    prefix = f"sede_{sede_num:02d}" if sede_num > 1 else "sede_principal"
+    return {
+        f"{prefix}_codigo": sv(12, 6),
+        f"{prefix}_nombre": sv(12, 8),
+        f"{prefix}_municipio_distrito": sv(13, 6),
+        f"{prefix}_departamento": sv(13, 9),
+        f"{prefix}_direccion": sv(14, 6),
+        f"{prefix}_zona": sv(14, 9),
+        f"{prefix}_telefono": only_digits(sv(15, 6)),
+        f"{prefix}_correo": sv(16, 6),
+        f"responsable_{prefix}_nombre_completo": " ".join(filter(None, [sv(12,13), sv(12,15), sv(13,13), sv(13,15)])).strip(),
+        f"responsable_{prefix}_tipo_documento": sv(14,13),
+        f"responsable_{prefix}_numero_documento": only_digits(sv(14,15)),
+    }
+
 def _extract_worker_sheet_control_totals(rows: List[tuple[Any, ...]]) -> Dict[str, int]:
     reported_workers = 0
     reported_salary_total = 0
@@ -3762,7 +3786,7 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
     return {
         "sheets": sheets,
         "profile": profile,
-        "form_fields": form_fields,
+        "form_fields": {**form_fields, **{k:v for sede in sede_info_extra.values() for k,v in sede.items() if v}},
         "flat_pairs": flat_pairs,
         "records": records,
         "worker_sheet_counts": worker_sheet_counts,
@@ -3834,6 +3858,7 @@ def _generate_clean_from_workbook(workbook: Any, excel_filename: str) -> Dict[st
 
     contrato_lines = _sheet_to_clean_lines(workbook[main_sheet], force_int_float=False)
     workers_multi: List[Dict[str, Any]] = []
+    sede_info_extra: Dict[str, Any] = {}
     for idx, name in enumerate(worker_sheets, start=1):
         sheet = workbook[name]
         rows = list(sheet.iter_rows(values_only=True))
@@ -3847,6 +3872,7 @@ def _generate_clean_from_workbook(workbook: Any, excel_filename: str) -> Dict[st
         normalized_name = re.sub(r"\s+", " ", str(name or "").strip())
         sede_match = re.search(r"sede\s*0*(\d+)", normalized_name, flags=re.IGNORECASE)
         sede_num = int(sede_match.group(1)) if sede_match else idx
+        sede_info_extra[f"sede_{sede_num:02d}"] = _extract_sede_info_from_sheet(sheet, sede_num)
         workers_multi.append(
             {
                 "sheet": normalized_name,
