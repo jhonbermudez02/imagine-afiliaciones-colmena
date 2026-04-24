@@ -4030,7 +4030,7 @@ def _extract_employer_from_contract_text(contract_text: str) -> Dict[str, str]:
         "sede_principal_codigo": by_label("Código de la sede", "codigo de la sede"),
         "sede_principal_nombre": by_label("Nombre de la sede"),
         "sede_principal_direccion": by_label("Dirección de la sede principal", "direccion de la sede"),
-        "sede_principal_telefono": only_digits(by_label("Teléfono fijo/celular", "telefono fijo/celular")),
+        "sede_principal_telefono": next((only_digits(p) for p in re.split(r"[-/,;\s]+", str(by_label("Teléfono fijo/celular", "telefono fijo/celular") or "")) if len(only_digits(p)) in {7,10} and not only_digits(p).startswith("0")), only_digits(str(by_label("Teléfono fijo/celular", "telefono fijo/celular") or ""))),
         "sede_principal_correo": by_label("Correo electrónico de la sede", "correo electrónico"),
         "sede_principal_municipio_distrito": by_label("Municipio/Distrito", "municipio distrito"),
         "sede_principal_zona": by_label("Zona sede", "Zona"),
