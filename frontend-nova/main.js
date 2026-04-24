@@ -113,6 +113,8 @@ function getReviewTypeCode(type) {
 
 function getReviewTypeLabelWithCode(type, legacyCode) {
     const label = getReviewTypeLabel(type);
+    // Para sedes numeradas, el label ya incluye el número — no duplicar con legacy_code
+    if (String(type||'').startsWith('anexo_sedes')) return label;
     const code = legacyCode != null ? String(legacyCode).padStart(2,'0') : getReviewTypeCode(type);
     return code ? `${label} ·${code}` : label;
 }
