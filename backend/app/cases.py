@@ -3583,7 +3583,7 @@ def _extract_sede_info_from_sheet(sheet_obj: Any, sede_num: int) -> Dict[str, An
         f"{prefix}_departamento": sv(13, 9),
         f"{prefix}_direccion": sv(14, 6),
         f"{prefix}_zona": sv(14, 9),
-        f"{prefix}_telefono": only_digits(sv(15, 6)),
+        f"{prefix}_telefono": next((only_digits(p) for p in re.split(r"[-/,;\s]+", str(sv(15, 6) or "")) if len(only_digits(p)) in {7,10} and not only_digits(p).startswith("0")), only_digits(str(sv(15, 6) or ""))),
         f"{prefix}_correo": sv(16, 6),
         f"responsable_{prefix}_nombre_completo": " ".join(filter(None, [sv(12,13), sv(12,17), sv(13,13), sv(13,17)])).strip(),
         f"responsable_{prefix}_tipo_documento": sv(14,13),
