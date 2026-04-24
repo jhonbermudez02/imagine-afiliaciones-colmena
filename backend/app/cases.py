@@ -3722,7 +3722,7 @@ def _extract_form_fields_from_sheet(sheet: Any) -> Dict[str, str]:
         "sede_principal_codigo": _sheet_value(sheet, 21, 8),
         "sede_principal_nombre": _sheet_value(sheet, 21, 13),
         "sede_principal_direccion": _sheet_value(sheet, 20, 21),
-        "sede_principal_telefono": next((only_digits(p) for p in re.split(r"[-/,;\s]+", str(_sheet_value(sheet, 20, 31) or _sheet_value(sheet, 21, 31) or "")) if len(only_digits(p)) in {7,10} and not only_digits(p).startswith("0")), only_digits(str(_sheet_value(sheet, 20, 31) or _sheet_value(sheet, 21, 31) or ""))),
+        "sede_principal_telefono": next((only_digits(p) for p in re.split(r"[-/,;\s]+", str(_sheet_value(sheet, 20, 40) or _sheet_value(sheet, 20, 31) or _sheet_value(sheet, 21, 40) or _sheet_value(sheet, 21, 31) or "")) if len(only_digits(p)) in {7,10} and not only_digits(p).startswith("0")), only_digits(str(_sheet_value(sheet, 20, 40) or _sheet_value(sheet, 20, 31) or ""))),
         "sede_principal_correo": _sheet_value(sheet, 24, 27),
         "sede_principal_municipio_distrito": _sheet_value(sheet, 22, 8),
         "sede_principal_zona": _sheet_value(sheet, 22, 20),
