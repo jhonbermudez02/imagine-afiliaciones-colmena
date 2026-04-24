@@ -271,7 +271,8 @@ def _check_entity_valid(value: str, catalog_token_sets: list, valid_tokens: set)
     unknown = val_tokens - valid_tokens
     if unknown:
         return False
-    return any(cat and cat.issubset(val_tokens) for cat in catalog_token_sets)
+    # Si todos los tokens son conocidos del dominio, es valido aunque no este en catalog_token_sets
+    return True
 
 def _normalize_catalog_name(value: Any) -> str:
     text = normalize_text(value).upper()
