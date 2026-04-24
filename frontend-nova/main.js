@@ -2865,7 +2865,7 @@ async function doSearch(query) {
             return;
         }
         el.innerHTML = results.map(item => {
-            const { empresa, nit, fecha, status, finalStatus } = resolveCase(item);
+            const { empresa, nit, fecha, status, finalStatus, nroAfiliacion } = resolveCase(item);
             const cls = caseStatusClass(status, finalStatus);
             const lbl = casePillLabel(status, finalStatus);
             const blockers = item.blockers || [];
