@@ -2299,7 +2299,7 @@ function renderReporte(container, payload) {
                             ['Dirección', info.direccion], ['Municipio', info.municipio],
                             ['Departamento', info.departamento], ['Zona', info.zona],
                             ['Teléfono', info.telefono], ['Correo', info.correo],
-                            ['Responsable', info.responsable], ['Doc. Responsable', info.doc_responsable],
+                            ['Responsable', info.responsable],
                         ].filter(([,v]) => v);
                         if (!fields.length) return '';
                         return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;margin-bottom:12px;padding:10px;background:var(--c-bg);border-radius:6px;border:1px solid var(--c-border)">
@@ -2310,13 +2310,15 @@ function renderReporte(container, payload) {
                         </div>`;
                     }
 
+                    // Documentos anexo_sedes por numero de sede
+                    const sedeDocs = (a.documents || []).filter(d => d.document_type === 'anexo_sedes');
+
                     function renderBySede() {
                         let html = '';
                         sedeNames.forEach((sedeName, si) => {
                             const workers = bySede[sedeName] || [];
                             const total = workerCounts[sedeName] ?? workers.length;
                             if (!total && !workers.length) return;
-                            // Calcular nómina sumando salarios de los trabajadores
                             const nominaSede = workers.reduce((sum, w) => sum + (Number(w.salario) || 0), 0);
                             const sal = nominaSede > 0
                                 ? '$ ' + nominaSede.toLocaleString('es-CO')
@@ -2331,6 +2333,11 @@ function renderReporte(container, payload) {
                             const numCentros = Object.keys(porCentro).length;
                             const infoCard = renderSedeInfoCard(sedeInfo);
 
+                            // PDF de esta sede
+                            const sedeNum = parseInt(sedeName.match(/\d+/)?.[0] || String(si + 1));
+                            const sedeDoc = sedeDocs.find(d => d.sede_num === sedeNum) || sedeDocs[si] || null;
+                            const pdfUrl = sedeDoc ? `${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(sedeDoc.filename)}?inline=true` : '';
+
                             html += `<div style="margin-bottom:16px;border:0.5px solid var(--c-border);border-radius:8px;overflow:hidden">
                                 <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--c-info-bg)">
                                     <span style="font-weight:600;font-size:13px;color:var(--c-text-1)">🏢 ${escapeHtml(sedeName.replace(' - Trabajadores',''))}</span>
@@ -2342,23 +2349,13 @@ function renderReporte(container, payload) {
                                 </div>
                                 <div style="padding:12px">
                                     ${infoCard}
+                                    ${pdfUrl ? `<details style="margin-bottom:10px"><summary style="cursor:pointer;font-size:11px;font-weight:600;color:var(--c-blue);padding:4px 0;list-style:none">📄 Ver formulario de sede</summary><iframe src="${escapeHtml(pdfUrl)}" style="width:100%;height:400px;border:1px solid var(--c-border);border-radius:6px;margin-top:6px"></iframe></details>` : ''}
                                     ${Object.entries(porCentro).map(([centro, cWorkers], ci) => {
                                         const cId = `ct_${si}_${ci}`;
                                         return `<div style="margin-bottom:10px;border:0.5px solid var(--c-border);border-radius:6px;overflow:hidden">
                                             <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--c-bg-2)">
                                                 <span style="font-size:12px;font-weight:600;color:var(--c-text-1)">🏭 Centro de costo ${escapeHtml(centro)}</span>
-                                                <div style="display:flex;gap:6px">
-                                                    <button class="classif-sort-btn" onclick="
-                                                        var t=document.getElementById('${cId}_trab');
-                                                        var i=document.getElementById('${cId}_info');
-                                                        var open=t.style.display!=='none';
-                                                        t.style.display=open?'none':'';
-                                                        if(!open&&i)i.style.display='none';
-                                                        this.classList.toggle('active',!open);
-                                                        var ib=this.previousElementSibling;
-                                                        if(ib)ib.classList.remove('active');
-                                                    " type="button">👷 Trabajadores (${cWorkers.length})</button>
-                                                </div>
+                                                <button class="classif-sort-btn" onclick="var t=document.getElementById('${cId}_trab');var open=t.style.display!=='none';t.style.display=open?'none':'';this.classList.toggle('active',!open);" type="button">👷 Trabajadores (${cWorkers.length})</button>
                                             </div>
                                             <div id="${cId}_trab" style="display:none;padding:10px">${buildWorkerTable(cWorkers)}</div>
                                         </div>`;
