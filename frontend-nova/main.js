@@ -2400,25 +2400,26 @@ function renderReporte(container, payload) {
                             html += `<div style="margin-bottom:16px;border:0.5px solid var(--c-border);border-radius:8px;overflow:hidden">
                                 <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--c-info-bg)">
                                     <span style="font-weight:600;font-size:13px;color:var(--c-text-1)">🏢 ${escapeHtml(sedeName.replace(' - Trabajadores',''))}</span>
-                                    <span style="font-size:12px;color:var(--c-text-2);display:flex;gap:16px">
-                                        <span>Centros: <strong>${numCentros}</strong></span>
-                                        <span>Trabajadores: <strong>${total}</strong></span>
+                                    <span style="font-size:12px;display:flex;gap:16px;align-items:center">
+                                        <button class="classif-sort-btn" onclick="var t=document.getElementById('sc_${si}_centros');t.style.display=t.style.display==='none'?'':'none'" type="button" style="font-size:11px">Centros: <strong>${numCentros}</strong></button>
+                                        <button class="classif-sort-btn" onclick="var t=document.getElementById('sc_${si}_workers');t.style.display=t.style.display==='none'?'':'none'" type="button" style="font-size:11px">Trabajadores: <strong>${total}</strong></button>
                                         ${sal ? `<span style="color:var(--c-text-1);font-weight:500">${escapeHtml(sal)}</span>` : ''}
                                     </span>
                                 </div>
                                 <div style="padding:12px">
                                     ${infoCard}
                                     ${pdfUrl ? `<details style="margin-bottom:10px"><summary style="cursor:pointer;font-size:11px;font-weight:600;color:var(--c-blue);padding:4px 0;list-style:none">📄 Ver formulario de sede</summary><iframe src="${escapeHtml(pdfUrl)}" style="width:100%;height:400px;border:1px solid var(--c-border);border-radius:6px;margin-top:6px"></iframe></details>` : ''}
+                                    <div id="sc_${si}_centros" style="display:none">
                                     ${Object.entries(porCentro).map(([centro, cWorkers], ci) => {
                                         const cId = `ct_${si}_${ci}`;
                                         return `<div style="margin-bottom:10px;border:0.5px solid var(--c-border);border-radius:6px;overflow:hidden">
-                                            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--c-bg-2)">
-                                                <span style="font-size:12px;font-weight:600;color:var(--c-text-1)">🏭 Centro de costo ${escapeHtml(centro)}</span>
-                                                <button class="classif-sort-btn" onclick="var t=document.getElementById('${cId}_trab');var open=t.style.display!=='none';t.style.display=open?'none':'';this.classList.toggle('active',!open);" type="button">👷 Trabajadores (${cWorkers.length})</button>
-                                            </div>
-                                            <div id="${cId}_trab" style="display:none;padding:10px">${buildWorkerTable(cWorkers)}</div>
+                                            <div style="padding:8px 12px;background:var(--c-bg-2);font-size:12px;font-weight:600;color:var(--c-text-1)">🏭 Centro de costo ${escapeHtml(centro)} · ${cWorkers.length} trabajador(es)</div>
                                         </div>`;
                                     }).join('')}
+                                    </div>
+                                    <div id="sc_${si}_workers" style="display:none">
+                                        ${buildWorkerTable(workers)}
+                                    </div>
                                 </div>
                             </div>`;
                         });
@@ -2438,7 +2439,6 @@ function renderReporte(container, payload) {
                     const sedesCount = sedeNames.filter(s => (workerCounts[s] ?? (bySede[s]||[]).length) > 0).length;
                     dataPanel.innerHTML = `
                         <div class="blocker-panel-head">
-                            <span class="blocker-panel-title">🏢 Sedes (${sedesCount})</span>
                             <div style="display:flex;gap:6px">
                                 <button class="classif-sort-btn active" id="btnVerSedes" type="button">Por sede</button>
                                 <button class="classif-sort-btn" id="btnVerCentros" type="button">Por centro</button>
@@ -2879,11 +2879,12 @@ async function doSearch(query) {
                         <div class="search-result-meta">
                             ${nit !== 'n/d' ? `NIT ${escapeHtml(nit)}` : ''}${nroAfiliacion ? ` · Contrato ${escapeHtml(nroAfiliacion)}` : ''} · ${escapeHtml(fecha)}
                         </div>
+                        ${isFailed ? `<div style="font-size:11px;color:var(--c-err);margin-top:3px">⚠ Procesamiento fallido — clic para ver documentos</div>` : ''}
                         ${blockers.length ? `<div style="font-size:11px;color:var(--c-err);margin-top:3px">
                             ${blockers.length} bloqueante${blockers.length>1?'s':''}: ${escapeHtml(String(blockers[0]).slice(0,60))}${blockers[0]?.length>60?'...':''}
                         </div>` : ''}
                     </div>
-                    <span class="pill pill-${cls}" style="flex-shrink:0">${escapeHtml(lbl)}</span>
+                    <span class="pill pill-${isFailed?'warn':cls}" style="flex-shrink:0">${isFailed?'Error':escapeHtml(lbl)}</span>
                 </div>
             `;
         }).join('');
@@ -2892,12 +2893,15 @@ async function doSearch(query) {
                 const id = row.dataset.case;
                 if (!id) return;
                 activeCaseId = id;
+                // Si el caso tiene reporte ejecutivo ir ahí, si no al visor documental
                 const item = results.find(r => r.id === id);
-                const st = String(item?.status || '');
+                const st = String(item?.status || item?.workflow_run?.status || '');
                 if (st === 'completed' || st === 'stopped_prevalidacion' || st === 'stopped_926') {
-                    switchView('reporte'); loadReporteForCase(id);
+                    switchView('reporte');
+                    loadReporteForCase(id);
                 } else {
-                    switchView('clasificacion'); loadClassifForCase(id);
+                    switchView('clasificacion');
+                    loadClassifForCase(id);
                 }
             });
             row.addEventListener('keydown', e => {
