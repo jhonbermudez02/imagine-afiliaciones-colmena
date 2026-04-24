@@ -132,13 +132,17 @@ async function fetchWithRetry(url, options = {}, attempts = 2) {
     for (let i = 0; i < attempts; i++) {
         try {
             const r = await fetch(url, options);
+            // Detectar si la respuesta es HTML en vez de JSON (ej: error de túnel Cloudflare)
+            const contentType = r.headers.get('content-type') || '';
+            if (contentType.includes('text/html')) {
+                throw new Error('Sin conexión con el servidor. Verifica que el sistema esté disponible.');
+            }
             if (!r.ok) {
                 const t = await r.text().catch(()=>'');
                 let detail = '';
                 try {
                     const parsed = JSON.parse(t);
                     if (Array.isArray(parsed?.detail)) {
-                        // Errores de validación Pydantic
                         detail = parsed.detail.map(e => e.msg || JSON.stringify(e)).join('; ');
                     } else {
                         detail = parsed?.detail || parsed?.message || t;
