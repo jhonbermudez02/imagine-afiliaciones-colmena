@@ -920,7 +920,7 @@ def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, exp
     bucket_name = "xlsx" if normalize_haystack(kind) == "xlsx" else "documents"
     bucket = review_store.setdefault(bucket_name, {})
     normalized_expected_type = normalize_haystack(expected_type).replace(" ", "_")
-    if normalized_expected_type not in DOC_TYPE_LABELS and normalized_expected_type != "xlsx":
+    if normalized_expected_type not in DOC_TYPE_LABELS and normalized_expected_type != "xlsx" and not normalized_expected_type.startswith("anexo_sedes"):
         normalized_expected_type = ""
     bucket[str(filename)] = {
         "kind": bucket_name,
@@ -2470,19 +2470,25 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
 
 def _number_anexo_sedes(docs: List[Dict[str, Any]]) -> None:
     """Numera los documentos anexo_sedes segun el codigo de sede detectado en el OCR.
-    Si no se puede detectar, los numera secuencialmente."""
+    Respeta correcciones manuales. Si no se puede detectar, numera secuencialmente."""
     sede_docs = [d for d in docs if str(d.get("document_type","")).startswith("anexo_sedes")]
     if not sede_docs:
         return
     used_nums = set()
     for doc in sede_docs:
         dtype = str(doc.get("document_type",""))
-        m_type = re.search(r"anexo_sedes_?(\d+)", dtype)
-        if m_type:
-            num = int(m_type.group(1))
+        # Si ya fue corregido manualmente con numero especifico, respetar
+        code_src = str(doc.get("code_source",""))
+        if "manual" in code_src or "review" in code_src:
+            m_type = re.search(r"anexo_sedes_?(\d+)", dtype)
+            num = int(m_type.group(1)) if m_type else 1
         else:
-            ocr = str(doc.get("ocr_text") or doc.get("text_preview") or "")
-            num = _detect_sede_number_from_ocr(ocr)
+            m_type = re.search(r"anexo_sedes_?(\d+)", dtype)
+            if m_type:
+                num = int(m_type.group(1))
+            else:
+                ocr = str(doc.get("ocr_text") or doc.get("text_preview") or "")
+                num = _detect_sede_number_from_ocr(ocr)
         # Evitar duplicados — si ya se uso ese numero, incrementar
         while num in used_nums:
             num += 1
