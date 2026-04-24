@@ -729,6 +729,19 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
 .doc-item-type.warn { background: var(--c-warn-bg); color: var(--c-warn); }
 .doc-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text); }
 .doc-item-corrected { font-size: 10px; color: var(--c-warn); flex-shrink: 0; }
+.doc-item-actions { display: none; gap: 2px; flex-shrink: 0; margin-left: auto; }
+.doc-item:hover .doc-item-actions { display: flex; }
+.doc-action-btn {
+  font-size: 10px; padding: 2px 6px;
+  border: 0.5px solid var(--c-border); border-radius: 3px;
+  background: var(--c-bg-2); cursor: pointer;
+  line-height: 1.4; transition: all 0.1s;
+}
+.doc-action-btn:hover { border-color: var(--c-text-2); }
+.doc-delete-btn { color: var(--c-err); }
+.doc-delete-btn:hover { background: var(--c-err-bg); }
+.doc-duplicate-btn { color: var(--c-blue); }
+.doc-duplicate-btn:hover { background: var(--c-info-bg); }
 
 /* ============================================================ DOC FRAME (VISOR) */
 .doc-frame {

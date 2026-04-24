@@ -1235,11 +1235,17 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
             <span class="doc-item-name" title="${escapeHtml(item.displayName||item.file)}">${escapeHtml(item.label)}</span>
             ${isRag ? '<span class="doc-item-corrected" style="background:var(--c-info-bg);color:var(--c-blue)" title="Clasificado por RAG">🧠</span>' : ''}
             ${item.corrected ? '<span class="doc-item-corrected">corregido</span>' : ''}
+            ${item.kind !== 'xlsx' ? `
+            <span class="doc-item-actions">
+                <button class="doc-action-btn doc-duplicate-btn" data-file="${escapeHtml(item.file)}" title="Duplicar imagen" type="button">⧉ Dup</button>
+                <button class="doc-action-btn doc-delete-btn" data-file="${escapeHtml(item.file)}" title="Eliminar imagen" type="button">✕ Elim</button>
+            </span>` : ''}
         </div>
     `}).join('');
     el.querySelectorAll('.doc-item').forEach(el => {
         el.addEventListener('click', async (e) => {
-            if (e.target.classList.contains('doc-order-select')) return; // no abrir al cambiar orden
+            if (e.target.classList.contains('doc-order-select')) return;
+            if (e.target.classList.contains('doc-action-btn')) return; // manejar por separado
             el.closest('.doc-list')?.querySelectorAll('.doc-item').forEach(d => d.classList.remove('active'));
             el.classList.add('active');
             const idx = parseInt(el.dataset.index);
@@ -1251,6 +1257,48 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
                 await renderDocPreview(preview, payload.id, item);
             }
             renderClassifActions(item, payload);
+        });
+    });
+
+    // Botón Eliminar
+    el.querySelectorAll('.doc-delete-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const filename = btn.dataset.file;
+            if (!filename || !payload?.id) return;
+            if (!confirm(`¿Eliminar "${filename}"?\n\nEste archivo se eliminará permanentemente del expediente.`)) return;
+            try {
+                const r = await fetch(`${API_URL}/api/cases/${encodeURIComponent(payload.id)}/files/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+                if (r.ok) {
+                    btn.closest('.doc-item')?.remove();
+                    showToast(`Archivo eliminado: ${filename}`, 'ok');
+                } else {
+                    showToast('No se pudo eliminar el archivo', 'err');
+                }
+            } catch(e) {
+                showToast('Error al eliminar: ' + e.message, 'err');
+            }
+        });
+    });
+
+    // Botón Duplicar
+    el.querySelectorAll('.doc-duplicate-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const filename = btn.dataset.file;
+            if (!filename || !payload?.id) return;
+            try {
+                const r = await fetch(`${API_URL}/api/cases/${encodeURIComponent(payload.id)}/files/${encodeURIComponent(filename)}/duplicate`, { method: 'POST' });
+                if (r.ok) {
+                    const data = await r.json();
+                    showToast(`Duplicado creado: ${data.filename || filename}`, 'ok');
+                    setTimeout(() => loadClassifForCase(payload.id), 500);
+                } else {
+                    showToast('No se pudo duplicar el archivo', 'err');
+                }
+            } catch(e) {
+                showToast('Error al duplicar: ' + e.message, 'err');
+            }
         });
     });
 
