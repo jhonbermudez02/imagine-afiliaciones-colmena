@@ -2369,8 +2369,16 @@ function renderReporte(container, payload) {
                         </div>`;
                     }
 
-                    // Documentos anexo_sedes por numero de sede
-                    const sedeDocs = (a.documents || []).filter(d => d.document_type === 'anexo_sedes');
+                    // Documentos anexo_sedes agrupados por archivo original
+                    const sedeDocs = (a.documents || []).filter(d => String(d.document_type||'').startsWith('anexo_sedes'));
+                    // Agrupar por prefijo de archivo (antes de __p)
+                    const sedeDocGroups = {};
+                    sedeDocs.forEach(doc => {
+                        const prefix = doc.filename.replace(/__p\d+\.pdf$/i, '');
+                        if (!sedeDocGroups[prefix]) sedeDocGroups[prefix] = [];
+                        sedeDocGroups[prefix].push(doc);
+                    });
+                    const sedeDocGroupList = Object.values(sedeDocGroups);
 
                     function renderBySede() {
                         let html = '';
@@ -2392,10 +2400,12 @@ function renderReporte(container, payload) {
                             const numCentros = Object.keys(porCentro).length;
                             const infoCard = renderSedeInfoCard(sedeInfo);
 
-                            // PDF de esta sede
+                            // PDFs de esta sede — usar el grupo correspondiente por índice
                             const sedeNum = parseInt(sedeName.match(/\d+/)?.[0] || String(si + 1));
-                            const sedeDoc = sedeDocs.find(d => d.sede_num === sedeNum) || sedeDocs[si] || null;
-                            const pdfUrl = sedeDoc ? `${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(sedeDoc.filename)}?inline=true` : '';
+                            const sedeGroup = sedeDocGroupList[si] || sedeDocGroupList[0] || [];
+                            const pdfLinks = sedeGroup.map(doc =>
+                                `${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(doc.filename)}?inline=true`
+                            );
 
                             html += `<div style="margin-bottom:16px;border:0.5px solid var(--c-border);border-radius:8px;overflow:hidden">
                                 <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--c-info-bg)">
@@ -2408,7 +2418,13 @@ function renderReporte(container, payload) {
                                 </div>
                                 <div style="padding:12px">
                                     ${infoCard}
-                                    ${pdfUrl ? `<details style="margin-bottom:10px"><summary style="cursor:pointer;font-size:11px;font-weight:600;color:var(--c-blue);padding:4px 0;list-style:none">📄 Ver formulario de sede</summary><iframe src="${escapeHtml(pdfUrl)}" style="width:100%;height:400px;border:1px solid var(--c-border);border-radius:6px;margin-top:6px"></iframe></details>` : ''}
+                                    ${pdfLinks.length ? `<details style="margin-bottom:10px"><summary style="cursor:pointer;font-size:11px;font-weight:600;color:var(--c-blue);padding:4px 0;list-style:none">📄 Ver formulario de sede (${pdfLinks.length} página${pdfLinks.length>1?'s':''})</summary>
+                                        ${pdfLinks.map((url, pi) => `
+                                        <div style="margin-top:6px">
+                                            <div style="font-size:10px;color:var(--c-text-2);margin-bottom:2px">Página ${pi+1}</div>
+                                            <iframe src="${escapeHtml(url)}" style="width:100%;height:380px;border:1px solid var(--c-border);border-radius:6px"></iframe>
+                                        </div>`).join('')}
+                                    </details>` : ''}
                                     <div id="sc_${si}_centros" style="display:none">
                                     ${Object.entries(porCentro).map(([centro, cWorkers], ci) => {
                                         const cId = `ct_${si}_${ci}`;
