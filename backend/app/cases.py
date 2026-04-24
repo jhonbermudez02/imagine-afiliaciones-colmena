@@ -2468,6 +2468,25 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
     _apply_document_learning_calibration(docs)
 
 
+def _number_anexo_sedes(docs: List[Dict[str, Any]]) -> None:
+    """Numera los documentos anexo_sedes segun el codigo de sede detectado en el OCR.
+    Si no se puede detectar, los numera secuencialmente."""
+    sede_docs = [d for d in docs if d.get("document_type") == "anexo_sedes"]
+    if not sede_docs:
+        return
+    used_nums = set()
+    for doc in sede_docs:
+        ocr = str(doc.get("ocr_text") or doc.get("text_preview") or "")
+        num = _detect_sede_number_from_ocr(ocr)
+        # Evitar duplicados — si ya se uso ese numero, incrementar
+        while num in used_nums:
+            num += 1
+        used_nums.add(num)
+        doc["sede_num"] = num
+        doc["display_name"] = f"Sedes ·{num:02d}"
+        doc["legacy_label"] = f"Sedes ·{num:02d}"
+
+
 def _classify_document(filename: str, text: str) -> Dict[str, Any]:
     # 1. Intentar clasificar con RAG primero (aprendizaje acumulado)
     if text and len(text.strip()) > 50:
@@ -2992,6 +3011,22 @@ def _document_key_fields(document_type: str, fields: Dict[str, Any]) -> Dict[str
         "nit": only_digits(fields.get("nit", "")),
     }
 
+
+
+def _detect_sede_number_from_ocr(ocr_text: str) -> int:
+    """Detecta el numero de sede en el OCR de un anexo_sedes."""
+    if not ocr_text:
+        return 1
+    import re as _re
+    text = normalize_text(ocr_text)
+    # Buscar "codigo de la sede: X" o "sede X"
+    m = _re.search(r'codigo\s+de\s+la\s+sede[:\s]+(\d+)', text)
+    if m:
+        return int(m.group(1))
+    m = _re.search(r'sede\s+(\d+)', text)
+    if m:
+        return int(m.group(1))
+    return 1
 
 def _field_confidence(document_type: str, fields: Dict[str, Any], text: str) -> Dict[str, float]:
     normalized = normalize_text(text)
@@ -6979,6 +7014,7 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
         )
 
     _apply_document_classification_overrides(docs)
+    _number_anexo_sedes(docs)
 
     # Aplicar correcciones manuales del operador (sobreescriben el clasificador OCR)
     manual_docs = (previous_manual_review or {}).get("documents") or {}
