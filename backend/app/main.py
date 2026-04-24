@@ -3042,6 +3042,40 @@ async def case_file(case_id: str, filename: str, download_name: str = Query(defa
     return FileResponse(path, media_type=media_type, filename=response_name, content_disposition_type="attachment")
 
 
+
+@app.delete("/api/cases/{case_id}/files/{filename:path}")
+async def delete_case_file(case_id: str, filename: str):
+    try:
+        path = get_case_file_path(case_id, filename)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Archivo no encontrado.")
+    try:
+        path.unlink()
+        return {"ok": True, "deleted": filename}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/cases/{case_id}/files/{filename:path}/duplicate")
+async def duplicate_case_file(case_id: str, filename: str):
+    try:
+        src = get_case_file_path(case_id, filename)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Archivo no encontrado.")
+    import shutil as _shutil
+    stem = src.stem
+    suffix = src.suffix
+    counter = 1
+    while True:
+        new_name = f"{stem}_copia{counter}{suffix}"
+        dst = src.parent / new_name
+        if not dst.exists():
+            break
+        counter += 1
+    _shutil.copy2(src, dst)
+    return {"ok": True, "filename": new_name}
+
+
 @app.get("/api/cases/{case_id}/package")
 async def case_package(case_id: str):
     try:
