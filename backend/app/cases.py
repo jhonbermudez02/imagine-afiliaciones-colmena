@@ -1721,6 +1721,8 @@ def _normalize_company_compare(value: str) -> str:
     text = re.sub(r"\bs\s*\.\s*a\s*\.\s*s\s*\.?\b", "sas", text, flags=re.IGNORECASE)
     text = re.sub(r"\bs\s*\.\s*a\b", "sa", text, flags=re.IGNORECASE)
     text = re.sub(r"\bl\s*\.\s*t\s*\.\s*d\s*\.\s*a\s*\.?\b", "ltda", text, flags=re.IGNORECASE)
+    # Eliminar sufijos legales adicionales que no cambian la identidad de la empresa
+    text = re.sub(r"\b(bic|esal|esp|eu|zomac|sca|ips|ong|fundacion|asociacion|cooperativa)\b", "", text, flags=re.IGNORECASE)
     text = re.sub(r"[^a-z0-9]+", "", text)
     return text
 
@@ -4576,7 +4578,11 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
             }
         )
 
-    sede_principal_telefono = only_digits(form_fields.get("sede_principal_telefono", ""))
+    _tel_raw = form_fields.get("sede_principal_telefono", "") or ""
+    # Si hay multiples numeros separados por guiones/espacios, tomar el primero valido
+    _tel_parts = re.split(r"[-/,;\s]+", _tel_raw.strip())
+    _tel_valid = next((only_digits(p) for p in _tel_parts if len(only_digits(p)) in {7, 10} and not only_digits(p).startswith("0")), None)
+    sede_principal_telefono = _tel_valid or only_digits(_tel_raw)
     if sede_principal_telefono:
         if sede_principal_telefono.startswith("0"):
             rejection_reasons.append(
