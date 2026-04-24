@@ -2869,6 +2869,8 @@ async function doSearch(query) {
             const cls = caseStatusClass(status, finalStatus);
             const lbl = casePillLabel(status, finalStatus);
             const blockers = item.blockers || [];
+            const wfStatus = item.workflow_run?.status || item.status || '';
+            const isFailed = wfStatus === 'failed';
             const id = item.id || '';
             return `
                 <div class="search-result-item" data-case="${escapeHtml(id)}" tabindex="0" role="button">
@@ -2888,7 +2890,15 @@ async function doSearch(query) {
         el.querySelectorAll('[data-case]').forEach(row => {
             row.addEventListener('click', () => {
                 const id = row.dataset.case;
-                if (id) { activeCaseId = id; switchView('reporte'); loadReporteForCase(id); }
+                if (!id) return;
+                activeCaseId = id;
+                const item = results.find(r => r.id === id);
+                const st = String(item?.status || '');
+                if (st === 'completed' || st === 'stopped_prevalidacion' || st === 'stopped_926') {
+                    switchView('reporte'); loadReporteForCase(id);
+                } else {
+                    switchView('clasificacion'); loadClassifForCase(id);
+                }
             });
             row.addEventListener('keydown', e => {
                 if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); }
