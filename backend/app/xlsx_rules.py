@@ -634,6 +634,14 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
     afp_catalog = _load_name_catalog(AFP_CATALOG_PATH)
     invalid_eps = []
     invalid_afp = []
+    try:
+        valid_tokens = _build_valid_tokens(EPS_CATALOG_PATH, AFP_CATALOG_PATH)
+        eps_token_sets = [_get_entity_tokens(i.get("nombre","")) for i in json.loads(EPS_CATALOG_PATH.read_text(encoding="utf-8")) if isinstance(i,dict) and i.get("nombre") and i["nombre"] not in ("SIN DEFINIR",)]
+        afp_token_sets = [_get_entity_tokens(i.get("nombre","")) for i in json.loads(AFP_CATALOG_PATH.read_text(encoding="utf-8")) if isinstance(i,dict) and i.get("nombre") and i["nombre"] not in ("NO SUMINISTRADO","DESCONOCIDO")]
+    except Exception:
+        valid_tokens = set()
+        eps_token_sets = []
+        afp_token_sets = []
     for record in records[:1000]:
         documento = only_digits(record.get("numero_de_identificacion") or record.get("documento") or "")
         eps_value = normalize_text(record.get("eps", ""))
