@@ -481,6 +481,20 @@ def _record_first_value(record: Dict[str, Any], *keys: str) -> str:
 
 
 def _business_days_between(start: datetime, end: datetime) -> int:
+    from datetime import date as _date
+    # Festivos Colombia 2025-2026 (Ley Emiliani)
+    FESTIVOS_CO = {
+        _date(2025, 1, 1), _date(2025, 1, 6), _date(2025, 3, 24), _date(2025, 4, 17),
+        _date(2025, 4, 18), _date(2025, 5, 1), _date(2025, 6, 2), _date(2025, 6, 23),
+        _date(2025, 6, 30), _date(2025, 7, 20), _date(2025, 8, 7), _date(2025, 8, 18),
+        _date(2025, 10, 13), _date(2025, 11, 3), _date(2025, 11, 17), _date(2025, 12, 8),
+        _date(2025, 12, 25),
+        _date(2026, 1, 1), _date(2026, 1, 12), _date(2026, 3, 23), _date(2026, 4, 2),
+        _date(2026, 4, 3), _date(2026, 5, 1), _date(2026, 5, 18), _date(2026, 6, 8),
+        _date(2026, 6, 29), _date(2026, 7, 20), _date(2026, 8, 7), _date(2026, 8, 17),
+        _date(2026, 10, 12), _date(2026, 11, 2), _date(2026, 11, 16), _date(2026, 12, 8),
+        _date(2026, 12, 25),
+    }
     start_date = start.date()
     end_date = end.date()
     if end_date <= start_date:
@@ -488,7 +502,7 @@ def _business_days_between(start: datetime, end: datetime) -> int:
     business_days = 0
     current = start_date
     while current < end_date:
-        if current.weekday() < 5:
+        if current.weekday() < 5 and current not in FESTIVOS_CO:
             business_days += 1
         current = current.fromordinal(current.toordinal() + 1)
     return business_days
