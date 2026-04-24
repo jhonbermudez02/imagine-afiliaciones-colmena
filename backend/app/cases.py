@@ -2471,13 +2471,18 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
 def _number_anexo_sedes(docs: List[Dict[str, Any]]) -> None:
     """Numera los documentos anexo_sedes segun el codigo de sede detectado en el OCR.
     Si no se puede detectar, los numera secuencialmente."""
-    sede_docs = [d for d in docs if d.get("document_type") == "anexo_sedes"]
+    sede_docs = [d for d in docs if str(d.get("document_type","")).startswith("anexo_sedes")]
     if not sede_docs:
         return
     used_nums = set()
     for doc in sede_docs:
-        ocr = str(doc.get("ocr_text") or doc.get("text_preview") or "")
-        num = _detect_sede_number_from_ocr(ocr)
+        dtype = str(doc.get("document_type",""))
+        m_type = re.search(r"anexo_sedes_?(\d+)", dtype)
+        if m_type:
+            num = int(m_type.group(1))
+        else:
+            ocr = str(doc.get("ocr_text") or doc.get("text_preview") or "")
+            num = _detect_sede_number_from_ocr(ocr)
         # Evitar duplicados — si ya se uso ese numero, incrementar
         while num in used_nums:
             num += 1

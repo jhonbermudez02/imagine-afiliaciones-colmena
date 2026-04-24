@@ -18,7 +18,16 @@ const CLASSIFICATION_ORDER_KEY = 'afi-colima-classif-order-v1';
 
 const REVIEW_TYPE_OPTIONS = [
     ['formulario_afiliacion', 'Afiliación',        '01'],
-    ['anexo_sedes',           'Sedes',              '01'],
+    ['anexo_sedes',           'Sedes ·01',         '01'],
+    ['anexo_sedes_02',        'Sedes ·02',         '01'],
+    ['anexo_sedes_03',        'Sedes ·03',         '01'],
+    ['anexo_sedes_04',        'Sedes ·04',         '01'],
+    ['anexo_sedes_05',        'Sedes ·05',         '01'],
+    ['anexo_sedes_06',        'Sedes ·06',         '01'],
+    ['anexo_sedes_07',        'Sedes ·07',         '01'],
+    ['anexo_sedes_08',        'Sedes ·08',         '01'],
+    ['anexo_sedes_09',        'Sedes ·09',         '01'],
+    ['anexo_sedes_10',        'Sedes ·10',         '01'],
     ['listado_trabajadores',  'Listados',           '03'],
     ['comision',              'Comisión',           '02'],
     ['carta',                 'Carta',              '04'],
