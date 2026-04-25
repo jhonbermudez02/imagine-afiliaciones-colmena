@@ -3578,28 +3578,31 @@ def _extract_sede_info_from_sheet(sheet_obj: Any, sede_num: int) -> Dict[str, An
     prefix = f"sede_{sede_num:02d}" if sede_num > 1 else "sede_principal"
     # Extraer centros de trabajo desde fila 24 en adelante
     centros = []
-    for r in range(24, 50):
+    for r in range(24, 60):
         num_ct = sv(r, 4)
         cod_ct = sv(r, 5)
         nom_ct = sv(r, 6)
-        if not num_ct or not num_ct.replace("#N/A","").strip() or not num_ct.isdigit():
+        # Parar si encontramos "Total centros de trabajo"
+        if "total" in nom_ct.lower() or "total" in num_ct.lower():
+            break
+        if not num_ct or not num_ct.strip() or not num_ct.isdigit():
             continue
-        if "#N/A" in cod_ct or not cod_ct.strip():
+        if not cod_ct.strip() or "#N/A" in (sv(r, 11) or ""):
             continue
         centros.append({
             "numero": num_ct,
             "codigo": cod_ct,
             "nombre": nom_ct,
-            "actividad_economica": sv(r, 7),
-            "clase_riesgo": sv(r, 10),
-            "municipio": sv(r, 11),
-            "departamento": sv(r, 13),
-            "zona": sv(r, 14),
-            "direccion": sv(r, 15),
-            "telefono": only_digits(sv(r, 17)),
-            "correo": sv(r, 18),
-            "cantidad_trabajadores": sv(r, 26),
-            "monto_cotizacion": sv(r, 28),
+            "actividad_economica": sv(r, 11),
+            "clase_riesgo": sv(r, 13),
+            "municipio": sv(r, 14),
+            "departamento": sv(r, 16),
+            "zona": sv(r, 18),
+            "direccion": sv(r, 19),
+            "telefono": only_digits(sv(r, 21)),
+            "correo": sv(r, 22),
+            "cantidad_trabajadores": sv(r, 35) or sv(r, 34),
+            "monto_cotizacion": sv(r, 37) or sv(r, 36),
         })
     return {
         f"{prefix}_codigo": sv(12, 6),
