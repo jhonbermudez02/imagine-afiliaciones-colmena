@@ -2408,13 +2408,11 @@ function renderReporte(container, payload) {
                             );
 
                             html += `<div style="margin-bottom:16px;border:0.5px solid var(--c-border);border-radius:8px;overflow:hidden">
-                                <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--c-info-bg)">
+                                <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--c-info-bg);flex-wrap:wrap">
                                     <span style="font-weight:600;font-size:13px;color:var(--c-text-1)">🏢 ${escapeHtml(sedeName.replace(' - Trabajadores',''))}</span>
-                                    <span style="font-size:12px;display:flex;gap:16px;align-items:center">
-                                        <button class="classif-sort-btn" onclick="var t=document.getElementById('sc_${si}_centros');t.style.display=t.style.display==='none'?'':'none'" type="button" style="font-size:11px">Centros: <strong>${numCentros}</strong></button>
-                                        <button class="classif-sort-btn" onclick="var t=document.getElementById('sc_${si}_workers');t.style.display=t.style.display==='none'?'':'none'" type="button" style="font-size:11px">Trabajadores: <strong>${total}</strong></button>
-                                        ${sal ? `<span style="color:var(--c-text-1);font-weight:500">${escapeHtml(sal)}</span>` : ''}
-                                    </span>
+                                    <button class="classif-sort-btn" onclick="var t=document.getElementById('sc_${si}_centros');t.style.display=t.style.display==='none'?'':'none';this.classList.toggle('active')" type="button" style="font-size:11px">Centros: <strong>${numCentros}</strong></button>
+                                    <button class="classif-sort-btn" onclick="var t=document.getElementById('sc_${si}_workers');t.style.display=t.style.display==='none'?'':'none';this.classList.toggle('active')" type="button" style="font-size:11px">Trabajadores: <strong>${total}</strong></button>
+                                    ${sal ? `<span style="font-size:12px;color:var(--c-text-1);font-weight:500;margin-left:auto">${escapeHtml(sal)}</span>` : ''}
                                 </div>
                                 <div style="padding:12px">
                                     ${infoCard}
@@ -2425,15 +2423,16 @@ function renderReporte(container, payload) {
                                             <iframe src="${escapeHtml(url)}" style="width:100%;height:380px;border:1px solid var(--c-border);border-radius:6px"></iframe>
                                         </div>`).join('')}
                                     </details>` : ''}
-                                    <div id="sc_${si}_centros" style="display:none">
-                                    ${Object.entries(porCentro).map(([centro, cWorkers], ci) => {
-                                        const cId = `ct_${si}_${ci}`;
-                                        return `<div style="margin-bottom:10px;border:0.5px solid var(--c-border);border-radius:6px;overflow:hidden">
-                                            <div style="padding:8px 12px;background:var(--c-bg-2);font-size:12px;font-weight:600;color:var(--c-text-1)">🏭 Centro de costo ${escapeHtml(centro)} · ${cWorkers.length} trabajador(es)</div>
-                                        </div>`;
-                                    }).join('')}
+                                    <div id="sc_${si}_centros" style="display:none;margin-bottom:8px">
+                                        <div style="font-size:11px;font-weight:600;color:var(--c-text-2);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--c-border)">Centros de trabajo</div>
+                                        ${Object.entries(porCentro).map(([centro, cWorkers]) => `
+                                        <div style="padding:8px 10px;background:var(--c-bg-2);border-radius:6px;margin-bottom:6px;border:0.5px solid var(--c-border)">
+                                            <div style="font-size:12px;font-weight:600;color:var(--c-text-1);margin-bottom:4px">🏭 Centro de costo ${escapeHtml(centro)}</div>
+                                            <div style="font-size:11px;color:var(--c-text-2)">${cWorkers.length} trabajador(es)</div>
+                                        </div>`).join('')}
                                     </div>
                                     <div id="sc_${si}_workers" style="display:none">
+                                        <div style="font-size:11px;font-weight:600;color:var(--c-text-2);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--c-border)">Trabajadores</div>
                                         ${buildWorkerTable(workers)}
                                     </div>
                                 </div>
