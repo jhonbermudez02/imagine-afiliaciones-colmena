@@ -199,6 +199,13 @@ def _refresh_learning_artifacts() -> None:
                 "ibc salud",
                 "ibc pension",
                 "ibc pensión",
+                "planilla integrada de liquidacion",
+                "pila",
+                "operador de informacion",
+                "periodo de cotizacion",
+                "numero de planilla",
+                "total aportes",
+                "aportes en salud",
             ],
             "carta": [
                 "se adjuntan los siguientes documentos",
