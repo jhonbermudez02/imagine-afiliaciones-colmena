@@ -757,13 +757,8 @@ def _rag_classify_document(ocr_text: str, min_score: float = 0.82) -> Optional[D
         qdrant = _get_rag_client()
         if not qdrant:
             return None
-        import httpx as _httpx
-        qdrant_url = str(settings.legacy_backend_url or "").replace("8000", "11434").replace("imagine_compat_backend", "imagine_ollama")
-        ollama_url = "http://imagine_ollama:11434"
-        r = _httpx.post(f"{ollama_url}/api/embeddings",
-            json={"model": "nomic-embed-text", "prompt": ocr_text[:1500]},
-            timeout=30)
-        vector = r.json().get("embedding", [])
+        from app.embeddings import embed_text as _embed_text
+        vector = _embed_text(ocr_text[:1500])
         if not vector:
             return None
         results = qdrant.search(
@@ -802,13 +797,10 @@ def _rag_index_document(case_id: str, filename: str, ocr_text: str, document_typ
         qdrant = _get_rag_client()
         if not qdrant:
             return False
-        import httpx as _httpx, uuid as _uuid
+        import uuid as _uuid
         from qdrant_client.models import PointStruct
-        ollama_url = "http://imagine_ollama:11434"
-        r = _httpx.post(f"{ollama_url}/api/embeddings",
-            json={"model": "nomic-embed-text", "prompt": ocr_text[:1500]},
-            timeout=30)
-        vector = r.json().get("embedding", [])
+        from app.embeddings import embed_text as _embed_text
+        vector = _embed_text(ocr_text[:1500])
         if not vector:
             return False
         qdrant.upsert("afi_doc_clasificaciones", points=[PointStruct(
