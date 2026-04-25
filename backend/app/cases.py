@@ -3568,7 +3568,7 @@ def _extract_worker_records_from_rows(rows: List[tuple[Any, ...]]) -> tuple[List
 
 
 def _extract_sede_info_from_sheet(sheet_obj: Any, sede_num: int) -> Dict[str, Any]:
-    """Extrae datos de la sede desde las filas 11-16 de la hoja de trabajadores."""
+    """Extrae datos de la sede y centros de trabajo desde la hoja de trabajadores."""
     def sv(row, col):
         try:
             v = sheet_obj.cell(row, col).value
@@ -3576,6 +3576,31 @@ def _extract_sede_info_from_sheet(sheet_obj: Any, sede_num: int) -> Dict[str, An
         except Exception:
             return ""
     prefix = f"sede_{sede_num:02d}" if sede_num > 1 else "sede_principal"
+    # Extraer centros de trabajo desde fila 24 en adelante
+    centros = []
+    for r in range(24, 50):
+        num_ct = sv(r, 4)
+        cod_ct = sv(r, 5)
+        nom_ct = sv(r, 6)
+        if not num_ct or not num_ct.replace("#N/A","").strip() or not num_ct.isdigit():
+            continue
+        if "#N/A" in cod_ct or not cod_ct.strip():
+            continue
+        centros.append({
+            "numero": num_ct,
+            "codigo": cod_ct,
+            "nombre": nom_ct,
+            "actividad_economica": sv(r, 7),
+            "clase_riesgo": sv(r, 10),
+            "municipio": sv(r, 11),
+            "departamento": sv(r, 13),
+            "zona": sv(r, 14),
+            "direccion": sv(r, 15),
+            "telefono": only_digits(sv(r, 17)),
+            "correo": sv(r, 18),
+            "cantidad_trabajadores": sv(r, 26),
+            "monto_cotizacion": sv(r, 28),
+        })
     return {
         f"{prefix}_codigo": sv(12, 6),
         f"{prefix}_nombre": sv(12, 8),
@@ -3588,6 +3613,7 @@ def _extract_sede_info_from_sheet(sheet_obj: Any, sede_num: int) -> Dict[str, An
         f"responsable_{prefix}_nombre_completo": " ".join(filter(None, [sv(12,13), sv(12,17), sv(13,13), sv(13,17)])).strip(),
         f"responsable_{prefix}_tipo_documento": sv(14,13),
         f"responsable_{prefix}_numero_documento": only_digits(sv(14,17)),
+        f"{prefix}_centros_de_trabajo": centros,
     }
 
 def _extract_worker_sheet_control_totals(rows: List[tuple[Any, ...]]) -> Dict[str, int]:

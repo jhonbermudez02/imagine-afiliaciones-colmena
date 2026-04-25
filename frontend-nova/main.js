@@ -2336,7 +2336,6 @@ function renderReporte(container, payload) {
                     const formFields = a.xlsx_profile?.form_fields || {};
                     function getSedeInfo(sedeName) {
                         const num = parseInt(sedeName.match(/\d+/)?.[0] || '1');
-                        // La sede 01 siempre es sede_principal
                         const prefix = num === 1 ? 'sede_principal' : `sede_0${num}`;
                         return {
                             codigo: formFields[`${prefix}_codigo`] || '',
@@ -2348,8 +2347,33 @@ function renderReporte(container, payload) {
                             correo: formFields[`${prefix}_correo`] || '',
                             zona: formFields[`${prefix}_zona`] || '',
                             responsable: formFields[`responsable_${prefix}_nombre_completo`] || '',
-                            doc_responsable: formFields[`responsable_${prefix}_numero_documento`] || '',
+                            centros: formFields[`${prefix}_centros_de_trabajo`] || [],
                         };
+                    }
+
+                    function renderCentrosTable(centros) {
+                        if (!centros || !centros.length) return '<div style="font-size:11px;color:var(--c-text-2)">Sin centros de trabajo registrados.</div>';
+                        return `<div style="overflow-x:auto"><table class="blocker-table" style="font-size:11px">
+                            <thead><tr>
+                                <th>N°</th><th>Código</th><th>Nombre</th><th>Act. Económica</th>
+                                <th>Riesgo</th><th>Municipio</th><th>Depto</th><th>Zona</th>
+                                <th>Dirección</th><th>Teléfono</th><th>Trabajadores</th><th>Cotización</th>
+                            </tr></thead>
+                            <tbody>${centros.map(c => `<tr>
+                                <td>${escapeHtml(c.numero||'')}</td>
+                                <td>${escapeHtml(c.codigo||'')}</td>
+                                <td>${escapeHtml(c.nombre||'')}</td>
+                                <td style="max-width:180px;white-space:normal">${escapeHtml((c.actividad_economica||'').slice(0,80))}${(c.actividad_economica||'').length>80?'...':''}</td>
+                                <td>${escapeHtml(c.clase_riesgo||'')}</td>
+                                <td>${escapeHtml(c.municipio||'')}</td>
+                                <td>${escapeHtml(c.departamento||'')}</td>
+                                <td>${escapeHtml(c.zona||'')}</td>
+                                <td>${escapeHtml(c.direccion||'')}</td>
+                                <td>${escapeHtml(c.telefono||'')}</td>
+                                <td style="text-align:center">${escapeHtml(c.cantidad_trabajadores||'')}</td>
+                                <td>${escapeHtml(c.monto_cotizacion||'')}</td>
+                            </tr>`).join('')}</tbody>
+                        </table></div>`;
                     }
 
                     function renderSedeInfoCard(info) {
@@ -2425,11 +2449,7 @@ function renderReporte(container, payload) {
                                     </details>` : ''}
                                     <div id="sc_${si}_centros" style="display:none;margin-bottom:8px">
                                         <div style="font-size:11px;font-weight:600;color:var(--c-text-2);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--c-border)">Centros de trabajo</div>
-                                        ${Object.entries(porCentro).map(([centro, cWorkers]) => `
-                                        <div style="padding:8px 10px;background:var(--c-bg-2);border-radius:6px;margin-bottom:6px;border:0.5px solid var(--c-border)">
-                                            <div style="font-size:12px;font-weight:600;color:var(--c-text-1);margin-bottom:4px">🏭 Centro de costo ${escapeHtml(centro)}</div>
-                                            <div style="font-size:11px;color:var(--c-text-2)">${cWorkers.length} trabajador(es)</div>
-                                        </div>`).join('')}
+                                        ${renderCentrosTable(sedeInfo.centros)}
                                     </div>
                                     <div id="sc_${si}_workers" style="display:none">
                                         <div style="font-size:11px;font-weight:600;color:var(--c-text-2);margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--c-border)">Trabajadores</div>
