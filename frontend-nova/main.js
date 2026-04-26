@@ -425,38 +425,67 @@ function openGallery(items, payload, startIndex = 0) {
     if (!overlay) {
         overlay = document.createElement('div');
         overlay.id = 'galleryOverlay';
-        overlay.style.cssText = 'position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center';
+        overlay.tabIndex = 0;
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;outline:none';
         overlay.innerHTML = `
             <div style="position:absolute;top:12px;right:12px;display:flex;gap:8px;align-items:center">
                 <span id="galleryCounter" style="color:#fff;font-size:13px"></span>
                 <button id="galleryClose" style="background:transparent;border:1px solid #555;color:#fff;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:13px">✕ Cerrar</button>
             </div>
-            <div id="galleryLabel" style="color:#fff;font-size:11px;margin-bottom:8px;opacity:0.7;text-align:center;max-width:600px"></div>
-            <div id="galleryType" style="color:#4af;font-size:14px;font-weight:600;margin-bottom:10px;text-align:center"></div>
+            <div id="galleryLabel" style="color:#fff;font-size:11px;margin-bottom:4px;opacity:0.7;text-align:center;max-width:600px"></div>
+            <div id="galleryType" style="color:#4af;font-size:14px;font-weight:600;margin-bottom:6px;text-align:center"></div>
             <div style="position:relative;display:flex;align-items:center;gap:12px">
-                <button id="galleryPrev" style="background:transparent;border:1px solid #555;color:#fff;padding:8px 14px;border-radius:4px;cursor:pointer;font-size:18px">‹</button>
-                <div id="galleryFrame" style="width:600px;height:75vh;border:1px solid #333;border-radius:6px;overflow:hidden;background:#111;display:flex;align-items:center;justify-content:center">
+                <button id="galleryPrev" style="background:transparent;border:1px solid #555;color:#fff;padding:8px 14px;border-radius:4px;cursor:pointer;font-size:22px">‹</button>
+                <div id="galleryFrame" style="width:600px;height:68vh;border:1px solid #333;border-radius:6px;overflow:hidden;background:#111;display:flex;align-items:center;justify-content:center">
                     <div style="color:#888">Cargando...</div>
                 </div>
-                <button id="galleryNext" style="background:transparent;border:1px solid #555;color:#fff;padding:8px 14px;border-radius:4px;cursor:pointer;font-size:18px">›</button>
+                <button id="galleryNext" style="background:transparent;border:1px solid #555;color:#fff;padding:8px 14px;border-radius:4px;cursor:pointer;font-size:22px">›</button>
             </div>
-            <div style="margin-top:10px;color:#888;font-size:11px">← → para navegar · Esc para cerrar</div>
+            <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+                <select id="galleryReclassify" style="padding:4px 8px;border-radius:4px;font-size:12px;background:#222;color:#fff;border:1px solid #555">
+                    <option value="">— Reclasificar —</option>
+                    ${REVIEW_TYPE_OPTIONS.map(([v,l]) => `<option value="${v}">${escapeHtml(l)}</option>`).join('')}
+                </select>
+                <button id="galleryReclassifyBtn" style="background:#1a6ef5;color:#fff;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px">Aplicar</button>
+                <span style="color:#888;font-size:11px">↑ ↓ ← → para navegar · Esc para cerrar</span>
+            </div>
         `;
         document.body.appendChild(overlay);
         document.getElementById('galleryClose').addEventListener('click', closeGallery);
         document.getElementById('galleryPrev').addEventListener('click', () => galleryNav(-1));
         document.getElementById('galleryNext').addEventListener('click', () => galleryNav(1));
+        document.getElementById('galleryReclassifyBtn').addEventListener('click', async () => {
+            const sel = document.getElementById('galleryReclassify');
+            const newType = sel.value;
+            if (!newType || !_galleryPayload) return;
+            const item = _galleryItems[_galleryIndex];
+            if (!item) return;
+            try {
+                await fetch(`${API_URL}/api/cases/${encodeURIComponent(_galleryPayload.id)}/manual-review`, {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({kind: newType, filename: item.file, verdict: 'no', expected_type: newType})
+                });
+                showToast(`Reclasificado como "${getReviewTypeLabel(newType)}"`, 'ok');
+                document.getElementById('galleryType').textContent = getReviewTypeLabel(newType);
+                sel.value = '';
+            } catch(e) {
+                showToast('Error al reclasificar', 'err');
+            }
+        });
     }
     overlay.style.display = 'flex';
     renderGalleryItem();
-
-    document.addEventListener('keydown', galleryKeyHandler);
+    setTimeout(() => overlay.focus(), 50);
+    overlay.addEventListener('keydown', galleryKeyHandler);
 }
 
 function closeGallery() {
     const overlay = document.getElementById('galleryOverlay');
-    if (overlay) overlay.style.display = 'none';
-    document.removeEventListener('keydown', galleryKeyHandler);
+    if (overlay) {
+        overlay.style.display = 'none';
+        overlay.removeEventListener('keydown', galleryKeyHandler);
+    }
 }
 
 function galleryKeyHandler(e) {
