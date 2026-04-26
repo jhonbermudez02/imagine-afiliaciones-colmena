@@ -5075,6 +5075,15 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
                     "documento": row_document,
                 }
             )
+        elif codigo_ct and not only_digits(str(codigo_ct)):
+            row_errors.append(
+                {
+                    "row": row_excel,
+                    "code": "CENTRO_TRABAJO_CODIGO_INVALIDO",
+                    "message": f"El código del centro de trabajo en fila {row_excel} contiene '{codigo_ct}' que no es numérico. Verifique si es un error de digitación en el XLSX (por ejemplo, letra 'I' en lugar del número '1').",
+                    "documento": row_document,
+                }
+            )
 
         if tipo_trabajador == "INDEPENDIENTE":
             tipo_contrato = _record_first_value(record, "tipo_de_contrato", "tipo_contrato")

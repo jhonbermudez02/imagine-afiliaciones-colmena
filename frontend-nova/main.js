@@ -403,12 +403,85 @@ function switchView(viewId) {
     if (viewId === 'admin') loadSystemStatus();
     if (viewId === 'clasificacion') {
         populateCaseSelect('classifCaseSelect', onClassifCaseChange);
-        // Si hay un caso activo pendiente de cargar, cargarlo después del populate
         if (activeCaseId) setTimeout(() => loadClassifForCase(activeCaseId), 100);
     }
     if (viewId === 'validacion') populateCaseSelect('validacionCaseSelect', onValidacionCaseChange);
     if (viewId === 'visor') populateCaseSelect('visorCaseSelect', onVisorCaseChange);
     if (viewId === 'reporte') loadReporteSidebar();
+}
+
+// ── Galería de verificación rápida ──────────────────────────────
+let _galleryItems = [];
+let _galleryIndex = 0;
+let _galleryPayload = null;
+
+function openGallery(items, payload, startIndex = 0) {
+    _galleryItems = items.filter(i => i.kind !== 'xlsx');
+    _galleryIndex = startIndex;
+    _galleryPayload = payload;
+    if (!_galleryItems.length) { showToast('No hay imágenes para mostrar en galería', 'warn'); return; }
+
+    let overlay = document.getElementById('galleryOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'galleryOverlay';
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center';
+        overlay.innerHTML = `
+            <div style="position:absolute;top:12px;right:12px;display:flex;gap:8px;align-items:center">
+                <span id="galleryCounter" style="color:#fff;font-size:13px"></span>
+                <button id="galleryClose" style="background:transparent;border:1px solid #555;color:#fff;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:13px">✕ Cerrar</button>
+            </div>
+            <div id="galleryLabel" style="color:#fff;font-size:11px;margin-bottom:8px;opacity:0.7;text-align:center;max-width:600px"></div>
+            <div id="galleryType" style="color:#4af;font-size:14px;font-weight:600;margin-bottom:10px;text-align:center"></div>
+            <div style="position:relative;display:flex;align-items:center;gap:12px">
+                <button id="galleryPrev" style="background:transparent;border:1px solid #555;color:#fff;padding:8px 14px;border-radius:4px;cursor:pointer;font-size:18px">‹</button>
+                <div id="galleryFrame" style="width:600px;height:75vh;border:1px solid #333;border-radius:6px;overflow:hidden;background:#111;display:flex;align-items:center;justify-content:center">
+                    <div style="color:#888">Cargando...</div>
+                </div>
+                <button id="galleryNext" style="background:transparent;border:1px solid #555;color:#fff;padding:8px 14px;border-radius:4px;cursor:pointer;font-size:18px">›</button>
+            </div>
+            <div style="margin-top:10px;color:#888;font-size:11px">← → para navegar · Esc para cerrar</div>
+        `;
+        document.body.appendChild(overlay);
+        document.getElementById('galleryClose').addEventListener('click', closeGallery);
+        document.getElementById('galleryPrev').addEventListener('click', () => galleryNav(-1));
+        document.getElementById('galleryNext').addEventListener('click', () => galleryNav(1));
+    }
+    overlay.style.display = 'flex';
+    renderGalleryItem();
+
+    document.addEventListener('keydown', galleryKeyHandler);
+}
+
+function closeGallery() {
+    const overlay = document.getElementById('galleryOverlay');
+    if (overlay) overlay.style.display = 'none';
+    document.removeEventListener('keydown', galleryKeyHandler);
+}
+
+function galleryKeyHandler(e) {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') galleryNav(1);
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') galleryNav(-1);
+    else if (e.key === 'Escape') closeGallery();
+}
+
+function galleryNav(dir) {
+    _galleryIndex = (_galleryIndex + dir + _galleryItems.length) % _galleryItems.length;
+    renderGalleryItem();
+}
+
+function renderGalleryItem() {
+    const item = _galleryItems[_galleryIndex];
+    if (!item || !_galleryPayload) return;
+    const url = `${API_URL}/api/cases/${encodeURIComponent(_galleryPayload.id)}/files/${encodeURIComponent(item.file)}?inline=true`;
+    document.getElementById('galleryCounter').textContent = `${_galleryIndex + 1} / ${_galleryItems.length}`;
+    document.getElementById('galleryLabel').textContent = item.displayName || item.file;
+    document.getElementById('galleryType').textContent = item.label || item.type || '';
+    const frame = document.getElementById('galleryFrame');
+    const isPdf = item.file.toLowerCase().endsWith('.pdf');
+    frame.innerHTML = isPdf
+        ? `<iframe src="${escapeHtml(url)}" style="width:100%;height:100%;border:none"></iframe>`
+        : `<img src="${escapeHtml(url)}" style="max-width:100%;max-height:100%;object-fit:contain" alt="${escapeHtml(item.label||'')}">`;
 }
 
 function updateTopbarActions(viewId) {
@@ -1199,18 +1272,21 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
             <span>${items.length} documentos</span><span style="font-size:10px;opacity:0.7">↕ scroll</span>
         </div>
-        <div style="display:flex;gap:4px;flex-wrap:wrap">
+        <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
             <span style="font-size:10px;opacity:0.6;margin-right:2px">Ordenar:</span>
             <button class="classif-sort-btn ${sortBy==='default'?'active':''}" data-sort="default" type="button">Original</button>
             <button class="classif-sort-btn ${sortBy==='tipo'?'active':''}" data-sort="tipo" type="button">Tipo${dirs('tipo')}</button>
             <button class="classif-sort-btn ${sortBy==='nombre'?'active':''}" data-sort="nombre" type="button">Nombre${dirs('nombre')}</button>
             <button class="classif-sort-btn ${sortBy==='estado'?'active':''}" data-sort="estado" type="button">Estado${dirs('estado')}</button>
+            <button class="classif-sort-btn" id="btnGalleryMode" type="button" style="margin-left:auto;color:var(--c-blue)">🖼 Galería</button>
         </div>
     `;
     el.parentElement?.insertBefore(header, el);
 
-    // Listeners de ordenamiento
-    header.querySelectorAll('.classif-sort-btn').forEach(btn => {
+    // Listener galería
+    header.querySelector('#btnGalleryMode')?.addEventListener('click', () => {
+        openGallery(items, payload, 0);
+    });
         btn.addEventListener('click', () => {
             const col = btn.dataset.sort;
             const newDir = (sortBy === col) ? -sortDir : 1;
