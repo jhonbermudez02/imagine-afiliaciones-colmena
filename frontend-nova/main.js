@@ -1287,8 +1287,12 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
     header.querySelector('#btnGalleryMode')?.addEventListener('click', () => {
         openGallery(items, payload, 0);
     });
+
+    // Listeners de ordenamiento
+    header.querySelectorAll('.classif-sort-btn[data-sort]').forEach(btn => {
         btn.addEventListener('click', () => {
             const col = btn.dataset.sort;
+            if (col === 'gallery') return;
             const newDir = (sortBy === col) ? -sortDir : 1;
             renderClassifDocList(payload, col, newDir);
         });
