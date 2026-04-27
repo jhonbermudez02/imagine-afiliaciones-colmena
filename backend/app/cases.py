@@ -3588,10 +3588,16 @@ def _extract_sede_info_from_sheet(sheet_obj: Any, sede_num: int) -> Dict[str, An
             continue
         if not cod_ct.strip() or "#N/A" in (sv(r, 11) or ""):
             continue
+        monto_raw = sv(r, 38) or sv(r, 37) or sv(r, 36)
+        try:
+            monto_fmt = "$ {:,.0f}".format(float(str(monto_raw).replace(",","").replace("$","").strip())) if monto_raw else ""
+        except Exception:
+            monto_fmt = str(monto_raw)
         centros.append({
             "numero": num_ct,
             "codigo": cod_ct,
             "nombre": nom_ct,
+            "actividad_economica_codigo": sv(r, 9),
             "actividad_economica": sv(r, 11),
             "clase_riesgo": sv(r, 13),
             "municipio": sv(r, 14),
@@ -3600,8 +3606,16 @@ def _extract_sede_info_from_sheet(sheet_obj: Any, sede_num: int) -> Dict[str, An
             "direccion": sv(r, 19),
             "telefono": only_digits(sv(r, 21)),
             "correo": sv(r, 22),
-            "cantidad_trabajadores": sv(r, 35) or sv(r, 34),
-            "monto_cotizacion": sv(r, 37) or sv(r, 36),
+            "responsable_apellido1": sv(r, 25),
+            "responsable_apellido2": sv(r, 26),
+            "responsable_nombre1": sv(r, 27),
+            "responsable_nombre2": sv(r, 28),
+            "responsable_tipo_doc": sv(r, 29),
+            "responsable_num_doc": only_digits(sv(r, 30)),
+            "responsable_correo": sv(r, 31),
+            "novedades": sv(r, 34),
+            "cantidad_trabajadores": sv(r, 36),
+            "monto_cotizacion": monto_fmt,
         })
     return {
         f"{prefix}_codigo": sv(12, 6),

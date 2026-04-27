@@ -2462,26 +2462,38 @@ function renderReporte(container, payload) {
 
                     function renderCentrosTable(centros) {
                         if (!centros || !centros.length) return '<div style="font-size:11px;color:var(--c-text-2)">Sin centros de trabajo registrados.</div>';
-                        return `<div style="overflow-x:auto"><table class="blocker-table" style="font-size:11px">
+                        return `<div style="overflow-x:auto"><table class="blocker-table" style="font-size:11px;min-width:900px">
                             <thead><tr>
-                                <th>N°</th><th>Código</th><th>Nombre</th><th>Act. Económica</th>
+                                <th>N°</th><th>Código</th><th>Nombre</th>
+                                <th>Cód. Act.</th><th>Actividad económica</th>
                                 <th>Riesgo</th><th>Municipio</th><th>Depto</th><th>Zona</th>
-                                <th>Dirección</th><th>Teléfono</th><th>Trabajadores</th><th>Cotización</th>
+                                <th>Dirección</th><th>Teléfono</th><th>Correo sede</th>
+                                <th>Responsable</th><th>Doc</th><th>Correo resp.</th>
+                                <th>Novedades</th><th>Trabajadores</th><th>Cotización</th>
                             </tr></thead>
-                            <tbody>${centros.map(c => `<tr>
+                            <tbody>${centros.map(c => {
+                                const responsable = [c.responsable_apellido1, c.responsable_apellido2, c.responsable_nombre1, c.responsable_nombre2].filter(Boolean).join(' ');
+                                const docResp = c.responsable_tipo_doc && c.responsable_num_doc ? `${c.responsable_tipo_doc} ${c.responsable_num_doc}` : '';
+                                return `<tr>
                                 <td>${escapeHtml(c.numero||'')}</td>
                                 <td>${escapeHtml(c.codigo||'')}</td>
-                                <td>${escapeHtml(c.nombre||'')}</td>
-                                <td style="max-width:180px;white-space:normal">${escapeHtml((c.actividad_economica||'').slice(0,80))}${(c.actividad_economica||'').length>80?'...':''}</td>
-                                <td>${escapeHtml(c.clase_riesgo||'')}</td>
+                                <td style="white-space:nowrap">${escapeHtml(c.nombre||'')}</td>
+                                <td>${escapeHtml(c.actividad_economica_codigo||'')}</td>
+                                <td style="max-width:200px;white-space:normal">${escapeHtml((c.actividad_economica||'').slice(0,100))}${(c.actividad_economica||'').length>100?'...':''}</td>
+                                <td style="text-align:center">${escapeHtml(c.clase_riesgo||'')}</td>
                                 <td>${escapeHtml(c.municipio||'')}</td>
                                 <td>${escapeHtml(c.departamento||'')}</td>
                                 <td>${escapeHtml(c.zona||'')}</td>
                                 <td>${escapeHtml(c.direccion||'')}</td>
                                 <td>${escapeHtml(c.telefono||'')}</td>
+                                <td>${escapeHtml(c.correo||'')}</td>
+                                <td style="white-space:nowrap">${escapeHtml(responsable)}</td>
+                                <td>${escapeHtml(docResp)}</td>
+                                <td>${escapeHtml(c.responsable_correo||'')}</td>
+                                <td>${escapeHtml(c.novedades||'')}</td>
                                 <td style="text-align:center">${escapeHtml(c.cantidad_trabajadores||'')}</td>
-                                <td>${escapeHtml(c.monto_cotizacion||'')}</td>
-                            </tr>`).join('')}</tbody>
+                                <td style="text-align:right">${escapeHtml(c.monto_cotizacion||'')}</td>
+                            </tr>`;}).join('')}</tbody>
                         </table></div>`;
                     }
 
