@@ -5072,15 +5072,14 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
         elif tipo_salario not in valid_tipo_salario:
             row_errors.append({"row": row_excel, "code": "TIPO_SALARIO_INVALIDO", "message": f"Tipo de salario inválido en fila {row_excel} ({tipo_salario_raw}).", "documento": row_document})
 
-        codigo_ct = only_digits(
-            _record_first_value(
-                record,
-                "codigo_del_centro_de_trabajo",
-                "codigo_centro_trabajo",
-                "codigo_ct",
-            )
-        )
-        if not codigo_ct:
+        codigo_ct_raw = str(_record_first_value(
+            record,
+            "codigo_del_centro_de_trabajo",
+            "codigo_centro_trabajo",
+            "codigo_ct",
+        ) or "").strip()
+        codigo_ct = only_digits(codigo_ct_raw)
+        if not codigo_ct_raw:
             row_errors.append(
                 {
                     "row": row_excel,
@@ -5089,12 +5088,12 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
                     "documento": row_document,
                 }
             )
-        elif codigo_ct and not only_digits(str(codigo_ct)):
+        elif codigo_ct_raw and not codigo_ct:
             row_errors.append(
                 {
                     "row": row_excel,
                     "code": "CENTRO_TRABAJO_CODIGO_INVALIDO",
-                    "message": f"El código del centro de trabajo en fila {row_excel} contiene '{codigo_ct}' que no es numérico. Verifique si es un error de digitación en el XLSX (por ejemplo, letra 'I' en lugar del número '1').",
+                    "message": f"El código del centro de trabajo en fila {row_excel} contiene '{codigo_ct_raw}' que no es numérico. Verifique si es un error de digitación en el XLSX (por ejemplo, letra 'I' en lugar del número '1').",
                     "documento": row_document,
                 }
             )
