@@ -2086,17 +2086,16 @@ function renderReporte(container, payload) {
             <div class="report-section">
                 <div class="report-section-title">Datos del contrato</div>
                 <div class="report-grid">
-                    <div class="report-kv clickable" data-panel="sedes" role="button" tabindex="0" title="Ver sedes, centros de trabajo y trabajadores">
+                    <div class="report-kv">
                         <div class="report-kv-label">Sedes</div>
                         <div class="report-kv-val">${escapeHtml(String(sedes))}</div>
-                        <div class="report-kv-hint">Ver sedes →</div>
                     </div>
                     <div class="report-kv">
                         <div class="report-kv-label">Nómina total</div>
                         <div class="report-kv-val">${escapeHtml(nomina)}</div>
                     </div>
                 </div>
-                <div id="reportDataPanel" class="report-data-panel hidden"></div>
+                <div id="reportSedesInline" style="margin-top:12px"></div>
             </div>
             ${blockers.length ? `
                 <div class="report-section">
@@ -2792,6 +2791,86 @@ function renderReporte(container, payload) {
             showToast('Error al reprocesar: ' + e.message, 'err');
         }
     });
+
+    // ── Sedes inline automático ──────────────────────────────
+    setTimeout(() => {
+        const sedesInline = document.getElementById('reportSedesInline');
+        if (!sedesInline) return;
+        const sedeRecords = a.xlsx_profile?.records || [];
+        const workerCounts = a.xlsx_profile?.worker_sheet_counts || {};
+        const salaryCounts = a.xlsx_profile?.worker_sheet_salary_totals || {};
+        const formFields = a.xlsx_profile?.form_fields || {};
+        const sedeDocs = (a.documents || []).filter(d => String(d.document_type||'').startsWith('anexo_sedes'));
+        const sedeDocGroups = {};
+        sedeDocs.forEach(doc => {
+            const prefix = doc.filename.replace(/__p\d+\.pdf$/i, '');
+            if (!sedeDocGroups[prefix]) sedeDocGroups[prefix] = [];
+            sedeDocGroups[prefix].push(doc);
+        });
+        const sedeDocGroupList = Object.values(sedeDocGroups);
+        const bySede = {};
+        for (const r of sedeRecords) {
+            const sede = r._sheet || 'Sin sede';
+            if (!bySede[sede]) bySede[sede] = [];
+            bySede[sede].push(r);
+        }
+        const sedeNames = Object.keys(workerCounts).length ? Object.keys(workerCounts) : Object.keys(bySede);
+        if (!sedeNames.length) { sedesInline.innerHTML = ''; return; }
+
+        function getSedeInfoInline(sedeName) {
+            const num = parseInt(sedeName.match(/\d+/)?.[0] || '1');
+            const prefix = num === 1 ? 'sede_principal' : `sede_0${num}`;
+            return {
+                codigo: formFields[`${prefix}_codigo`] || '',
+                nombre: formFields[`${prefix}_nombre`] || '',
+                direccion: formFields[`${prefix}_direccion`] || '',
+                municipio: formFields[`${prefix}_municipio_distrito`] || '',
+                departamento: formFields[`${prefix}_departamento`] || '',
+                telefono: formFields[`${prefix}_telefono`] || '',
+                correo: formFields[`${prefix}_correo`] || '',
+                zona: formFields[`${prefix}_zona`] || '',
+                responsable: formFields[`responsable_${prefix}_nombre_completo`] || '',
+                centros: formFields[`${prefix}_centros_de_trabajo`] || [],
+            };
+        }
+
+        let html = '';
+        sedeNames.forEach((sedeName, si) => {
+            const workers = bySede[sedeName] || [];
+            const total = workerCounts[sedeName] ?? workers.length;
+            if (!total && !workers.length) return;
+            const nominaSede = workers.reduce((sum, w) => sum + (Number(w.salario) || 0), 0);
+            const sal = nominaSede > 0 ? '$ ' + nominaSede.toLocaleString('es-CO') : '';
+            const info = getSedeInfoInline(sedeName);
+            const sedeGroup = sedeDocGroupList[si] || [];
+            const pdfUrl = sedeGroup[0] ? `${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(sedeGroup[0].filename)}?inline=true` : '';
+
+            const infoFields = [
+                ['Código', info.codigo], ['Nombre', info.nombre],
+                ['Dirección', info.direccion], ['Municipio', info.municipio],
+                ['Departamento', info.departamento], ['Zona', info.zona],
+                ['Teléfono', info.telefono], ['Correo', info.correo],
+                ['Responsable', info.responsable],
+            ].filter(([,v]) => v);
+
+            html += `<div style="margin-bottom:12px;border:0.5px solid var(--c-border);border-radius:8px;overflow:hidden">
+                <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--c-info-bg);flex-wrap:wrap">
+                    <span style="font-weight:600;font-size:13px;color:var(--c-text-1)">🏢 ${escapeHtml(sedeName.replace(' - Trabajadores',''))}</span>
+                    <span style="font-size:12px;color:var(--c-text-2)">Trabajadores: <strong>${total}</strong></span>
+                    ${sal ? `<span style="font-size:12px;color:var(--c-text-1);font-weight:500">${escapeHtml(sal)}</span>` : ''}
+                </div>
+                <div style="padding:10px 12px">
+                    ${infoFields.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:4px;margin-bottom:8px">
+                        ${infoFields.map(([k,v]) => `<div style="font-size:11px"><span style="color:var(--c-text-2);font-weight:600">${escapeHtml(k)}: </span><span style="color:var(--c-text-1)">${escapeHtml(String(v))}</span></div>`).join('')}
+                    </div>` : ''}
+                    ${pdfUrl ? `<details style="margin-bottom:6px"><summary style="cursor:pointer;font-size:11px;color:var(--c-blue);font-weight:600">📄 Ver formulario (${sedeGroup.length} pág.)</summary>
+                        ${sedeGroup.map((doc,pi) => `<iframe src="${escapeHtml(`${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(doc.filename)}?inline=true`)}" style="width:100%;height:350px;border:1px solid var(--c-border);border-radius:4px;margin-top:4px"></iframe>`).join('')}
+                    </details>` : ''}
+                </div>
+            </div>`;
+        });
+        sedesInline.innerHTML = html;
+    }, 100);
 }
 
 // ── PRODUCCIÓN (COLMENA) ─────────────────────────────────────
