@@ -2095,7 +2095,7 @@ function renderReporte(container, payload) {
                         <div class="report-kv-val">${escapeHtml(nomina)}</div>
                     </div>
                 </div>
-                <div id="reportSedesInline" style="margin-top:12px"></div>
+                <div id="reportSedesInline" style="margin-top:12px;max-height:600px;overflow-y:auto"></div>
             </div>
             ${blockers.length ? `
                 <div class="report-section">
