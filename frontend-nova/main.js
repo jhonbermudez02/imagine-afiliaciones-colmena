@@ -2854,10 +2854,27 @@ function renderReporte(container, payload) {
             ].filter(([,v]) => v);
 
             const trabId = `ri_trab_${si}`;
+            // Tabla simple de trabajadores para el reporte inline
+            function buildWorkerTableSimple(ws) {
+                if (!ws || !ws.length) return '<div style="font-size:11px;color:var(--c-text-2);padding:8px">Sin trabajadores.</div>';
+                return `<div style="overflow-x:auto"><table class="blocker-table" style="font-size:11px;min-width:600px">
+                    <thead><tr><th>Documento</th><th>Nombre</th><th>Cargo</th><th>Salario</th><th>EPS</th><th>Pensión</th><th>Municipio</th></tr></thead>
+                    <tbody>${ws.map(w => `<tr>
+                        <td>${escapeHtml(w.numero_de_identificacion||'')}</td>
+                        <td>${escapeHtml([w.primer_apellido,w.segundo_apellido,w.primer_nombre,w.segundo_nombre].filter(Boolean).join(' '))}</td>
+                        <td>${escapeHtml(w.cargo||w.nombre_del_cargo||'')}</td>
+                        <td>${escapeHtml(w.salario?'$ '+Number(w.salario).toLocaleString('es-CO'):'')}</td>
+                        <td>${escapeHtml(w.eps||'')}</td>
+                        <td>${escapeHtml(w.pension||w.afp||'')}</td>
+                        <td>${escapeHtml(w.municipio_distrito||w.municipio||'')}</td>
+                    </tr>`).join('')}</tbody>
+                </table></div>`;
+            }
+
             html += `<div style="margin-bottom:12px;border:0.5px solid var(--c-border);border-radius:8px;overflow:hidden">
                 <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--c-info-bg);flex-wrap:wrap">
                     <span style="font-weight:600;font-size:13px;color:var(--c-text-1)">🏢 ${escapeHtml(sedeName.replace(' - Trabajadores',''))}</span>
-                    <button class="classif-sort-btn" onclick="var t=document.getElementById('${trabId}');t.style.display=t.style.display==='none'?'':'none';this.classList.toggle('active')" type="button" style="font-size:11px">👷 Trabajadores: <strong>${total}</strong></button>
+                    <button class="classif-sort-btn" onclick="var t=document.getElementById('${trabId}');var open=t.style.display!=='none';t.style.display=open?'none':'';this.classList.toggle('active',!open)" type="button" style="font-size:11px">👷 Trabajadores: <strong>${total}</strong></button>
                     ${sal ? `<span style="font-size:12px;color:var(--c-text-1);font-weight:500">${escapeHtml(sal)}</span>` : ''}
                 </div>
                 <div style="padding:10px 12px">
@@ -2867,7 +2884,7 @@ function renderReporte(container, payload) {
                     ${pdfUrl ? `<details style="margin-bottom:6px"><summary style="cursor:pointer;font-size:11px;color:var(--c-blue);font-weight:600">📄 Ver formulario (${sedeGroup.length} pág.)</summary>
                         ${sedeGroup.map((doc,pi) => `<iframe src="${escapeHtml(`${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(doc.filename)}?inline=true`)}" style="width:100%;height:350px;border:1px solid var(--c-border);border-radius:4px;margin-top:4px"></iframe>`).join('')}
                     </details>` : ''}
-                    <div id="${trabId}" style="display:none;overflow-y:auto;max-height:400px">${buildWorkerTable ? buildWorkerTable(workers) : ''}</div>
+                    <div id="${trabId}" style="display:none;margin-top:8px;max-height:400px;overflow-y:auto">${buildWorkerTableSimple(workers)}</div>
                 </div>
             </div>`;
         });
