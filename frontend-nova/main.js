@@ -2095,7 +2095,7 @@ function renderReporte(container, payload) {
                         <div class="report-kv-val">${escapeHtml(nomina)}</div>
                     </div>
                 </div>
-                <div id="reportSedesInline" style="margin-top:12px;max-height:600px;overflow-y:auto"></div>
+                <div id="reportSedesInline" style="margin-top:12px"></div>
             </div>
             ${blockers.length ? `
                 <div class="report-section">
@@ -2853,10 +2853,11 @@ function renderReporte(container, payload) {
                 ['Responsable', info.responsable],
             ].filter(([,v]) => v);
 
+            const trabId = `ri_trab_${si}`;
             html += `<div style="margin-bottom:12px;border:0.5px solid var(--c-border);border-radius:8px;overflow:hidden">
                 <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--c-info-bg);flex-wrap:wrap">
                     <span style="font-weight:600;font-size:13px;color:var(--c-text-1)">🏢 ${escapeHtml(sedeName.replace(' - Trabajadores',''))}</span>
-                    <span style="font-size:12px;color:var(--c-text-2)">Trabajadores: <strong>${total}</strong></span>
+                    <button class="classif-sort-btn" onclick="var t=document.getElementById('${trabId}');t.style.display=t.style.display==='none'?'':'none';this.classList.toggle('active')" type="button" style="font-size:11px">👷 Trabajadores: <strong>${total}</strong></button>
                     ${sal ? `<span style="font-size:12px;color:var(--c-text-1);font-weight:500">${escapeHtml(sal)}</span>` : ''}
                 </div>
                 <div style="padding:10px 12px">
@@ -2866,6 +2867,7 @@ function renderReporte(container, payload) {
                     ${pdfUrl ? `<details style="margin-bottom:6px"><summary style="cursor:pointer;font-size:11px;color:var(--c-blue);font-weight:600">📄 Ver formulario (${sedeGroup.length} pág.)</summary>
                         ${sedeGroup.map((doc,pi) => `<iframe src="${escapeHtml(`${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(doc.filename)}?inline=true`)}" style="width:100%;height:350px;border:1px solid var(--c-border);border-radius:4px;margin-top:4px"></iframe>`).join('')}
                     </details>` : ''}
+                    <div id="${trabId}" style="display:none;overflow-y:auto;max-height:400px">${buildWorkerTable ? buildWorkerTable(workers) : ''}</div>
                 </div>
             </div>`;
         });

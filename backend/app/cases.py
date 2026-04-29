@@ -5006,11 +5006,12 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
             )
             actividad_economica_estudiante = only_digits(actividad_economica_estudiante_raw)
             if not actividad_economica_estudiante:
-                row_errors.append(
+                row_warnings.append(
                     {
                         "row": row_excel,
                         "code": "ESTUDIANTE_ACTIVIDAD_ECONOMICA_VACIA",
-                        "message": f"Para tipo de trabajador estudiante, el código de actividad económica es obligatorio en fila {row_excel}.",
+                        "severity": "warning",
+                        "message": f"Para tipo de trabajador estudiante, el código de actividad económica no está diligenciado en fila {row_excel}. Verifique si aplica.",
                         "documento": row_document,
                     }
                 )
