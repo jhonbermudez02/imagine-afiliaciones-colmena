@@ -87,6 +87,28 @@ async def startup_repair_workflow_queue() -> None:
             _start_next_queued_case_if_any()
     except Exception as exc:
         logger.error("No pude reparar la cola de ejecución al iniciar: %s", exc)
+    # Auto-recuperar casos en disco que no tienen workflow completado
+    try:
+        import asyncio as _asyncio
+        from pathlib import Path as _Path
+        cases_dir = _Path(settings.cases_dir)
+        recovered = 0
+        for case_dir in cases_dir.iterdir():
+            if not case_dir.name.startswith("case-"):
+                continue
+            try:
+                payload = load_case(case_dir.name)
+                wf = (payload.get("analysis") or {}).get("workflow_run") or {}
+                wf_status = str(wf.get("status") or "").strip()
+                if wf_status in ("", "none", "failed", "queued"):
+                    enqueue_case_workflow(case_dir.name)
+                    recovered += 1
+            except Exception:
+                pass
+        if recovered:
+            logger.info("Auto-recuperados %d casos huérfanos al iniciar", recovered)
+    except Exception as exc:
+        logger.error("Error en auto-recuperación de casos: %s", exc)
 
 
 class ConsultaRequest(BaseModel):
@@ -2215,6 +2237,87 @@ def _build_specialized_case_response(intent: str, case_item: Dict[str, Any]) -> 
             )
     return None
 
+
+
+# ── Admin Tables API ─────────────────────────────────────────
+@app.get("/api/admin/tables/eps")
+async def get_eps_catalog():
+    from pathlib import Path
+    import json
+    p = Path("/data/evals/eps_catalog.json")
+    return {"items": json.loads(p.read_text()) if p.exists() else []}
+
+@app.post("/api/admin/tables/eps")
+async def save_eps_catalog(payload: dict):
+    from pathlib import Path
+    import json
+    p = Path("/data/evals/eps_catalog.json")
+    p.write_text(json.dumps(payload.get("items", []), ensure_ascii=False, indent=2))
+    return {"ok": True}
+
+@app.get("/api/admin/tables/afp")
+async def get_afp_catalog():
+    from pathlib import Path
+    import json
+    p = Path("/data/evals/afp_catalog.json")
+    return {"items": json.loads(p.read_text()) if p.exists() else []}
+
+@app.post("/api/admin/tables/afp")
+async def save_afp_catalog(payload: dict):
+    from pathlib import Path
+    import json
+    p = Path("/data/evals/afp_catalog.json")
+    p.write_text(json.dumps(payload.get("items", []), ensure_ascii=False, indent=2))
+    return {"ok": True}
+
+@app.get("/api/admin/tables/asesores")
+async def get_asesores():
+    from pathlib import Path
+    import json
+    p = Path("/data/evals/asesores_colmena.json")
+    d = json.loads(p.read_text()) if p.exists() else {}
+    return {"comerciales": d.get("comerciales", []), "intermediarios": d.get("intermediarios", [])}
+
+@app.post("/api/admin/tables/asesores")
+async def save_asesores(payload: dict):
+    from pathlib import Path
+    import json
+    p = Path("/data/evals/asesores_colmena.json")
+    comerciales = payload.get("comerciales", [])
+    intermediarios = payload.get("intermediarios", [])
+    d = {"comerciales": comerciales, "intermediarios": intermediarios, "total": len(comerciales) + len(intermediarios)}
+    p.write_text(json.dumps(d, ensure_ascii=False, indent=2))
+    return {"ok": True}
+
+@app.get("/api/admin/tables/smmlv")
+async def get_smmlv():
+    from pathlib import Path
+    import json
+    p = Path("/data/evals/smmlv_table.json")
+    return json.loads(p.read_text()) if p.exists() else {}
+
+@app.post("/api/admin/tables/smmlv")
+async def save_smmlv(payload: dict):
+    from pathlib import Path
+    import json
+    p = Path("/data/evals/smmlv_table.json")
+    p.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+    return {"ok": True}
+
+@app.get("/api/admin/tables/recipients")
+async def get_recipients():
+    from pathlib import Path
+    import json
+    p = Path(settings.notification_recipients_path)
+    return json.loads(p.read_text()) if p.exists() else {}
+
+@app.post("/api/admin/tables/recipients")
+async def save_recipients(payload: dict):
+    from pathlib import Path
+    import json
+    p = Path(settings.notification_recipients_path)
+    p.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+    return {"ok": True}
 
 @app.get("/")
 async def root():
