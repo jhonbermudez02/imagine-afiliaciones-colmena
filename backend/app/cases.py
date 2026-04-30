@@ -4840,7 +4840,7 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
     valid_zonas = {"U", "R"}
     valid_sexos = {"M", "F", "T", "NB", "O"}
     valid_tipo_documento = {"CC", "CE", "CD", "SC", "PE", "PT", "RC", "TI", "NI", "PPT", "PEP", "PA", "AS"}
-    valid_tipo_trabajador = {"DEPENDIENTE", "INDEPENDIENTE", "ESTUDIANTE", "PENSIONADO", "APRENDIZ", "COOPERADO", "SERVICIO DOMESTICO", "SERVICIO DOMÉSTICO"}
+    valid_tipo_trabajador = {"DEPENDIENTE", "INDEPENDIENTE", "ESTUDIANTE", "PENSIONADO", "APRENDIZ", "COOPERADO", "SERVICIODOMESTICO", "SERVICIODOMÉSTICO"}
     valid_tipo_salario = {"FIJO", "VARIABLE", "INTEGRAL"}
     today = datetime.now()
     afiliacion_inicio_cobertura = _parse_date_value(form_fields.get("fecha_inicio_cobertura", ""))
