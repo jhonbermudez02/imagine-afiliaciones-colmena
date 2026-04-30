@@ -848,7 +848,11 @@ def _validate_asesor_en_tabla(cedula: str, codigo_intermediario: str) -> bool:
     asesores = _load_asesores_colmena()
     if not asesores.get("loaded"):
         return True
-    cedula_clean = only_digits(cedula)
+    # Normalizar NIT: quitar puntos y digito de verificacion (ej: 901.778.677-3 -> 901778677)
+    cedula_str = str(cedula).strip()
+    if '-' in cedula_str:
+        cedula_str = cedula_str.split('-')[0]
+    cedula_clean = only_digits(cedula_str)
     if codigo_intermediario in {"1", "01"}:
         return cedula_clean in asesores.get("comerciales", {})
     elif codigo_intermediario in {"3", "03"}:
@@ -3547,7 +3551,7 @@ def _extract_worker_records_from_rows(rows: List[tuple[Any, ...]]) -> tuple[List
             if normalize_haystack(document_value) in {"total", "total_centros_de_trabajo"}:
                 break
             if document_value or name_value:
-                if doc_digits and len(doc_digits) >= 5 and doc_type in {"CC", "CE", "CD", "SC", "PE", "PT", "RC", "TI", "NI"}:
+                if doc_digits and len(doc_digits) >= 5 and doc_type in {"CC", "CE", "CD", "SC", "PE", "PT", "RC", "TI", "NI", "PPT", "PEP", "PA", "AS"}:
                     record["numero_de_identificacion"] = doc_digits
                     if not record.get("fecha_de_nacimiento"):
                         parts = [
@@ -4835,8 +4839,8 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
     valid_jornadas = {"UNICA", "TURNOS", "ROTATIVA"}
     valid_zonas = {"U", "R"}
     valid_sexos = {"M", "F", "T", "NB", "O"}
-    valid_tipo_documento = {"CC", "CE", "CD", "SC", "PE", "PT", "RC", "TI", "NI"}
-    valid_tipo_trabajador = {"DEPENDIENTE", "INDEPENDIENTE", "ESTUDIANTE", "PENSIONADO", "APRENDIZ", "COOPERADO"}
+    valid_tipo_documento = {"CC", "CE", "CD", "SC", "PE", "PT", "RC", "TI", "NI", "PPT", "PEP", "PA", "AS"}
+    valid_tipo_trabajador = {"DEPENDIENTE", "INDEPENDIENTE", "ESTUDIANTE", "PENSIONADO", "APRENDIZ", "COOPERADO", "SERVICIO DOMESTICO", "SERVICIO DOMÉSTICO"}
     valid_tipo_salario = {"FIJO", "VARIABLE", "INTEGRAL"}
     today = datetime.now()
     afiliacion_inicio_cobertura = _parse_date_value(form_fields.get("fecha_inicio_cobertura", ""))

@@ -580,7 +580,7 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
     )
     if expected_nomina > 0 and actual_nomina > 0 and expected_nomina != actual_nomina:
         delta = abs(expected_nomina - actual_nomina)
-        tolerance = max(1000, int(expected_nomina * 0.01))
+        tolerance = max(1000, int(expected_nomina * 0.02))  # 2% tolerancia para diferencias de redondeo
         if delta > tolerance:
             blockers.append(
                 {
