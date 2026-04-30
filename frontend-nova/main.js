@@ -400,7 +400,7 @@ function switchView(viewId) {
     if (viewId === 'produccion') loadProduccion();
     if (viewId === 'entrenamiento') { loadFeedbackNotes(); syncFeedbackName(); }
     if (viewId === 'busqueda') { doSearch(''); }
-    if (viewId === 'admin') loadSystemStatus();
+    if (viewId === 'admin') { loadSystemStatus(); setTimeout(loadAdminTables, 200); }
     if (viewId === 'clasificacion') {
         populateCaseSelect('classifCaseSelect', onClassifCaseChange);
         if (activeCaseId) setTimeout(() => loadClassifForCase(activeCaseId), 100);
@@ -3298,6 +3298,281 @@ async function reindexKnowledge() {
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Reindexar conocimiento'; }
     }
+}
+
+// ── Panel de Administración de Tablas ──────────────────────────
+async function loadAdminTables() {
+    const el = document.getElementById('adminTablesPanel');
+    if (!el) return;
+    el.innerHTML = `<div style="font-size:12px;color:var(--c-text-2)">Cargando tablas...</div>`;
+
+    try {
+        const [epsR, afpR, aseR, smlR, recR] = await Promise.all([
+            fetch(`${API_URL}/api/admin/tables/eps`).then(r=>r.json()),
+            fetch(`${API_URL}/api/admin/tables/afp`).then(r=>r.json()),
+            fetch(`${API_URL}/api/admin/tables/asesores`).then(r=>r.json()),
+            fetch(`${API_URL}/api/admin/tables/smmlv`).then(r=>r.json()),
+            fetch(`${API_URL}/api/admin/tables/recipients`).then(r=>r.json()),
+        ]);
+
+        el.innerHTML = `
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+            ${['eps','afp','asesores','smmlv','destinatarios'].map(t=>`
+            <button class="classif-sort-btn ${t==='eps'?'active':''}" onclick="showTable('${t}')" type="button" id="tabBtn_${t}">${
+                t==='eps'?'EPS':t==='afp'?'AFP':t==='asesores'?'Asesores':t==='smmlv'?'SMMLV':'Destinatarios'
+            }</button>`).join('')}
+        </div>
+        <div id="tableContent_eps" class="table-panel"></div>
+        <div id="tableContent_afp" class="table-panel" style="display:none"></div>
+        <div id="tableContent_asesores" class="table-panel" style="display:none"></div>
+        <div id="tableContent_smmlv" class="table-panel" style="display:none"></div>
+        <div id="tableContent_destinatarios" class="table-panel" style="display:none"></div>
+        `;
+
+        // EPS
+        renderCatalogTable('eps', epsR.items, ['codigo','nombre','na'], ['Código','Nombre','N/A'],
+            async (items) => {
+                await fetch(`${API_URL}/api/admin/tables/eps`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
+            }
+        );
+
+        // AFP
+        renderCatalogTable('afp', afpR.items, ['codigo','nombre','activo'], ['Código','Nombre','Activo'],
+            async (items) => {
+                await fetch(`${API_URL}/api/admin/tables/afp`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
+            }
+        );
+
+        // Asesores
+        renderAsesoresTable(aseR);
+
+        // SMMLV
+        renderSmmlvTable(smlR);
+
+        // Destinatarios
+        renderRecipientsTable(recR);
+
+        showTable('eps');
+
+    } catch(e) {
+        el.innerHTML = `<div style="color:var(--c-err)">Error cargando tablas: ${e.message}</div>`;
+    }
+}
+
+function showTable(name) {
+    ['eps','afp','asesores','smmlv','destinatarios'].forEach(t => {
+        document.getElementById(`tableContent_${t}`)?.style && (document.getElementById(`tableContent_${t}`).style.display = t===name?'':'none');
+        document.getElementById(`tabBtn_${t}`)?.classList.toggle('active', t===name);
+    });
+}
+
+function renderCatalogTable(type, items, fields, headers, saveFn) {
+    const el = document.getElementById(`tableContent_${type}`);
+    if (!el) return;
+    let data = [...items];
+
+    const render = () => {
+        el.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <span style="font-size:11px;color:var(--c-text-2)">${data.length} registros</span>
+            <div style="display:flex;gap:6px">
+                <input id="search_${type}" placeholder="Buscar..." style="padding:4px 8px;border:1px solid var(--c-border);border-radius:4px;font-size:11px;width:150px" oninput="filterTable('${type}')">
+                <button class="classif-sort-btn" type="button" onclick="addRowCatalog('${type}', ${JSON.stringify(fields)})">+ Agregar</button>
+                <button class="btn-primary" style="font-size:11px;padding:4px 10px" type="button" onclick="saveCatalog('${type}')">💾 Guardar</button>
+            </div>
+        </div>
+        <div style="overflow-x:auto;max-height:400px;overflow-y:auto">
+        <table class="blocker-table" style="font-size:11px" id="tbl_${type}">
+            <thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}<th style="width:40px"></th></tr></thead>
+            <tbody>
+            ${data.map((row,i) => `<tr data-index="${i}">
+                ${fields.map(f=>`<td><input value="${escapeHtml(String(row[f]??''))}" data-field="${f}" style="width:100%;border:none;background:transparent;font-size:11px;padding:2px" onchange="updateRowCatalog('${type}',${i},'${f}',this.value)"></td>`).join('')}
+                <td><button type="button" style="background:transparent;border:none;cursor:pointer;color:var(--c-err);font-size:12px" onclick="deleteRowCatalog('${type}',${i})">✕</button></td>
+            </tr>`).join('')}
+            </tbody>
+        </table>
+        </div>`;
+        window[`_tableData_${type}`] = data;
+        window[`_tableSaveFn_${type}`] = saveFn;
+    };
+    render();
+    window[`_tableData_${type}`] = data;
+    window[`_tableSaveFn_${type}`] = saveFn;
+    window[`_tableRender_${type}`] = render;
+}
+
+window.addRowCatalog = function(type, fields) {
+    const data = window[`_tableData_${type}`];
+    const newRow = {};
+    fields.forEach(f => newRow[f] = '');
+    data.push(newRow);
+    window[`_tableRender_${type}`]?.();
+};
+
+window.updateRowCatalog = function(type, idx, field, value) {
+    const data = window[`_tableData_${type}`];
+    if (data[idx]) data[idx][field] = value;
+};
+
+window.deleteRowCatalog = function(type, idx) {
+    const data = window[`_tableData_${type}`];
+    data.splice(idx, 1);
+    window[`_tableRender_${type}`]?.();
+};
+
+window.saveCatalog = async function(type) {
+    const data = window[`_tableData_${type}`];
+    const saveFn = window[`_tableSaveFn_${type}`];
+    try {
+        await saveFn(data);
+        showToast(`Tabla ${type.toUpperCase()} guardada (${data.length} registros)`, 'ok');
+    } catch(e) {
+        showToast('Error guardando: ' + e.message, 'err');
+    }
+};
+
+window.filterTable = function(type) {
+    const q = document.getElementById(`search_${type}`)?.value?.toLowerCase() || '';
+    document.querySelectorAll(`#tbl_${type} tbody tr`).forEach(tr => {
+        tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+};
+
+function renderAsesoresTable(data) {
+    const el = document.getElementById('tableContent_asesores');
+    if (!el) return;
+
+    const render = (tipo) => {
+        const items = tipo === 'comerciales' ? data.comerciales : data.intermediarios;
+        return `
+        <div style="overflow-x:auto;max-height:350px;overflow-y:auto">
+        <table class="blocker-table" style="font-size:11px" id="tbl_ase_${tipo}">
+            <thead><tr><th>Cédula/NIT</th><th>Nombre</th><th>Tipo</th><th style="width:40px"></th></tr></thead>
+            <tbody>
+            ${items.map((row,i) => `<tr>
+                <td><input value="${escapeHtml(String(row.cedula??''))}" style="width:100%;border:none;background:transparent;font-size:11px;padding:2px" onchange="data_ase_${tipo}[${i}].cedula=this.value"></td>
+                <td><input value="${escapeHtml(String(row.nombre??''))}" style="width:100%;border:none;background:transparent;font-size:11px;padding:2px" onchange="data_ase_${tipo}[${i}].nombre=this.value"></td>
+                <td><input value="${escapeHtml(String(row.tipo??''))}" style="width:100%;border:none;background:transparent;font-size:11px;padding:2px" onchange="data_ase_${tipo}[${i}].tipo=this.value"></td>
+                <td><button type="button" style="background:transparent;border:none;cursor:pointer;color:var(--c-err);font-size:12px" onclick="window._aseData.${tipo}.splice(${i},1);renderAse()">✕</button></td>
+            </tr>`).join('')}
+            </tbody>
+        </table></div>`;
+    };
+
+    window._aseData = { comerciales: [...data.comerciales], intermediarios: [...data.intermediarios] };
+
+    window.renderAse = () => {
+        document.getElementById('ase_com_body').innerHTML = render('comerciales');
+        document.getElementById('ase_int_body').innerHTML = render('intermediarios');
+        document.getElementById('ase_com_count').textContent = window._aseData.comerciales.length;
+        document.getElementById('ase_int_count').textContent = window._aseData.intermediarios.length;
+    };
+
+    el.innerHTML = `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+        <button class="btn-primary" style="font-size:11px;padding:4px 10px" type="button" onclick="saveAsesores()">💾 Guardar asesores</button>
+    </div>
+    <div style="font-weight:600;font-size:12px;margin-bottom:4px">Comerciales (<span id="ase_com_count">${data.comerciales.length}</span>)
+        <button class="classif-sort-btn" type="button" style="margin-left:8px;font-size:11px" onclick="window._aseData.comerciales.push({cedula:'',nombre:'',tipo:'consultor'});renderAse()">+ Agregar</button>
+    </div>
+    <div id="ase_com_body">${render('comerciales')}</div>
+    <div style="font-weight:600;font-size:12px;margin:12px 0 4px">Intermediarios (<span id="ase_int_count">${data.intermediarios.length}</span>)
+        <button class="classif-sort-btn" type="button" style="margin-left:8px;font-size:11px" onclick="window._aseData.intermediarios.push({cedula:'',nombre:'',tipo:'AGENCIA'});renderAse()">+ Agregar</button>
+    </div>
+    <div id="ase_int_body">${render('intermediarios')}</div>
+    `;
+
+    window.saveAsesores = async () => {
+        try {
+            await fetch(`${API_URL}/api/admin/tables/asesores`, {method:'POST',headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({comerciales:window._aseData.comerciales, intermediarios:window._aseData.intermediarios})});
+            showToast(`Asesores guardados (${window._aseData.comerciales.length + window._aseData.intermediarios.length} registros)`, 'ok');
+        } catch(e) { showToast('Error: ' + e.message, 'err'); }
+    };
+}
+
+function renderSmmlvTable(data) {
+    const el = document.getElementById('tableContent_smmlv');
+    if (!el) return;
+    window._smmlvData = {...data};
+
+    const render = () => {
+        el.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <span style="font-size:12px;color:var(--c-text-2)">Salario Mínimo Mensual Legal Vigente por año</span>
+            <div style="display:flex;gap:6px">
+                <button class="classif-sort-btn" type="button" onclick="addSmmlvYear()">+ Agregar año</button>
+                <button class="btn-primary" style="font-size:11px;padding:4px 10px" type="button" onclick="saveSmmlv()">💾 Guardar</button>
+            </div>
+        </div>
+        <table class="blocker-table" style="font-size:12px;width:300px">
+            <thead><tr><th>Año</th><th>SMMLV ($)</th><th style="width:40px"></th></tr></thead>
+            <tbody>
+            ${Object.entries(window._smmlvData).sort().map(([year,val]) => `<tr>
+                <td><strong>${escapeHtml(year)}</strong></td>
+                <td><input value="${val}" type="number" style="width:120px;border:1px solid var(--c-border);border-radius:4px;padding:2px 6px;font-size:12px" onchange="window._smmlvData['${year}']=parseInt(this.value)"></td>
+                <td><button type="button" style="background:transparent;border:none;cursor:pointer;color:var(--c-err)" onclick="delete window._smmlvData['${year}'];renderSmmlvInner()">✕</button></td>
+            </tr>`).join('')}
+            </tbody>
+        </table>`;
+        window.renderSmmlvInner = render;
+    };
+    render();
+
+    window.addSmmlvYear = () => {
+        const year = prompt('Año (ej: 2027):');
+        const val = prompt('Valor SMMLV:');
+        if (year && val) { window._smmlvData[year] = parseInt(val); render(); }
+    };
+    window.saveSmmlv = async () => {
+        try {
+            await fetch(`${API_URL}/api/admin/tables/smmlv`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(window._smmlvData)});
+            showToast('SMMLV guardado', 'ok');
+        } catch(e) { showToast('Error: ' + e.message, 'err'); }
+    };
+}
+
+function renderRecipientsTable(data) {
+    const el = document.getElementById('tableContent_destinatarios');
+    if (!el) return;
+    window._recData = { sender: data.sender || {}, recipients: [...(data.recipients || [])] };
+
+    const render = () => {
+        el.innerHTML = `
+        <div style="margin-bottom:12px;padding:10px;background:var(--c-info-bg);border-radius:6px">
+            <div style="font-size:11px;font-weight:600;margin-bottom:6px">Remitente</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <input placeholder="Nombre remitente" value="${escapeHtml(window._recData.sender.name||'')}" style="padding:4px 8px;border:1px solid var(--c-border);border-radius:4px;font-size:11px;flex:1" onchange="window._recData.sender.name=this.value">
+                <input placeholder="Correo remitente" value="${escapeHtml(window._recData.sender.email||'')}" style="padding:4px 8px;border:1px solid var(--c-border);border-radius:4px;font-size:11px;flex:1" onchange="window._recData.sender.email=this.value">
+            </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <span style="font-size:11px;font-weight:600">Destinatarios (${window._recData.recipients.length})</span>
+            <div style="display:flex;gap:6px">
+                <button class="classif-sort-btn" type="button" onclick="window._recData.recipients.push({name:'',email:''});renderRecInner()">+ Agregar</button>
+                <button class="btn-primary" style="font-size:11px;padding:4px 10px" type="button" onclick="saveRecipients()">💾 Guardar</button>
+            </div>
+        </div>
+        <table class="blocker-table" style="font-size:11px">
+            <thead><tr><th>Nombre</th><th>Correo electrónico</th><th style="width:40px"></th></tr></thead>
+            <tbody>
+            ${window._recData.recipients.map((r,i) => `<tr>
+                <td><input value="${escapeHtml(r.name||'')}" style="width:100%;border:none;background:transparent;font-size:11px;padding:2px" onchange="window._recData.recipients[${i}].name=this.value"></td>
+                <td><input value="${escapeHtml(r.email||'')}" style="width:100%;border:none;background:transparent;font-size:11px;padding:2px" onchange="window._recData.recipients[${i}].email=this.value"></td>
+                <td><button type="button" style="background:transparent;border:none;cursor:pointer;color:var(--c-err);font-size:12px" onclick="window._recData.recipients.splice(${i},1);renderRecInner()">✕</button></td>
+            </tr>`).join('')}
+            </tbody>
+        </table>`;
+        window.renderRecInner = render;
+    };
+    render();
+
+    window.saveRecipients = async () => {
+        try {
+            await fetch(`${API_URL}/api/admin/tables/recipients`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(window._recData)});
+            showToast('Destinatarios guardados', 'ok');
+        } catch(e) { showToast('Error: ' + e.message, 'err'); }
+    };
 }
 
 async function exportReviews() {
