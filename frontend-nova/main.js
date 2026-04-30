@@ -3301,6 +3301,15 @@ async function reindexKnowledge() {
 }
 
 // ── Panel de Administración de Tablas ──────────────────────────
+function showTable(name) {
+    ['eps','afp','asesores','smmlv','destinatarios'].forEach(t => {
+        const panel = document.getElementById(`tableContent_${t}`);
+        const btn = document.getElementById(`tabBtn_${t}`);
+        if (panel) panel.style.display = t === name ? '' : 'none';
+        if (btn) btn.classList.toggle('active', t === name);
+    });
+}
+
 async function loadAdminTables() {
     const el = document.getElementById('adminTablesPanel');
     if (!el) return;
@@ -3357,13 +3366,6 @@ async function loadAdminTables() {
     } catch(e) {
         el.innerHTML = `<div style="color:var(--c-err)">Error cargando tablas: ${e.message}</div>`;
     }
-}
-
-function showTable(name) {
-    ['eps','afp','asesores','smmlv','destinatarios'].forEach(t => {
-        document.getElementById(`tableContent_${t}`)?.style && (document.getElementById(`tableContent_${t}`).style.display = t===name?'':'none');
-        document.getElementById(`tabBtn_${t}`)?.classList.toggle('active', t===name);
-    });
 }
 
 function renderCatalogTable(type, items, fields, headers, saveFn) {
@@ -3441,52 +3443,52 @@ window.filterTable = function(type) {
 function renderAsesoresTable(data) {
     const el = document.getElementById('tableContent_asesores');
     if (!el) return;
-
-    const render = (tipo) => {
-        const items = tipo === 'comerciales' ? data.comerciales : data.intermediarios;
-        return `
-        <div style="overflow-x:auto;max-height:350px;overflow-y:auto">
-        <table class="blocker-table" style="font-size:11px" id="tbl_ase_${tipo}">
-            <thead><tr><th>Cédula/NIT</th><th>Nombre</th><th>Tipo</th><th style="width:40px"></th></tr></thead>
-            <tbody>
-            ${items.map((row,i) => `<tr>
-                <td><input value="${escapeHtml(String(row.cedula??''))}" style="width:100%;border:none;background:transparent;font-size:11px;padding:2px" onchange="data_ase_${tipo}[${i}].cedula=this.value"></td>
-                <td><input value="${escapeHtml(String(row.nombre??''))}" style="width:100%;border:none;background:transparent;font-size:11px;padding:2px" onchange="data_ase_${tipo}[${i}].nombre=this.value"></td>
-                <td><input value="${escapeHtml(String(row.tipo??''))}" style="width:100%;border:none;background:transparent;font-size:11px;padding:2px" onchange="data_ase_${tipo}[${i}].tipo=this.value"></td>
-                <td><button type="button" style="background:transparent;border:none;cursor:pointer;color:var(--c-err);font-size:12px" onclick="window._aseData.${tipo}.splice(${i},1);renderAse()">✕</button></td>
-            </tr>`).join('')}
-            </tbody>
-        </table></div>`;
-    };
-
     window._aseData = { comerciales: [...data.comerciales], intermediarios: [...data.intermediarios] };
 
     window.renderAse = () => {
-        document.getElementById('ase_com_body').innerHTML = render('comerciales');
-        document.getElementById('ase_int_body').innerHTML = render('intermediarios');
-        document.getElementById('ase_com_count').textContent = window._aseData.comerciales.length;
-        document.getElementById('ase_int_count').textContent = window._aseData.intermediarios.length;
+        ['comerciales','intermediarios'].forEach(tipo => {
+            const items = window._aseData[tipo];
+            const body = document.getElementById(`ase_${tipo}_body`);
+            const count = document.getElementById(`ase_${tipo}_count`);
+            if (count) count.textContent = items.length;
+            if (body) body.innerHTML = `<div style="overflow-x:auto;max-height:300px;overflow-y:auto">
+            <table class="blocker-table" style="font-size:11px">
+                <thead><tr><th>Cédula/NIT</th><th>Nombre</th><th>Tipo</th><th style="width:40px"></th></tr></thead>
+                <tbody>${items.map((row,i) => `<tr>
+                    <td><input value="${escapeHtml(String(row.cedula??''))}" style="width:100%;border:none;background:transparent;font-size:11px" onchange="window._aseData.${tipo}[${i}].cedula=this.value"></td>
+                    <td><input value="${escapeHtml(String(row.nombre??''))}" style="width:100%;border:none;background:transparent;font-size:11px" onchange="window._aseData.${tipo}[${i}].nombre=this.value"></td>
+                    <td><input value="${escapeHtml(String(row.tipo??''))}" style="width:80px;border:none;background:transparent;font-size:11px" onchange="window._aseData.${tipo}[${i}].tipo=this.value"></td>
+                    <td><button type="button" style="background:transparent;border:none;cursor:pointer;color:var(--c-err)" onclick="window._aseData.${tipo}.splice(${i},1);window.renderAse()">✕</button></td>
+                </tr>`).join('')}</tbody>
+            </table></div>`;
+        });
     };
 
     el.innerHTML = `
-    <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
-        <button class="btn-primary" style="font-size:11px;padding:4px 10px" type="button" onclick="saveAsesores()">💾 Guardar asesores</button>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+        <button class="btn-primary" style="font-size:11px;padding:5px 14px" type="button" onclick="window.saveAsesores()">💾 Guardar todos los asesores</button>
     </div>
-    <div style="font-weight:600;font-size:12px;margin-bottom:4px">Comerciales (<span id="ase_com_count">${data.comerciales.length}</span>)
-        <button class="classif-sort-btn" type="button" style="margin-left:8px;font-size:11px" onclick="window._aseData.comerciales.push({cedula:'',nombre:'',tipo:'consultor'});renderAse()">+ Agregar</button>
+    <div style="font-weight:600;font-size:12px;margin-bottom:6px;display:flex;align-items:center;gap:8px">
+        Comerciales (<span id="ase_comerciales_count">${data.comerciales.length}</span>)
+        <button class="classif-sort-btn" type="button" onclick="window._aseData.comerciales.unshift({cedula:'',nombre:'',tipo:'consultor'});window.renderAse()">+ Agregar</button>
     </div>
-    <div id="ase_com_body">${render('comerciales')}</div>
-    <div style="font-weight:600;font-size:12px;margin:12px 0 4px">Intermediarios (<span id="ase_int_count">${data.intermediarios.length}</span>)
-        <button class="classif-sort-btn" type="button" style="margin-left:8px;font-size:11px" onclick="window._aseData.intermediarios.push({cedula:'',nombre:'',tipo:'AGENCIA'});renderAse()">+ Agregar</button>
+    <div id="ase_comerciales_body"></div>
+    <div style="font-weight:600;font-size:12px;margin:14px 0 6px;display:flex;align-items:center;gap:8px">
+        Intermediarios (<span id="ase_intermediarios_count">${data.intermediarios.length}</span>)
+        <button class="classif-sort-btn" type="button" onclick="window._aseData.intermediarios.unshift({cedula:'',nombre:'',tipo:'AGENCIA'});window.renderAse()">+ Agregar</button>
     </div>
-    <div id="ase_int_body">${render('intermediarios')}</div>
-    `;
+    <div id="ase_intermediarios_body"></div>`;
+
+    window.renderAse();
 
     window.saveAsesores = async () => {
         try {
-            await fetch(`${API_URL}/api/admin/tables/asesores`, {method:'POST',headers:{'Content-Type':'application/json'},
-                body:JSON.stringify({comerciales:window._aseData.comerciales, intermediarios:window._aseData.intermediarios})});
-            showToast(`Asesores guardados (${window._aseData.comerciales.length + window._aseData.intermediarios.length} registros)`, 'ok');
+            const r = await fetch(`${API_URL}/api/admin/tables/asesores`, {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({comerciales: window._aseData.comerciales, intermediarios: window._aseData.intermediarios})
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            showToast(`Asesores guardados — ${window._aseData.comerciales.length + window._aseData.intermediarios.length} registros`, 'ok');
         } catch(e) { showToast('Error: ' + e.message, 'err'); }
     };
 }
