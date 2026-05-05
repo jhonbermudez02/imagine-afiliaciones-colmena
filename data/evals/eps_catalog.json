@@ -1,8 +1,8 @@
 [
   {
-    "codigo": 0,
-    "nombre": "SIN DEFINIR",
-    "na": 78
+    "codigo": 9,
+    "nombre": "ESP SURAMERICANA",
+    "na": 82
   },
   {
     "codigo": 1,
@@ -453,5 +453,15 @@
     "codigo": 27000,
     "nombre": "DIRECCION DEPARTAMANETAL DE SALUD DEL CHOCO",
     "na": 45
+  },
+  {
+    "nombre": "ASMET SALUD - ASOCIACIÓN MUTUA",
+    "codigo": "",
+    "na": ""
+  },
+  {
+    "nombre": "ASMET SALUD - ASOCIACIÓN MUTUAL LA ESPERANZA",
+    "codigo": "",
+    "na": ""
   }
 ]

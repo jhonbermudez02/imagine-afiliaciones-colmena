@@ -21,6 +21,25 @@ def only_digits(value: Any) -> str:
     return re.sub(r"\D+", "", str(value or ""))
 
 
+def _is_strict_numeric_value(value: Any) -> bool:
+    text = normalize_text(value)
+    if not text:
+        return False
+    return bool(re.fullmatch(r"\d+", text))
+
+
+def _worker_document_raw(record: Dict[str, Any]) -> str:
+    return normalize_text(
+        record.get("_raw_numero_de_identificacion")
+        or record.get("_raw_documento")
+        or record.get("documento")
+        or record.get("numero_documento")
+        or record.get("num_id_trabajador")
+        or record.get("numero_de_identificacion")
+        or ""
+    )
+
+
 def _valid_date(value: Any) -> bool:
     text = normalize_text(value)
     if not text:
@@ -141,6 +160,7 @@ ALLOWED_ESTADO_CUENTA = {"al día", "al dia", "en mora", "acuerdo de pago", "inc
 SMMLV_TABLE_PATH = Path(__file__).resolve().parents[2] / "data" / "evals" / "smmlv_table.json"
 EPS_CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "evals" / "eps_catalog.json"
 AFP_CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "evals" / "afp_catalog.json"
+PILA_CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "evals" / "pila_catalog.json"
 DEFAULT_SMMLV_TABLE = {
     "2025": 1423500,
     "2026": 1750905,
@@ -201,20 +221,16 @@ def _resolve_smmlv_value(form_fields: Dict[str, Any]) -> tuple[str, int]:
 
 
 def _rag_validate_eps_afp(value: str, tipo: str) -> bool:
-    """Valida EPS o AFP usando RAG (Qdrant + nomic-embed-text). 
+    """Valida EPS o AFP usando RAG con el motor de embeddings configurado.
     Retorna True si es válido, False si no."""
     if not value or len(value.strip()) < 3:
         return True  # Sin valor, no validar
     try:
         from qdrant_client import QdrantClient
-        import httpx as _httpx
+        from app.embeddings import embed_text
         qdrant = QdrantClient(host="imagine_qdrant", port=6333)
         col = "afi_eps_catalog" if tipo == "eps" else "afi_afp_catalog"
-        r = _httpx.post("http://imagine_ollama:11434/api/embeddings",
-            json={"model": "nomic-embed-text", 
-                  "prompt": f"{'EPS entidad de salud' if tipo=='eps' else 'AFP fondo de pensiones'}: {value}"},
-            timeout=15)
-        vector = r.json().get("embedding", [])
+        vector = embed_text(f"{'EPS entidad de salud' if tipo=='eps' else 'AFP fondo de pensiones'}: {value}")
         if not vector:
             return True  # Si falla RAG, no bloquear
         results = qdrant.search(collection_name=col, query_vector=vector, limit=1, score_threshold=0.82)
@@ -264,6 +280,15 @@ def _build_valid_tokens(eps_catalog_path: Path, afp_catalog_path: Path) -> set:
                     valid.update(_get_entity_tokens(item["nombre"]))
         except Exception:
             pass
+    try:
+        for item in json.loads(PILA_CATALOG_PATH.read_text(encoding="utf-8")):
+            if not isinstance(item, dict):
+                continue
+            for value in _pila_alias_values(item):
+                if value:
+                    valid.update(_get_entity_tokens(str(value)))
+    except Exception:
+        pass
     _EPS_AFP_VALID_TOKENS = valid
     return valid
 
@@ -303,6 +328,30 @@ def _load_name_catalog(path: Path) -> set[str]:
         normalized = _normalize_catalog_name(item.get("nombre"))
         if normalized:
             names.add(normalized)
+    return names
+
+
+def _pila_alias_values(item: Dict[str, Any]) -> List[Any]:
+    aliases = item.get("alias") or []
+    if not isinstance(aliases, list):
+        aliases = re.split(r"[,;\n]+", str(aliases))
+    return [item.get("nombre_oficial"), *aliases]
+
+
+def _load_pila_name_catalog(subsystem: str) -> set[str]:
+    try:
+        payload = json.loads(PILA_CATALOG_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        payload = []
+    names: set[str] = set()
+    subsystem = subsystem.upper()
+    for item in payload or []:
+        if not isinstance(item, dict) or str(item.get("subsistema") or "").upper() != subsystem:
+            continue
+        for value in _pila_alias_values(item):
+            normalized = _normalize_catalog_name(value)
+            if normalized:
+                names.add(normalized)
     return names
 
 
@@ -611,6 +660,33 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
             }
         )
 
+    invalid_worker_documents = []
+    for record in records[:1000]:
+        raw_document = _worker_document_raw(record)
+        if raw_document and not _is_strict_numeric_value(raw_document):
+            invalid_worker_documents.append(
+                (
+                    raw_document,
+                    normalize_text(record.get("_sheet", "")),
+                    normalize_text(record.get("_row", "")),
+                )
+            )
+            if len(invalid_worker_documents) >= 10:
+                break
+    if invalid_worker_documents:
+        blockers.append(
+            {
+                "code": "XLSX_SECONDARY_DOCUMENTO_NO_NUMERICO",
+                "severity": "blocker",
+                "message": "Se identifican registros de trabajadores con documentos que contienen caracteres no numéricos: "
+                + "; ".join(
+                    " | ".join(part for part in [doc, sheet, f"fila {row}" if row else ""] if part)
+                    for doc, sheet, row in invalid_worker_documents
+                )
+                + ".",
+            }
+        )
+
     smmlv_year, smmlv_value = _resolve_smmlv_value(form_fields)
     salarios_bajos = []
     for record in records[:500]:
@@ -621,7 +697,7 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
             or record.get("ingreso_base_de_cotizacion")
             or ""
         )
-        documento = only_digits(record.get("numero_de_identificacion") or record.get("documento") or "")
+        documento = only_digits(_worker_document_raw(record))
         if salario and salario < smmlv_value:
             salarios_bajos.append((documento, salario, normalize_text(record.get("_sheet", "")), normalize_text(record.get("_row", ""))))
             if len(salarios_bajos) >= 5:
@@ -640,20 +716,29 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
             }
         )
 
-    eps_catalog = _load_name_catalog(EPS_CATALOG_PATH)
-    afp_catalog = _load_name_catalog(AFP_CATALOG_PATH)
+    eps_catalog = _load_name_catalog(EPS_CATALOG_PATH) | _load_pila_name_catalog("EPS")
+    afp_catalog = _load_name_catalog(AFP_CATALOG_PATH) | _load_pila_name_catalog("AFP")
     invalid_eps = []
     invalid_afp = []
     try:
         valid_tokens = _build_valid_tokens(EPS_CATALOG_PATH, AFP_CATALOG_PATH)
         eps_token_sets = [_get_entity_tokens(i.get("nombre","")) for i in json.loads(EPS_CATALOG_PATH.read_text(encoding="utf-8")) if isinstance(i,dict) and i.get("nombre") and i["nombre"] not in ("SIN DEFINIR",)]
         afp_token_sets = [_get_entity_tokens(i.get("nombre","")) for i in json.loads(AFP_CATALOG_PATH.read_text(encoding="utf-8")) if isinstance(i,dict) and i.get("nombre") and i["nombre"] not in ("NO SUMINISTRADO","DESCONOCIDO")]
+        for item in json.loads(PILA_CATALOG_PATH.read_text(encoding="utf-8")):
+            if not isinstance(item, dict):
+                continue
+            values = _pila_alias_values(item)
+            token_sets = [_get_entity_tokens(str(value)) for value in values if value]
+            if str(item.get("subsistema") or "").upper() == "EPS":
+                eps_token_sets.extend(token_sets)
+            elif str(item.get("subsistema") or "").upper() == "AFP":
+                afp_token_sets.extend(token_sets)
     except Exception:
         valid_tokens = set()
         eps_token_sets = []
         afp_token_sets = []
     for record in records[:1000]:
-        documento = only_digits(record.get("numero_de_identificacion") or record.get("documento") or "")
+        documento = only_digits(_worker_document_raw(record))
         eps_value = normalize_text(record.get("eps", ""))
         afp_value = normalize_text(record.get("pension") or record.get("afp") or "")
         sheet = normalize_text(record.get("_sheet", ""))
@@ -671,11 +756,11 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
             if not afp_match:
                 invalid_afp.append((documento, afp_value, sheet, row))
     if invalid_eps:
-        blockers.append(
+        alerts.append(
             {
                 "code": "XLSX_SECONDARY_EPS_INVALID",
-                "severity": "blocker",
-                "message": "Se detectaron trabajadores con EPS que no cruza contra la tabla paramétrica: "
+                "severity": "warning",
+                "message": "Se detectaron trabajadores con EPS que no cruza contra el catálogo PILA/EPS de referencia; revisar nombre, sin devolución automática: "
                 + "; ".join(
                     " | ".join(part for part in [doc or "n/d", eps, sheet, f"fila {row}" if row else ""] if part)
                     for doc, eps, sheet, row in invalid_eps
@@ -684,11 +769,11 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
             }
         )
     if invalid_afp:
-        blockers.append(
+        alerts.append(
             {
                 "code": "XLSX_SECONDARY_AFP_INVALID",
-                "severity": "blocker",
-                "message": "Se detectaron trabajadores con AFP que no cruza contra la tabla paramétrica: "
+                "severity": "warning",
+                "message": "Se detectaron trabajadores con AFP que no cruza contra el catálogo PILA/AFP de referencia; revisar nombre, sin devolución automática: "
                 + "; ".join(
                     " | ".join(part for part in [doc or "n/d", afp, sheet, f"fila {row}" if row else ""] if part)
                     for doc, afp, sheet, row in invalid_afp
@@ -712,7 +797,7 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
             continue
         invalid_births.append(
             (
-                only_digits(record.get("numero_de_identificacion") or record.get("documento") or ""),
+                only_digits(_worker_document_raw(record)),
                 normalize_text(day),
                 normalize_text(month),
                 normalize_text(year),
@@ -760,7 +845,7 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
         if marked < 2:
             special_worker_issues.append(
                 (
-                    only_digits(record.get("numero_de_identificacion") or record.get("documento") or ""),
+                    only_digits(_worker_document_raw(record)),
                     normalize_text(record.get("tipo_de_trabajador", "")),
                     marked,
                     normalize_text(record.get("_sheet", "")),

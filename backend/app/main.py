@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from .cases import (
     analyze_case,
     export_manual_review_dataset,
+    extract_contract_number_from_uploads,
     format_reason_lines,
     get_document_reviews_export_path,
     get_case_file_path,
@@ -26,6 +27,7 @@ from .cases import (
     normalize_haystack,
     only_digits,
     rebuild_document_registry,
+    _resolve_case_contract_number,
     run_case_workflow,
     save_case,
     save_document_workspace,
@@ -35,6 +37,7 @@ from .cases import (
     store_case_files,
 )
 from .config import settings
+from .embeddings import get_embed_dims, get_engine_name, is_local_embed_enabled
 from .notifications import send_case_notification, send_tester_activity_summary
 from .rag import generate_grounded_answer, infer_operational_decision, reindex_knowledge, search_knowledge
 from .services import get_eval_summary, get_feed_summary, get_system_health, get_system_status
@@ -552,6 +555,42 @@ def _resolve_precheck_info(analysis: Dict[str, Any], case_item: Dict[str, Any]) 
     }
 
 
+def _contract_number_key(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return only_digits(text) or normalize_haystack(text).replace(" ", "")
+
+
+def _is_aprobable_case(payload: Dict[str, Any]) -> bool:
+    analysis = payload.get("analysis") or {}
+    workflow = analysis.get("workflow_run") or {}
+    decision = analysis.get("decision") or {}
+    report = workflow.get("executive_report_final") or workflow.get("executive_report_precheck") or {}
+    resumen = report.get("resumen_ejecutivo") if isinstance(report, dict) else {}
+    values = [
+        payload.get("status"),
+        workflow.get("status"),
+        decision.get("recommended_status"),
+        (resumen or {}).get("estado") if isinstance(resumen, dict) else "",
+    ]
+    if any(normalize_haystack(value) == "aprobable" for value in values):
+        return True
+    precheck = _resolve_precheck_info(analysis, payload)
+    return bool(precheck.get("approved")) and normalize_haystack(workflow.get("status")) == "completed"
+
+
+def _find_aprobable_case_by_contract(contract_number: str) -> Optional[Dict[str, Any]]:
+    contract_key = _contract_number_key(contract_number)
+    if not contract_key:
+        return None
+    for payload in list_cases(include_all=True):
+        existing_key = _contract_number_key(_resolve_case_contract_number(payload))
+        if existing_key and existing_key == contract_key and _is_aprobable_case(payload):
+            return payload
+    return None
+
+
 def _unique_filenames(files: List[Any]) -> List[str]:
     seen: set[str] = set()
     ordered: List[str] = []
@@ -653,6 +692,9 @@ class CaseCreateResponse(BaseModel):
     updated_at: str
     files: List[Dict]
     analysis: Optional[Dict] = None
+    contract_number: Optional[str] = None
+    numero_contrato: Optional[str] = None
+    nro_afiliacion: Optional[str] = None
     upload_summary: Optional[Dict[str, Any]] = None
 
 
@@ -2240,84 +2282,234 @@ def _build_specialized_case_response(intent: str, case_item: Dict[str, Any]) -> 
 
 
 # ── Admin Tables API ─────────────────────────────────────────
+def _admin_read_json(path: Path, default: Any) -> Any:
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"No pude leer {path.name}: {exc}") from exc
+
+
+def _admin_write_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _admin_int_or_text(value: Any) -> Any:
+    text = str(value or "").strip()
+    if text == "":
+        return ""
+    return int(text) if re.fullmatch(r"-?\d+", text) else text
+
+
+def _admin_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "si", "sí", "yes", "activo", "active"}
+
+
+def _normalize_entity_catalog(items: Any, *, include_active: bool = False) -> List[Dict[str, Any]]:
+    if not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="Campo items debe ser una lista.")
+    normalized: List[Dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        codigo = _admin_int_or_text(item.get("codigo"))
+        nombre = str(item.get("nombre") or "").strip().upper()
+        na = _admin_int_or_text(item.get("na"))
+        if codigo == "" and nombre == "" and na == "":
+            continue
+        row: Dict[str, Any] = dict(item)
+        row["codigo"] = codigo
+        row["nombre"] = nombre
+        row["na"] = na
+        if include_active:
+            row["activo"] = _admin_bool(item.get("activo"))
+        normalized.append(row)
+    return normalized
+
+
+def _normalize_pila_aliases(value: Any) -> List[str]:
+    if isinstance(value, list):
+        raw_items = value
+    else:
+        raw_items = re.split(r"[,;\n]+", str(value or ""))
+    aliases = []
+    seen = set()
+    for item in raw_items:
+        text = str(item or "").strip().upper()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        aliases.append(text)
+    return aliases
+
+
+def _normalize_pila_catalog(items: Any) -> List[Dict[str, Any]]:
+    if not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="Campo items debe ser una lista.")
+    normalized: List[Dict[str, Any]] = []
+    valid_subsystems = {"EPS", "AFP", "ARL", "CCF", "ICBF", "SENA", "ADRES"}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        subsistema = str(item.get("subsistema") or "").strip().upper()
+        codigo_pila = str(item.get("codigo_pila") or "").strip().upper()
+        nombre_oficial = str(item.get("nombre_oficial") or "").strip().upper()
+        if not subsistema and not codigo_pila and not nombre_oficial:
+            continue
+        if subsistema not in valid_subsystems:
+            raise HTTPException(status_code=400, detail=f"Subsistema PILA inválido: {subsistema or 'vacío'}.")
+        if not codigo_pila or not nombre_oficial:
+            raise HTTPException(status_code=400, detail="Cada registro PILA requiere código PILA y nombre oficial.")
+        normalized.append({
+            "subsistema": subsistema,
+            "codigo_pila": codigo_pila,
+            "nombre_oficial": nombre_oficial,
+            "alias": _normalize_pila_aliases(item.get("alias")),
+            "activo": _admin_bool(item.get("activo", True)),
+            "fuente": str(item.get("fuente") or "").strip(),
+            "fecha_fuente": str(item.get("fecha_fuente") or "").strip(),
+        })
+    return normalized
+
+
+def _normalize_asesores(items: Any) -> List[Dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    normalized: List[Dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        row["cedula"] = str(item.get("cedula") or "").strip()
+        row["nombre"] = str(item.get("nombre") or "").strip().upper()
+        row["tipo"] = str(item.get("tipo") or "").strip()
+        if not row["cedula"] and not row["nombre"]:
+            continue
+        normalized.append(row)
+    return normalized
+
+
+def _normalize_smmlv_table(payload: Any) -> Dict[str, int]:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="SMMLV debe ser un objeto {año: valor}.")
+    normalized: Dict[str, int] = {}
+    for year, value in payload.items():
+        year_text = str(year or "").strip()
+        if not re.fullmatch(r"\d{4}", year_text):
+            continue
+        try:
+            amount = int(str(value).replace(".", "").replace(",", "").strip())
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"SMMLV inválido para {year_text}.")
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail=f"SMMLV debe ser mayor a cero para {year_text}.")
+        normalized[year_text] = amount
+    return dict(sorted(normalized.items()))
+
+
+def _normalize_recipients(payload: Any) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Destinatarios debe ser un objeto.")
+    sender = payload.get("sender") if isinstance(payload.get("sender"), dict) else {}
+    recipients = payload.get("recipients") if isinstance(payload.get("recipients"), list) else []
+    clean_recipients = []
+    for item in recipients:
+        if not isinstance(item, dict):
+            continue
+        email = str(item.get("email") or "").strip().lower()
+        name = str(item.get("name") or "").strip()
+        if not email:
+            continue
+        clean_recipients.append({"name": name, "email": email})
+    return {
+        "sender": {
+            "name": str(sender.get("name") or "").strip(),
+            "email": str(sender.get("email") or "").strip().lower(),
+        },
+        "recipients": clean_recipients,
+    }
+
+
+@app.get("/api/admin/tables/pila")
+async def get_pila_catalog():
+    p = Path("/data/evals/pila_catalog.json")
+    return {"items": _admin_read_json(p, [])}
+
+
+@app.post("/api/admin/tables/pila")
+async def save_pila_catalog(payload: dict):
+    p = Path("/data/evals/pila_catalog.json")
+    items = _normalize_pila_catalog(payload.get("items", []))
+    _admin_write_json(p, items)
+    return {"ok": True, "count": len(items)}
+
+
 @app.get("/api/admin/tables/eps")
 async def get_eps_catalog():
-    from pathlib import Path
-    import json
     p = Path("/data/evals/eps_catalog.json")
-    return {"items": json.loads(p.read_text()) if p.exists() else []}
+    return {"items": _admin_read_json(p, [])}
 
 @app.post("/api/admin/tables/eps")
 async def save_eps_catalog(payload: dict):
-    from pathlib import Path
-    import json
     p = Path("/data/evals/eps_catalog.json")
-    p.write_text(json.dumps(payload.get("items", []), ensure_ascii=False, indent=2))
-    return {"ok": True}
+    items = _normalize_entity_catalog(payload.get("items", []))
+    _admin_write_json(p, items)
+    return {"ok": True, "count": len(items)}
 
 @app.get("/api/admin/tables/afp")
 async def get_afp_catalog():
-    from pathlib import Path
-    import json
     p = Path("/data/evals/afp_catalog.json")
-    return {"items": json.loads(p.read_text()) if p.exists() else []}
+    return {"items": _admin_read_json(p, [])}
 
 @app.post("/api/admin/tables/afp")
 async def save_afp_catalog(payload: dict):
-    from pathlib import Path
-    import json
     p = Path("/data/evals/afp_catalog.json")
-    p.write_text(json.dumps(payload.get("items", []), ensure_ascii=False, indent=2))
-    return {"ok": True}
+    items = _normalize_entity_catalog(payload.get("items", []), include_active=True)
+    _admin_write_json(p, items)
+    return {"ok": True, "count": len(items)}
 
 @app.get("/api/admin/tables/asesores")
 async def get_asesores():
-    from pathlib import Path
-    import json
     p = Path("/data/evals/asesores_colmena.json")
-    d = json.loads(p.read_text()) if p.exists() else {}
+    d = _admin_read_json(p, {})
     return {"comerciales": d.get("comerciales", []), "intermediarios": d.get("intermediarios", [])}
 
 @app.post("/api/admin/tables/asesores")
 async def save_asesores(payload: dict):
-    from pathlib import Path
-    import json
     p = Path("/data/evals/asesores_colmena.json")
-    comerciales = payload.get("comerciales", [])
-    intermediarios = payload.get("intermediarios", [])
+    comerciales = _normalize_asesores(payload.get("comerciales", []))
+    intermediarios = _normalize_asesores(payload.get("intermediarios", []))
     d = {"comerciales": comerciales, "intermediarios": intermediarios, "total": len(comerciales) + len(intermediarios)}
-    p.write_text(json.dumps(d, ensure_ascii=False, indent=2))
-    return {"ok": True}
+    _admin_write_json(p, d)
+    return {"ok": True, "count": d["total"]}
 
 @app.get("/api/admin/tables/smmlv")
 async def get_smmlv():
-    from pathlib import Path
-    import json
     p = Path("/data/evals/smmlv_table.json")
-    return json.loads(p.read_text()) if p.exists() else {}
+    return _admin_read_json(p, {})
 
 @app.post("/api/admin/tables/smmlv")
 async def save_smmlv(payload: dict):
-    from pathlib import Path
-    import json
     p = Path("/data/evals/smmlv_table.json")
-    p.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
-    return {"ok": True}
+    table = _normalize_smmlv_table(payload)
+    _admin_write_json(p, table)
+    return {"ok": True, "count": len(table)}
 
 @app.get("/api/admin/tables/recipients")
 async def get_recipients():
-    from pathlib import Path
-    import json
     p = Path(settings.notification_recipients_path)
-    return json.loads(p.read_text()) if p.exists() else {}
+    return _admin_read_json(p, {"sender": {}, "recipients": []})
 
 @app.post("/api/admin/tables/recipients")
 async def save_recipients(payload: dict):
-    from pathlib import Path
-    import json
     p = Path(settings.notification_recipients_path)
-    p.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
-    return {"ok": True}
+    recipients = _normalize_recipients(payload)
+    _admin_write_json(p, recipients)
+    return {"ok": True, "count": len(recipients["recipients"])}
 
 @app.get("/")
 async def root():
@@ -2590,10 +2782,17 @@ async def cases_production_summary():
     for payload in list_cases():
         analysis = payload.get("analysis") or {}
         workflow = analysis.get("workflow_run") or {}
+        decision = analysis.get("decision") or {}
         workflow_status = str(workflow.get("status") or "").strip().lower()
         payload_status = str(payload.get("status") or "").strip().lower()
+        decision_status = str(decision.get("recommended_status") or "").strip().lower()
         terminal_statuses = {"completed", "stopped_prevalidacion"}
-        if workflow_status not in terminal_statuses and payload_status not in terminal_statuses:
+        terminal_decision_statuses = {"aprobable", "observado", "rechazado", "rechazado_prevalidacion"}
+        if (
+            workflow_status not in terminal_statuses
+            and payload_status not in terminal_statuses
+            and decision_status not in terminal_decision_statuses
+        ):
             continue
         final_report = workflow.get("executive_report_final") or {}
         precheck_report = workflow.get("executive_report_precheck") or analysis.get("reporte_ejecutivo") or {}
@@ -2604,16 +2803,22 @@ async def cases_production_summary():
         legacy = output_926.get("legacy") or {}
         draft = output_926.get("draft") or {}
         status = str(workflow.get("status") or payload.get("status") or "n/d")
+        contract_number = _resolve_case_contract_number(payload)
+        final_status = resumen.get("estado") or report.get("estado_final") or decision_status or status
         item = {
             "id": payload.get("id"),
             "label": payload.get("label"),
+            "contract_number": contract_number,
+            "numero_contrato": contract_number,
+            "nro_afiliacion": contract_number,
             "updated_at": payload.get("updated_at"),
             "status": status,
             "empresa": resumen.get("empresa") or profile.get("empresa") or payload.get("label") or payload.get("id"),
             "nit": resumen.get("nit") or profile.get("nit") or "",
             "fecha": resumen.get("fecha_proceso_human") or report.get("fecha_proceso_human") or payload.get("updated_at"),
-            "final_status": resumen.get("estado") or report.get("estado_final") or status,
-            "summary": (analysis.get("decision") or {}).get("summary") or "",
+            "final_status": final_status,
+            "decision_status": decision_status,
+            "summary": decision.get("summary") or "",
             "filename": legacy.get("filename") or draft.get("filename") or "archivo_core.txt",
             "has_926": bool(legacy.get("ok") or legacy.get("available") or draft.get("content")),
         }
@@ -2621,7 +2826,7 @@ async def cases_production_summary():
         empresa_key = str(item.get("empresa") or "").strip()
         if not nit_key and (not empresa_key or empresa_key.lower().startswith("case-")):
             continue
-        entity_key = (str(item.get("nit") or "").strip() or str(item.get("empresa") or "").strip()).upper()
+        entity_key = (str(item.get("contract_number") or "").strip() or str(item.get("nit") or "").strip() or str(item.get("empresa") or "").strip()).upper()
         if not entity_key:
             entity_key = str(item.get("id") or "")
         current = deduped.get(entity_key)
@@ -2645,9 +2850,13 @@ async def cases_precheck_failed():
         profile = ((analysis.get("xlsx_profile") or {}).get("profile") or {})
         report = workflow.get("executive_report_precheck") or analysis.get("reporte_ejecutivo") or {}
         resumen = report.get("resumen_ejecutivo") or {}
+        contract_number = _resolve_case_contract_number(payload)
         item = {
             "id": payload.get("id"),
             "label": payload.get("label"),
+            "contract_number": contract_number,
+            "numero_contrato": contract_number,
+            "nro_afiliacion": contract_number,
             "empresa": resumen.get("empresa") or profile.get("empresa") or payload.get("label"),
             "company_name": resumen.get("empresa") or profile.get("empresa") or payload.get("label"),
             "nit": resumen.get("nit") or profile.get("nit") or "",
@@ -2660,7 +2869,7 @@ async def cases_precheck_failed():
             "blockers": decision.get("blockers") or [],
             "report": report,
         }
-        entity_key = (str(item.get("nit") or "").strip() or str(item.get("empresa") or "").strip()).upper()
+        entity_key = (str(item.get("contract_number") or "").strip() or str(item.get("nit") or "").strip() or str(item.get("empresa") or "").strip()).upper()
         if not entity_key:
             entity_key = str(item.get("id") or "")
         current = deduped.get(entity_key)
@@ -2792,6 +3001,25 @@ async def create_case(
                 "message": "Debes cargar mínimo 2 archivos válidos: un Excel en formato XLSX y al menos un PDF.",
                 "accepted_files": [filename for filename, _ in accepted_uploads],
                 "rejected_files": rejected_files,
+            },
+        )
+    incoming_contract_number = extract_contract_number_from_uploads(accepted_uploads)
+    existing_aprobable = _find_aprobable_case_by_contract(incoming_contract_number)
+    if existing_aprobable:
+        existing_contract_number = _resolve_case_contract_number(existing_aprobable) or incoming_contract_number
+        existing_case_id = existing_aprobable.get("id")
+        existing_label = existing_aprobable.get("label") or existing_case_id or "caso existente"
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    "Este contrato ya fue cargado y se encuentra en estado aprobable. "
+                    f"No se permite volver a cargar el mismo contrato. Caso existente: {existing_label} ({existing_case_id})."
+                ),
+                "code": "CONTRATO_APROBABLE_DUPLICADO",
+                "contract_number": existing_contract_number,
+                "existing_case_id": existing_case_id,
+                "existing_label": existing_label,
             },
         )
     case_payload = store_case_files(label=label, uploads=accepted_uploads)
@@ -3256,6 +3484,19 @@ async def case_package(case_id: str):
 
 @app.get("/api/modelos")
 async def listar_modelos():
+    if is_local_embed_enabled():
+        return {
+            "mode": "local-python",
+            "ollama": "disabled",
+            "models": [
+                {
+                    "name": get_engine_name(),
+                    "type": "embeddings",
+                    "dimensions": get_embed_dims(),
+                    "provider": "sentence-transformers",
+                }
+            ],
+        }
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(f"{settings.ollama_url}/api/tags", timeout=5.0)

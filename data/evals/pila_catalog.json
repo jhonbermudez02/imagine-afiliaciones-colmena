@@ -1,0 +1,990 @@
+[
+  {
+    "subsistema": "AFP",
+    "codigo_pila": "230201",
+    "nombre_oficial": "AFP PROTECCION",
+    "alias": [
+      "PROTECCION"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "AFP",
+    "codigo_pila": "230301",
+    "nombre_oficial": "AFP PORVENIR",
+    "alias": [
+      "PORVENIR"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "AFP",
+    "codigo_pila": "230901",
+    "nombre_oficial": "AFP SKANDIA PENSIONES Y CESANTÍAS S.A.",
+    "alias": [
+      "OLD MUTUAL",
+      "SKANDIA",
+      "SKANDIA PENSIONES Y CESANTÍAS S.A."
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "AFP",
+    "codigo_pila": "231001",
+    "nombre_oficial": "AFP COLFONDOS",
+    "alias": [
+      "COLFONDOS"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "AFP",
+    "codigo_pila": "230904",
+    "nombre_oficial": "AFP SKANDIA PENSIONES Y CESANTÍAS S.A.",
+    "alias": [
+      "OLD MUTUAL",
+      "SKANDIA",
+      "SKANDIA PENSIONES Y CESANTÍAS S.A."
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "AFP",
+    "codigo_pila": "25-14",
+    "nombre_oficial": "AFP COLPENSIONES",
+    "alias": [
+      "COLPENSIONES"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "AFP",
+    "codigo_pila": "25-2",
+    "nombre_oficial": "AFP CAXDAC",
+    "alias": [
+      "CAXDAC"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "AFP",
+    "codigo_pila": "25-3",
+    "nombre_oficial": "AFP FONPRECON",
+    "alias": [
+      "FONPRECON"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "ARL",
+    "codigo_pila": "14-11",
+    "nombre_oficial": "ARL SURA",
+    "alias": [
+      "SURA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "ARL",
+    "codigo_pila": "14-17",
+    "nombre_oficial": "ARL SEGUROS ALFA",
+    "alias": [
+      "SEGUROS ALFA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "ARL",
+    "codigo_pila": "14-23",
+    "nombre_oficial": "ARL POSITIVA",
+    "alias": [
+      "POSITIVA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "ARL",
+    "codigo_pila": "14-25",
+    "nombre_oficial": "ARL COLMENA",
+    "alias": [
+      "COLMENA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "ARL",
+    "codigo_pila": "14-29",
+    "nombre_oficial": "ARL LA EQUIDAD SEGUROS",
+    "alias": [
+      "LA EQUIDAD SEGUROS"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "ARL",
+    "codigo_pila": "14-30",
+    "nombre_oficial": "ARL MAPFRE",
+    "alias": [
+      "MAPFRE"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "ARL",
+    "codigo_pila": "14-4",
+    "nombre_oficial": "ARL COLPATRIA",
+    "alias": [
+      "COLPATRIA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "ARL",
+    "codigo_pila": "14-7",
+    "nombre_oficial": "ARL SEGUROS BOLIVAR",
+    "alias": [
+      "BOLIVAR",
+      "SEGUROS BOLIVAR"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "ARL",
+    "codigo_pila": "14-8",
+    "nombre_oficial": "ARL SEGUROS AURORA",
+    "alias": [
+      "SEGUROS AURORA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "ARL",
+    "codigo_pila": "14-33",
+    "nombre_oficial": "ARL SANITAS",
+    "alias": [
+      "SANITAS"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF03",
+    "nombre_oficial": "CCF COMFENALCO ANTIOQUIA",
+    "alias": [
+      "COMFENALCO ANTIOQUIA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF04",
+    "nombre_oficial": "CCF COMFAMA",
+    "alias": [
+      "COMFAMA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF05",
+    "nombre_oficial": "CCF CAJACOPI",
+    "alias": [
+      "CAJACOPI"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF06",
+    "nombre_oficial": "CCF COMBARRANQUILLA",
+    "alias": [
+      "COMBARRANQUILLA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF07",
+    "nombre_oficial": "CCF COMFAMILIAR ATLANTICO",
+    "alias": [
+      "COMFAMILIAR ATLANTICO"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF08",
+    "nombre_oficial": "CCF COMFENALCO CARTAGENA",
+    "alias": [
+      "COMFENALCO CARTAGENA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF09",
+    "nombre_oficial": "CCF CARTAGENA",
+    "alias": [
+      "CARTAGENA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF10",
+    "nombre_oficial": "CCF COMFABOY",
+    "alias": [
+      "COMFABOY"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF11",
+    "nombre_oficial": "CCF CALDAS",
+    "alias": [
+      "CALDAS"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF13",
+    "nombre_oficial": "CCF COMFACA",
+    "alias": [
+      "COMFACA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF14",
+    "nombre_oficial": "CCF COMFACAUCA",
+    "alias": [
+      "COMFACAUCA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF15",
+    "nombre_oficial": "CCF COMFACESAR",
+    "alias": [
+      "COMFACESAR"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF16",
+    "nombre_oficial": "CCF COMFACOR",
+    "alias": [
+      "COMFACOR"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF21",
+    "nombre_oficial": "CCF CAFAM",
+    "alias": [
+      "CAFAM"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF22",
+    "nombre_oficial": "CCF COLSUBSIDIO",
+    "alias": [
+      "COLSUBSIDIO"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF24",
+    "nombre_oficial": "CCF COMPENSAR",
+    "alias": [
+      "COMPENSAR"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF26",
+    "nombre_oficial": "CCF COMFACUNDI",
+    "alias": [
+      "COMFACUNDI"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF29",
+    "nombre_oficial": "CCF CHOCO",
+    "alias": [
+      "CHOCO"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF30",
+    "nombre_oficial": "CCF GUAJIRA",
+    "alias": [
+      "GUAJIRA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF32",
+    "nombre_oficial": "CCF COMFAMILIAR HUILA",
+    "alias": [
+      "COMFAMILIAR HUILA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF33",
+    "nombre_oficial": "CCF CAJAMAG",
+    "alias": [
+      "CAJAMAG"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF34",
+    "nombre_oficial": "CCF COFREM",
+    "alias": [
+      "COFREM"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF35",
+    "nombre_oficial": "CCF NARIÑO",
+    "alias": [
+      "NARIÑO"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF36",
+    "nombre_oficial": "CCF COMFAORIENTE",
+    "alias": [
+      "COMFAORIENTE"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF37",
+    "nombre_oficial": "CCF COMFANORTE",
+    "alias": [
+      "COMFANORTE"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF38",
+    "nombre_oficial": "CCF CAFABA",
+    "alias": [
+      "CAFABA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF39",
+    "nombre_oficial": "CCF CAJASAN",
+    "alias": [
+      "CAJASAN"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF40",
+    "nombre_oficial": "CCF COMFENALCO SANTANDER",
+    "alias": [
+      "COMFENALCO SANTANDER"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF41",
+    "nombre_oficial": "CCF SUCRE",
+    "alias": [
+      "SUCRE"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF43",
+    "nombre_oficial": "CCF COMFENALCO QUINDIO",
+    "alias": [
+      "COMFENALCO QUINDIO"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF44",
+    "nombre_oficial": "CCF COMFAMILIAR RISARALDA",
+    "alias": [
+      "COMFAMILIAR RISARALDA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF46",
+    "nombre_oficial": "CCF CAFASUR",
+    "alias": [
+      "CAFASUR"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF48",
+    "nombre_oficial": "CCF COMFATOLIMA",
+    "alias": [
+      "COMFATOLIMA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF50",
+    "nombre_oficial": "CCF COMFENALCO TOLIMA",
+    "alias": [
+      "COMFENALCO TOLIMA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF56",
+    "nombre_oficial": "CCF COMFENALCO VALLE",
+    "alias": [
+      "COMFENALCO VALLE"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF57",
+    "nombre_oficial": "CCF COMFANDI",
+    "alias": [
+      "COMFANDI"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF63",
+    "nombre_oficial": "CCF COMFAMILIAR PUTUMAYO",
+    "alias": [
+      "COMFAMILIAR PUTUMAYO"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF64",
+    "nombre_oficial": "CCF CAJASAI",
+    "alias": [
+      "CAJASAI"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF65",
+    "nombre_oficial": "CCF CAFAMAZ",
+    "alias": [
+      "CAFAMAZ"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF67",
+    "nombre_oficial": "CCF COMFIAR",
+    "alias": [
+      "COMFIAR"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF68",
+    "nombre_oficial": "CCF COMCAJA",
+    "alias": [
+      "COMCAJA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "CCF",
+    "codigo_pila": "CCF69",
+    "nombre_oficial": "CCF COMFACASANARE",
+    "alias": [
+      "COMFACASANARE"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPS001",
+    "nombre_oficial": "ALIANSALUD EPS",
+    "alias": [
+      "ALIANSALUD"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPS002",
+    "nombre_oficial": "EPS SALUD TOTAL",
+    "alias": [
+      "SALUD TOTAL",
+      "SALUD TOTAL EPS"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPS005",
+    "nombre_oficial": "EPS SANITAS",
+    "alias": [
+      "SANITAS"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPS008",
+    "nombre_oficial": "EPS COMPENSAR",
+    "alias": [
+      "COMPENSAR"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPS010",
+    "nombre_oficial": "EPS SURA",
+    "alias": [
+      "SURA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPS012",
+    "nombre_oficial": "EPS COMFENALCO VALLE",
+    "alias": [
+      "COMFENALCO VALLE"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPS017",
+    "nombre_oficial": "EPS FAMISANAR",
+    "alias": [
+      "FAMISANAR"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPS018",
+    "nombre_oficial": "EPS SOS",
+    "alias": [
+      "SOS"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPS037",
+    "nombre_oficial": "NUEVA EPS SA.",
+    "alias": [
+      "LA NUEVA EPS",
+      "NUEVA EPS"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPS040",
+    "nombre_oficial": "EPS SAVIA SALUD",
+    "alias": [
+      "SAVIA SALUD"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPS046",
+    "nombre_oficial": "EPS SALUD MIA",
+    "alias": [
+      "SALUD MIA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPSC34",
+    "nombre_oficial": "EPS CAPITAL SALUD",
+    "alias": [
+      "CAPITAL SALUD"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPSIC3",
+    "nombre_oficial": "EPS AIC",
+    "alias": [
+      "AIC"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPSIC5",
+    "nombre_oficial": "EPS MALLAMAS",
+    "alias": [
+      "MALLAMAS"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPSIC6",
+    "nombre_oficial": "EPS PIJAOS SALUD",
+    "alias": [
+      "PIJAOS SALUD"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "ESSC07",
+    "nombre_oficial": "EPS MUTUAL SER",
+    "alias": [
+      "MUTUAL SER"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "ESSC18",
+    "nombre_oficial": "EPS EMSSANAR",
+    "alias": [
+      "EMSSANAR"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "ESSC24",
+    "nombre_oficial": "EPS COOSALUD",
+    "alias": [
+      "COOSALUD"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "ESSC62",
+    "nombre_oficial": "EPS ASMETSALUD",
+    "alias": [
+      "ASMETSALUD"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPSIC4",
+    "nombre_oficial": "EPSI ANAS WAYUU",
+    "alias": [],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "CCFC55",
+    "nombre_oficial": "CAJACOPI EPS",
+    "alias": [],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPS047",
+    "nombre_oficial": "EPS SALUD BOLIVAR",
+    "alias": [
+      "SALUD BOLIVAR"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPSS47",
+    "nombre_oficial": "EPS- S SALUD BOLIVAR",
+    "alias": [],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "CCFC33",
+    "nombre_oficial": "EPS FAMILIAR COLOMBIA",
+    "alias": [
+      "FAMILIAR COLOMBIA"
+    ],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "CCFC20",
+    "nombre_oficial": "COMFACHOCO EPS-S",
+    "alias": [],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "CCFC50",
+    "nombre_oficial": "COMFAORIENTE EPS-S",
+    "alias": [],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPSIC1",
+    "nombre_oficial": "EPSI DUSAKAWI",
+    "alias": [],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPSC25",
+    "nombre_oficial": "CAPRESOCA EPS-S",
+    "alias": [],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "ICBF",
+    "codigo_pila": "PAICBF",
+    "nombre_oficial": "ICBF",
+    "alias": [],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "SENA",
+    "codigo_pila": "PASENA",
+    "nombre_oficial": "SENA",
+    "alias": [],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  },
+  {
+    "subsistema": "ADRES",
+    "codigo_pila": "ADRES",
+    "nombre_oficial": "ADRES",
+    "alias": [],
+    "activo": true,
+    "fuente": "UGPP bd_codigos_pila_2024.pdf",
+    "fecha_fuente": "2024-01"
+  }
+]

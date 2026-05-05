@@ -40,6 +40,7 @@ Al levantar el stack completo se crean estos servicios:
 - `data/knowledge`: conocimiento operativo
 - `docker-compose.github.yml`: compose interno de desarrollo y pruebas
 - `docker-compose.deploy.yml`: compose oficial de entrega portable
+- `ENTREGA_TECNICA.md`: guia para responsables de pruebas/produccion
 
 ## Levantar el sistema
 
@@ -83,6 +84,8 @@ Debe responder algo como:
 - frontend: [http://127.0.0.1:8105](http://127.0.0.1:8105)
 - backend: [http://localhost:8000](http://localhost:8000)
 - compat backend: [http://localhost:8011/health](http://localhost:8011/health)
+
+Para montaje por un responsable tecnico externo, revisar primero `ENTREGA_TECNICA.md`.
 
 ## Primer arranque
 

@@ -10,7 +10,6 @@ const API_URL = (
     || /^(https?:)?\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/api)?$/i.test(normalizedApiUrl)
 ) ? '' : normalizedApiUrl;
 
-const FRONTEND_BUILD_ID = 'afi-colima-2026.04.16';
 const PROFILE_KEY = 'afi-colima-profile-v1';
 const TESTER_KEY = 'afi-colima-tester-v1';
 const PROCESS_STATE_KEY = 'afi-colima-process-v1';
@@ -155,6 +154,8 @@ async function fetchWithRetry(url, options = {}, attempts = 2) {
                     const parsed = JSON.parse(t);
                     if (Array.isArray(parsed?.detail)) {
                         detail = parsed.detail.map(e => e.msg || JSON.stringify(e)).join('; ');
+                    } else if (parsed?.detail && typeof parsed.detail === 'object') {
+                        detail = parsed.detail.message || parsed.detail.detail || JSON.stringify(parsed.detail);
                     } else {
                         detail = parsed?.detail || parsed?.message || t;
                     }
@@ -226,6 +227,19 @@ function renderBlockers(blockers, cssClass = 'report-blocker') {
     `).join('');
 }
 
+function resolveContractNumber(analysis, item = {}) {
+    const a = analysis || {};
+    const wf = a.workflow_run || {};
+    const profile = (a.xlsx_profile || {}).profile || {};
+    const formFields = (a.xlsx_profile || {}).form_fields || {};
+    const output926 = wf.output_926 || a.output_926 || {};
+    const legacy = output926.legacy || {};
+    return item.contract_number || item.numero_contrato || item.nro_contrato || item.nro_afiliacion ||
+        legacy.numero_afiliacion || legacy.nro_afiliacion ||
+        profile.numero_contrato || profile.nro_contrato || profile.numero_radicacion || profile.nro_radicacion ||
+        formFields.numero_radicacion || '';
+}
+
 function resolveCase(item) {
     const a = item?.analysis || {};
     const wf = a.workflow_run || {};
@@ -240,10 +254,8 @@ function resolveCase(item) {
     const has926 = Boolean(item?.has_926 || (wf.output_926||{}).legacy?.ok);
     const filename = (wf.output_926||{}).legacy?.filename || item?.filename || 'archivo_plano.txt';
     const blockers = Array.isArray(item?.blockers) ? item.blockers : [];
-    // Número de contrato / afiliación
-    const legacy = (wf.output_926||{}).legacy || {};
     const formFields = a.xlsx_profile?.form_fields || {};
-    const nroAfiliacion = legacy.numero_afiliacion || legacy.nro_afiliacion || profile.numero_contrato || profile.nro_contrato || formFields.numero_radicacion || item?.nro_afiliacion || '';
+    const nroAfiliacion = resolveContractNumber(a, item);
     const nroRadicacion = formFields.numero_radicacion || profile.numero_radicacion || profile.nro_radicacion || a.formulario_profile?.numero_radicacion || '';
     return { empresa, nit, status, finalStatus, fecha, has926, filename, blockers, nroAfiliacion, nroRadicacion };
 }
@@ -336,7 +348,6 @@ function bootApp() {
     showNavColmena();
     switchView('bandeja');
     loadBandeja();
-    document.getElementById('adminBuildId').textContent = FRONTEND_BUILD_ID;
 }
 
 function updateSidebarUser() {
@@ -364,6 +375,19 @@ function showNavColmena() {
     if (isColmena && currentView !== 'produccion') {
         switchView('produccion');
     }
+    updateMobileNavOptions();
+}
+
+function updateMobileNavOptions() {
+    const select = document.getElementById('mobileViewSelect');
+    if (!select) return;
+    const isColmena = readProfile() === 'colmena';
+    Array.from(select.options).forEach(option => {
+        const isProduction = option.value === 'produccion';
+        option.hidden = isColmena ? !isProduction : isProduction;
+        option.disabled = option.hidden;
+    });
+    if (select.value !== currentView) select.value = currentView;
 }
 
 // ── NAVEGACIÓN ───────────────────────────────────────────────
@@ -375,7 +399,7 @@ const VIEW_META = {
     visor:         { title: 'Visor documental',         breadcrumb: 'Revisión · documentos adjuntos' },
     reporte:       { title: 'Reporte ejecutivo',        breadcrumb: 'Revisión · resumen de decisión' },
     produccion:    { title: 'Producción · Colmena',     breadcrumb: 'Colmena · archivo plano' },
-    entrenamiento: { title: 'Entrenamiento',            breadcrumb: 'Sistema · feedback del operador' },
+    entrenamiento: { title: 'Hallazgos',                breadcrumb: 'Sistema · mejoras y ajustes' },
     busqueda:      { title: 'Búsqueda',                 breadcrumb: 'Sistema · búsqueda documental' },
     admin:         { title: 'Administración',           breadcrumb: 'Sistema · estado y configuración' },
 };
@@ -393,6 +417,7 @@ function switchView(viewId) {
     const meta = VIEW_META[viewId] || { title: viewId, breadcrumb: '' };
     document.getElementById('pageTitle').textContent = meta.title;
     document.getElementById('pageBreadcrumb').textContent = meta.breadcrumb;
+    updateMobileNavOptions();
     updateTopbarActions(viewId);
 
     if (viewId === 'flujo') resetFlujoView();
@@ -400,7 +425,7 @@ function switchView(viewId) {
     if (viewId === 'produccion') loadProduccion();
     if (viewId === 'entrenamiento') { loadFeedbackNotes(); syncFeedbackName(); }
     if (viewId === 'busqueda') { doSearch(''); }
-    if (viewId === 'admin') { loadSystemStatus(); setTimeout(loadAdminTables, 200); }
+    if (viewId === 'admin') { setTimeout(loadAdminTables, 200); }
     if (viewId === 'clasificacion') {
         populateCaseSelect('classifCaseSelect', onClassifCaseChange);
         if (activeCaseId) setTimeout(() => loadClassifForCase(activeCaseId), 100);
@@ -557,7 +582,7 @@ function renderMetrics(cases) {
         const { status, finalStatus } = resolveCase(c);
         const s = normalizeText(status);
         const f = normalizeText(finalStatus);
-        if (s === 'completed' && (f.includes('aprob') || f === 'ok' || f === 'completed' || !f)) { aprobables++; continue; }
+        if (f.includes('aprob') || f === 'ok' || (s === 'completed' && (f === 'completed' || !f))) { aprobables++; continue; }
         if (s === 'stopped_prevalidacion') { noAprobados++; continue; }
         if (f.includes('observ') || s === 'completed') { observados++; continue; }
         enProceso++;
@@ -577,7 +602,7 @@ function filterCasesByTab(cases, tab) {
     if (tab === 'aprobables') return cases.filter(c => {
         const { status, finalStatus } = resolveCase(c);
         const s = normalizeText(status), f = normalizeText(finalStatus);
-        return s === 'completed' && (f.includes('aprob') || f === 'ok' || f === 'completed' || !f);
+        return f.includes('aprob') || f === 'ok' || (s === 'completed' && (f === 'completed' || !f));
     });
     if (tab === 'observados') return cases.filter(c => {
         const { status, finalStatus } = resolveCase(c);
@@ -696,8 +721,9 @@ function renderCasesTable(cases, tab = 'todos') {
                 data-default-case="${escapeHtml(id)}" tabindex="0" role="button"
                 aria-label="Ver reporte de ${escapeHtml(empresa)}">
                 <div class="case-card-main" style="flex:1;min-width:0">
+                    ${nroAfiliacion ? `<div class="case-card-contract">Contrato ${escapeHtml(nroAfiliacion)}</div>` : ''}
                     <div class="case-card-empresa">${escapeHtml(empresa)}</div>
-                    <div class="case-card-meta">NIT ${escapeHtml(nit)}${nroAfiliacion ? ` · Contrato ${escapeHtml(nroAfiliacion)}` : ''} · ${escapeHtml(fechaHora)}</div>
+                    <div class="case-card-meta">NIT ${escapeHtml(nit)} · ${escapeHtml(fechaHora)}</div>
                     ${isProcessing ? `
                         <div class="case-card-live-status">
                             <span class="spin-dot"></span>
@@ -1068,7 +1094,7 @@ function renderWorkflowResult(payload) {
     const trabajadores = resumen.numero_trabajadores ?? profile.numero_trabajadores ?? 'n/d';
     const sedes = resumen.numero_sedes ?? profile.numero_sedes ?? 'n/d';
     const nomina = profile.nomina_total ? formatCurrency(profile.nomina_total) : 'n/d';
-    const nroAfiliacion = (a.xlsx_profile?.form_fields?.numero_radicacion) || profile.numero_contrato || profile.nro_contrato || '';
+    const nroAfiliacion = resolveContractNumber(a, payload);
     const isAprobable = normalizeText(estado).includes('aprob') || normalizeText(wf.status||'') === 'completed';
     const isNoAprobado = normalizeText(wf.status||'') === 'stopped_prevalidacion';
     const decision = a.decision || {};
@@ -1702,7 +1728,7 @@ function renderValidacionOCR(container, payload) {
     const profile = (a.xlsx_profile || {}).profile || {};
     const empresa = profile.empresa || payload.label || 'n/d';
     const nit = profile.nit || 'n/d';
-    const nroAfiliacion = a.xlsx_profile?.form_fields?.numero_radicacion || profile.numero_contrato || '';
+    const nroAfiliacion = resolveContractNumber(a, payload);
 
     // Extraer validaciones adicionales de múltiples fuentes
     const vrMatches = a.validacion_resumen?.matches || a.reporte_ejecutivo?.matches || {};
@@ -1768,11 +1794,12 @@ function renderValidacionOCR(container, payload) {
         html += `<div class="report-section-title" style="margin-bottom:8px">Validaciones del sistema</div>`;
         html += `<div style="display:flex;flex-direction:column;gap:8px">`;
         for (const v of validaciones) {
-            const ok = Boolean(v.passed || v.ok || v.result === 'ok');
+            const status = normalizeText(v.status || v.estado || v.result || '');
+            const ok = Boolean(v.passed || v.ok || status === 'ok');
             const label = v.label || v.field || v.rule || 'Validación';
             const valueFound = v.value_found || v.valor_encontrado || v.extracted || '';
             const valueExpected = v.value_expected || v.valor_esperado || v.expected || '';
-            const detail = v.detail || v.detalle || '';
+            const detail = v.detail || v.detalle || v.message || '';
             html += `
                 <div class="ocr-field ${ok?'match':'mismatch'}">
                     <div class="ocr-field-label">${escapeHtml(label)}</div>
@@ -1964,7 +1991,7 @@ function renderReporte(container, payload) {
 
     const empresa = resumen.empresa || profile.empresa || payload.label || 'n/d';
     const nit = resumen.nit || profile.nit || 'n/d';
-    const nroAfiliacion = a.xlsx_profile?.form_fields?.numero_radicacion || profile.numero_contrato || profile.nro_contrato || '';
+    const nroAfiliacion = resolveContractNumber(a, payload);
     const estado = resumen.estado || decision.recommended_status || wf.status || 'n/d';
     const trabajadores = resumen.numero_trabajadores ?? profile.numero_trabajadores ?? 'n/d';
     const sedes = resumen.numero_sedes ?? profile.numero_sedes ?? 'n/d';
@@ -1983,7 +2010,7 @@ function renderReporte(container, payload) {
     // Resultado legacy APOLO
     const legacy926 = (wf.output_926||{}).legacy || (a.output_926||{}).legacy || {};
     const legacyOk = legacy926.ok || false;
-    const legacyNumAfil = legacy926.numero_afiliacion || legacy926.nro_afiliacion || profile.numero_contrato || profile.nro_contrato || '';
+    const legacyNumAfil = resolveContractNumber(a, payload);
     const legacyObs = legacy926.observacion || legacy926.observation || legacy926.message || '';
     const legacyFecha = legacy926.fecha || legacy926.processed_at || '';
     const legacyLote = legacy926.lote || legacy926.batch || '';
@@ -2070,7 +2097,6 @@ function renderReporte(container, payload) {
                 <div class="report-empresa">${escapeHtml(empresa)}</div>
                 <div class="report-nit">
                     NIT: <strong>${escapeHtml(nit)}</strong>${nroAfiliacion ? ` · Contrato <strong>${escapeHtml(nroAfiliacion)}</strong>` : ''}
-                    ${legacyNumAfil ? ` · Contrato: <strong>${escapeHtml(legacyNumAfil)}</strong>` : ''}
                     · ${escapeHtml(fecha)}
                 </div>
             </div>
@@ -3167,148 +3193,54 @@ async function doSearch(query) {
     }
 }
 
-// ── ADMIN ─────────────────────────────────────────────────────
-let _monitorTimer = null;
-
-async function loadSystemStatus() {
-    const statusVal = document.getElementById('adminStatusVal');
-    const statusSub = document.getElementById('adminStatusSub');
-    const detail = document.getElementById('adminStatusDetail');
-    if (statusVal) statusVal.textContent = '...';
-    try {
-        const [sysR, healthR, casesR] = await Promise.all([
-            fetch(`${API_URL}/api/system/status`).catch(() => null),
-            fetch(`${API_URL}/health`).catch(() => null),
-            fetch(`${API_URL}/api/cases/production-summary`).catch(() => null),
-        ]);
-        const sysData = sysR?.ok ? await sysR.json() : {};
-        const healthData = healthR?.ok ? await healthR.json() : {};
-        const casesData = casesR?.ok ? await casesR.json() : {};
-        const cases = casesData?.cases || [];
-        const res = healthData?.resources || {};
-
-        const overall = sysData.overall || 'ok';
-        const isOk = normalizeText(overall) === 'ok';
-        if (statusVal) { statusVal.textContent = isOk ? 'OK' : overall; statusVal.style.color = isOk ? 'var(--c-ok)' : 'var(--c-err)'; }
-        if (statusSub) statusSub.textContent = `Backend v${healthData.version||'?'} · RAM ${res.mem_used_mb||0} MB · RSS ${res.process_rss_mb||0} MB`;
-
-        // Métricas de cola
-        const cola = cases.filter(c => ['queued','uploaded','pending'].includes(String(c.status||'').toLowerCase())).length;
-        const procesando = cases.filter(c => ['processing'].includes(String(c.status||'').toLowerCase())).length;
-        const aprobables = cases.filter(c => c.status === 'completed').length;
-        const rechazados = cases.filter(c => c.status === 'stopped_prevalidacion').length;
-
-        const now = new Date().toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-
-        // Barra de memoria
-        const memPct = res.mem_pct || 0;
-        const memColor = memPct > 80 ? 'var(--c-err)' : memPct > 60 ? '#f59e0b' : 'var(--c-ok)';
-
-        // Servicios
-        const svcs = [
-            {name:'API Backend', ok: healthData.api === 'healthy', detail: `v${healthData.version||'?'}`},
-            {name:'RAG Qdrant', ok: healthData.qdrant === 'ok', detail: healthData.qdrant === 'ok' ? '3 colecciones' : 'error'},
-            {name:'Ollama LLM', ok: healthData.ollama === 'ok', detail: healthData.ollama === 'ok' ? 'nomic-embed-text' : 'error'},
-            {name:'PostgreSQL', ok: healthData.postgres === 'ok', detail: healthData.postgres === 'ok' ? 'conectado' : 'error'},
-        ];
-
-        if (detail) detail.innerHTML = `
-            <div style="padding:0 16px 16px">
-                <div style="font-size:11px;color:var(--c-text-2);margin-bottom:10px;text-align:right">Actualizado: ${now}</div>
-
-                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
-                    ${[
-                        ['En cola', cola, 'var(--c-blue)'],
-                        ['Procesando', procesando, '#f59e0b'],
-                        ['Aprobables', aprobables, 'var(--c-ok)'],
-                        ['Rechazados', rechazados, 'var(--c-err)'],
-                    ].map(([label, val, color]) => `
-                        <div style="background:var(--c-bg-2);border-radius:6px;padding:10px;text-align:center">
-                            <div style="font-size:22px;font-weight:500;color:${color}">${val}</div>
-                            <div style="font-size:10px;color:var(--c-text-2)">${label}</div>
-                        </div>`).join('')}
-                </div>
-
-                <div style="margin-bottom:14px">
-                    <div style="font-size:11px;font-weight:600;color:var(--c-text-2);margin-bottom:6px">Memoria del contenedor</div>
-                    <div style="display:flex;align-items:center;gap:8px">
-                        <div style="flex:1;height:10px;background:var(--c-border);border-radius:5px;overflow:hidden">
-                            <div style="height:100%;width:${Math.min(100,memPct||30)}%;background:${memColor};border-radius:5px;transition:width 0.5s"></div>
-                        </div>
-                        <span style="font-size:12px;color:var(--c-text-1);min-width:80px">${res.mem_used_mb||0} MB usados</span>
-                    </div>
-                    <div style="font-size:10px;color:var(--c-text-2);margin-top:3px">RSS proceso Python: ${res.process_rss_mb||0} MB</div>
-                </div>
-
-                <div style="margin-bottom:14px">
-                    <div style="font-size:11px;font-weight:600;color:var(--c-text-2);margin-bottom:6px">Servicios</div>
-                    ${svcs.map(s => `
-                        <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:0.5px solid var(--c-border);font-size:12px">
-                            <span style="display:flex;align-items:center;gap:6px">
-                                <span style="width:7px;height:7px;border-radius:50%;background:${s.ok ? 'var(--c-ok)' : 'var(--c-err)'}"></span>
-                                ${escapeHtml(s.name)}
-                            </span>
-                            <span style="color:${s.ok ? 'var(--c-ok)' : 'var(--c-err)'}">${escapeHtml(s.detail)}</span>
-                        </div>`).join('')}
-                </div>
-
-                ${cases.length ? `
-                <div>
-                    <div style="font-size:11px;font-weight:600;color:var(--c-text-2);margin-bottom:6px">Contratos recientes</div>
-                    ${cases.slice(0,6).map(c => {
-                        const st = String(c.status||'');
-                        const color = st==='completed'?'var(--c-ok)':st==='stopped_prevalidacion'?'var(--c-err)':'#f59e0b';
-                        const label = st==='completed'?'aprobable':st==='stopped_prevalidacion'?'no aprobado':st||'?';
-                        const emp = escapeHtml((c.empresa||c.label||'—').slice(0,28));
-                        const ago = c.updated_at ? Math.floor((Date.now()-new Date(c.updated_at))/60000) : 0;
-                        return `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:0.5px solid var(--c-border);font-size:12px">
-                            <span style="color:var(--c-text-1)">${emp}</span>
-                            <span style="display:flex;gap:8px;align-items:center">
-                                <span style="font-size:10px;color:var(--c-text-2)">${ago}m</span>
-                                <span style="font-size:10px;padding:2px 6px;border-radius:99px;background:var(--c-bg-2);color:${color}">${label}</span>
-                            </span>
-                        </div>`;
-                    }).join('')}
-                </div>` : ''}
-            </div>`;
-
-    } catch(e) {
-        if (statusVal) { statusVal.textContent = 'Error'; statusVal.style.color = 'var(--c-err)'; }
-        if (statusSub) statusSub.textContent = e.message;
-    }
-
-    // Auto-refresh cada 15s mientras Admin esté visible
-    clearTimeout(_monitorTimer);
-    _monitorTimer = setTimeout(() => {
-        if (document.getElementById('adminView')?.style.display !== 'none') loadSystemStatus();
-    }, 15000);
-}
-
-async function reindexKnowledge() {
-    const btn = document.getElementById('reindexBtn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Reindexando...'; }
-    try {
-        const r = await fetch(`${API_URL}/api/system/reindex`, { method: 'POST' });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = await r.json();
-        showToast(`Reindexado: ${data.documents||0} documentos`, 'ok');
-        loadSystemStatus();
-    } catch(e) {
-        showToast('Error reindexando: ' + e.message, 'err');
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Reindexar conocimiento'; }
-    }
-}
-
 // ── Panel de Administración de Tablas ──────────────────────────
+const ADMIN_CATALOG_FIELD_TYPES = {
+    codigo: 'number',
+    na: 'number',
+    activo: 'boolean',
+    nombre: 'text',
+    subsistema: 'text',
+    codigo_pila: 'text',
+    nombre_oficial: 'text',
+    alias: 'text',
+    fuente: 'text',
+    fecha_fuente: 'text',
+};
+
+function normalizeAdminFieldValue(field, value) {
+    const type = ADMIN_CATALOG_FIELD_TYPES[field] || 'text';
+    if (type === 'boolean') return Boolean(value);
+    if (type === 'number') {
+        const trimmed = String(value ?? '').trim();
+        if (!trimmed) return '';
+        const n = Number(trimmed);
+        return Number.isFinite(n) ? n : trimmed;
+    }
+    return String(value ?? '').trim();
+}
+
+function readAdminRowSearchText(row, fields) {
+    return fields.map(f => String(row?.[f] ?? '')).join(' ').toLowerCase();
+}
+
+function assertAdminSaveOk(response, tableName) {
+    if (!response.ok) throw new Error(`${tableName}: HTTP ${response.status}`);
+    return response.json().catch(() => ({ok: true}));
+}
+
+function adminAliasText(value) {
+    return Array.isArray(value) ? value.join(', ') : String(value ?? '');
+}
+
 function showTable(name) {
-    ['eps','afp','asesores','smmlv','destinatarios'].forEach(t => {
+    ['pila','eps','afp','asesores','smmlv','destinatarios'].forEach(t => {
         const panel = document.getElementById(`tableContent_${t}`);
         const btn = document.getElementById(`tabBtn_${t}`);
         if (panel) panel.style.display = t === name ? '' : 'none';
         if (btn) btn.classList.toggle('active', t === name);
     });
 }
+window.showTable = showTable;
 
 async function loadAdminTables() {
     const el = document.getElementById('adminTablesPanel');
@@ -3316,7 +3248,8 @@ async function loadAdminTables() {
     el.innerHTML = `<div style="font-size:12px;color:var(--c-text-2)">Cargando tablas...</div>`;
 
     try {
-        const [epsR, afpR, aseR, smlR, recR] = await Promise.all([
+        const [pilaR, epsR, afpR, aseR, smlR, recR] = await Promise.all([
+            fetch(`${API_URL}/api/admin/tables/pila`).then(r=>r.json()),
             fetch(`${API_URL}/api/admin/tables/eps`).then(r=>r.json()),
             fetch(`${API_URL}/api/admin/tables/afp`).then(r=>r.json()),
             fetch(`${API_URL}/api/admin/tables/asesores`).then(r=>r.json()),
@@ -3326,11 +3259,12 @@ async function loadAdminTables() {
 
         el.innerHTML = `
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-            ${['eps','afp','asesores','smmlv','destinatarios'].map(t=>`
-            <button class="classif-sort-btn ${t==='eps'?'active':''}" onclick="showTable('${t}')" type="button" id="tabBtn_${t}">${
-                t==='eps'?'EPS':t==='afp'?'AFP':t==='asesores'?'Asesores':t==='smmlv'?'SMMLV':'Destinatarios'
+            ${['pila','eps','afp','asesores','smmlv','destinatarios'].map(t=>`
+            <button class="classif-sort-btn ${t==='pila'?'active':''}" onclick="showTable('${t}')" type="button" id="tabBtn_${t}">${
+                t==='pila'?'PILA':t==='eps'?'EPS':t==='afp'?'AFP':t==='asesores'?'Asesores':t==='smmlv'?'SMMLV':'Destinatarios'
             }</button>`).join('')}
         </div>
+        <div id="tableContent_pila" class="table-panel"></div>
         <div id="tableContent_eps" class="table-panel"></div>
         <div id="tableContent_afp" class="table-panel" style="display:none"></div>
         <div id="tableContent_asesores" class="table-panel" style="display:none"></div>
@@ -3338,17 +3272,22 @@ async function loadAdminTables() {
         <div id="tableContent_destinatarios" class="table-panel" style="display:none"></div>
         `;
 
+        // PILA
+        renderPilaTable(pilaR.items || []);
+
         // EPS
-        renderCatalogTable('eps', epsR.items, ['codigo','nombre','na'], ['Código','Nombre','N/A'],
+        renderCatalogTable('eps', epsR.items || [], ['codigo','nombre','na'], ['Código','Nombre','N/A'],
             async (items) => {
-                await fetch(`${API_URL}/api/admin/tables/eps`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
+                const r = await fetch(`${API_URL}/api/admin/tables/eps`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
+                await assertAdminSaveOk(r, 'EPS');
             }
         );
 
         // AFP
-        renderCatalogTable('afp', afpR.items, ['codigo','nombre','activo'], ['Código','Nombre','Activo'],
+        renderCatalogTable('afp', afpR.items || [], ['codigo','nombre','na','activo'], ['Código','Nombre','N/A','Activo'],
             async (items) => {
-                await fetch(`${API_URL}/api/admin/tables/afp`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
+                const r = await fetch(`${API_URL}/api/admin/tables/afp`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
+                await assertAdminSaveOk(r, 'AFP');
             }
         );
 
@@ -3361,26 +3300,155 @@ async function loadAdminTables() {
         // Destinatarios
         renderRecipientsTable(recR);
 
-        showTable('eps');
+        showTable('pila');
 
     } catch(e) {
         el.innerHTML = `<div style="color:var(--c-err)">Error cargando tablas: ${e.message}</div>`;
     }
 }
 
+function renderPilaTable(items) {
+    const el = document.getElementById('tableContent_pila');
+    if (!el) return;
+    let data = Array.isArray(items) ? items.map(row => ({...row, alias: Array.isArray(row.alias) ? [...row.alias] : adminAliasText(row.alias)})) : [];
+    const fields = ['subsistema','codigo_pila','nombre_oficial','alias','activo','fuente','fecha_fuente'];
+
+    const render = () => {
+        data = window._pilaData || data;
+        const counts = data.reduce((acc, row) => {
+            const key = String(row.subsistema || 'SIN').toUpperCase();
+            acc[key] = (acc[key] || 0) + 1;
+            return acc;
+        }, {});
+        el.innerHTML = `
+        <div class="admin-table-toolbar">
+            <span style="font-size:11px;color:var(--c-text-2)">
+                ${data.length} registros · ${Object.entries(counts).sort().map(([k,v]) => `${k}: ${v}`).join(' · ')}
+            </span>
+            <div class="admin-table-actions">
+                <select id="filter_pila_subsistema" class="admin-table-search" onchange="filterPilaTable()">
+                    <option value="">Todos</option>
+                    ${['EPS','AFP','ARL','CCF','ICBF','SENA','ADRES'].map(s => `<option value="${s}">${s}</option>`).join('')}
+                </select>
+                <input id="search_pila" class="admin-table-search" placeholder="Buscar..." oninput="filterPilaTable()">
+                <button class="classif-sort-btn" type="button" onclick="addPilaRow()">+ Agregar</button>
+                <button class="btn-primary" style="font-size:11px;padding:4px 10px" type="button" onclick="savePilaCatalog()">Guardar</button>
+            </div>
+        </div>
+        <div style="font-size:11px;color:var(--c-text-2);margin-bottom:8px">
+            Catálogo maestro de administradoras PILA. Se usa como referencia para normalizar nombres y códigos; no debe causar devolución automática.
+        </div>
+        <div style="overflow-x:auto;max-height:460px;overflow-y:auto">
+        <table class="blocker-table" style="font-size:11px;min-width:980px" id="tbl_pila">
+            <thead><tr>
+                <th>Subsistema</th><th>Código PILA</th><th>Nombre oficial</th><th>Alias</th><th>Activo</th><th>Fuente</th><th>Fecha</th><th style="width:40px"></th>
+            </tr></thead>
+            <tbody>
+            ${data.map((row,i) => `<tr data-index="${i}">
+                <td>
+                    <select class="admin-table-input" onchange="updatePilaRow(${i},'subsistema',this.value)">
+                        ${['EPS','AFP','ARL','CCF','ICBF','SENA','ADRES'].map(s => `<option value="${s}" ${String(row.subsistema||'').toUpperCase()===s?'selected':''}>${s}</option>`).join('')}
+                    </select>
+                </td>
+                <td><input value="${escapeHtml(String(row.codigo_pila ?? ''))}" class="admin-table-input" oninput="updatePilaRow(${i},'codigo_pila',this.value)"></td>
+                <td><input value="${escapeHtml(String(row.nombre_oficial ?? ''))}" class="admin-table-input" oninput="updatePilaRow(${i},'nombre_oficial',this.value)"></td>
+                <td><input value="${escapeHtml(adminAliasText(row.alias))}" class="admin-table-input" oninput="updatePilaRow(${i},'alias',this.value)"></td>
+                <td><input type="checkbox" ${row.activo !== false ? 'checked' : ''} onchange="updatePilaRow(${i},'activo',this.checked)"></td>
+                <td><input value="${escapeHtml(String(row.fuente ?? ''))}" class="admin-table-input" oninput="updatePilaRow(${i},'fuente',this.value)"></td>
+                <td><input value="${escapeHtml(String(row.fecha_fuente ?? ''))}" class="admin-table-input" oninput="updatePilaRow(${i},'fecha_fuente',this.value)"></td>
+                <td><button type="button" style="background:transparent;border:none;cursor:pointer;color:var(--c-err);font-size:12px" onclick="deletePilaRow(${i})">✕</button></td>
+            </tr>`).join('')}
+            </tbody>
+        </table>
+        </div>`;
+        window._pilaData = data;
+        window._pilaFields = fields;
+    };
+
+    window._pilaRender = render;
+    render();
+}
+
+window.addPilaRow = function() {
+    const data = window._pilaData || [];
+    data.unshift({
+        subsistema: 'EPS',
+        codigo_pila: '',
+        nombre_oficial: '',
+        alias: '',
+        activo: true,
+        fuente: 'manual',
+        fecha_fuente: new Date().toISOString().slice(0, 7),
+    });
+    window._pilaData = data;
+    window._pilaRender?.();
+};
+
+window.updatePilaRow = function(idx, field, value) {
+    const data = window._pilaData || [];
+    if (!data[idx]) return;
+    data[idx][field] = field === 'activo' ? Boolean(value) : String(value ?? '').trim();
+};
+
+window.deletePilaRow = function(idx) {
+    const data = window._pilaData || [];
+    data.splice(idx, 1);
+    window._pilaRender?.();
+};
+
+window.filterPilaTable = function() {
+    const q = document.getElementById('search_pila')?.value?.toLowerCase() || '';
+    const subsystem = document.getElementById('filter_pila_subsistema')?.value || '';
+    const data = window._pilaData || [];
+    const fields = window._pilaFields || [];
+    document.querySelectorAll('#tbl_pila tbody tr').forEach(tr => {
+        const idx = Number(tr.dataset.index);
+        const row = data[idx] || {};
+        const rowSubsystem = String(row.subsistema || '').toUpperCase();
+        const matchesSubsystem = !subsystem || rowSubsystem === subsystem;
+        const matchesText = readAdminRowSearchText(row, fields).includes(q);
+        tr.style.display = matchesSubsystem && matchesText ? '' : 'none';
+    });
+};
+
+window.savePilaCatalog = async function() {
+    const data = window._pilaData || [];
+    try {
+        const items = data
+            .map(row => ({
+                ...row,
+                alias: Array.isArray(row.alias)
+                    ? row.alias
+                    : String(row.alias || '').split(/[,;\n]+/).map(x => x.trim()).filter(Boolean),
+            }))
+            .filter(row => row.subsistema || row.codigo_pila || row.nombre_oficial);
+        const r = await fetch(`${API_URL}/api/admin/tables/pila`, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({items}),
+        });
+        await assertAdminSaveOk(r, 'PILA');
+        window._pilaData = items;
+        window._pilaRender?.();
+        showToast(`Catálogo PILA guardado (${items.length} registros)`, 'ok');
+    } catch(e) {
+        showToast('Error guardando PILA: ' + e.message, 'err');
+    }
+};
+
 function renderCatalogTable(type, items, fields, headers, saveFn) {
     const el = document.getElementById(`tableContent_${type}`);
     if (!el) return;
-    let data = [...items];
+    let data = Array.isArray(items) ? items.map(row => ({...row})) : [];
 
     const render = () => {
         el.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div class="admin-table-toolbar">
             <span style="font-size:11px;color:var(--c-text-2)">${data.length} registros</span>
-            <div style="display:flex;gap:6px">
-                <input id="search_${type}" placeholder="Buscar..." style="padding:4px 8px;border:1px solid var(--c-border);border-radius:4px;font-size:11px;width:150px" oninput="filterTable('${type}')">
-                <button class="classif-sort-btn" type="button" onclick="addRowCatalog('${type}', ${JSON.stringify(fields)})">+ Agregar</button>
-                <button class="btn-primary" style="font-size:11px;padding:4px 10px" type="button" onclick="saveCatalog('${type}')">💾 Guardar</button>
+            <div class="admin-table-actions">
+                <input id="search_${type}" class="admin-table-search" placeholder="Buscar..." oninput="filterTable('${type}')">
+                <button class="classif-sort-btn" type="button" onclick="addRowCatalog('${type}')">+ Agregar</button>
+                <button class="btn-primary" style="font-size:11px;padding:4px 10px" type="button" onclick="saveCatalog('${type}')">Guardar</button>
             </div>
         </div>
         <div style="overflow-x:auto;max-height:400px;overflow-y:auto">
@@ -3388,32 +3456,46 @@ function renderCatalogTable(type, items, fields, headers, saveFn) {
             <thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}<th style="width:40px"></th></tr></thead>
             <tbody>
             ${data.map((row,i) => `<tr data-index="${i}">
-                ${fields.map(f=>`<td><input value="${escapeHtml(String(row[f]??''))}" data-field="${f}" style="width:100%;border:none;background:transparent;font-size:11px;padding:2px" onchange="updateRowCatalog('${type}',${i},'${f}',this.value)"></td>`).join('')}
+                ${fields.map(f=>`<td>${renderAdminCatalogInput(type, row, i, f)}</td>`).join('')}
                 <td><button type="button" style="background:transparent;border:none;cursor:pointer;color:var(--c-err);font-size:12px" onclick="deleteRowCatalog('${type}',${i})">✕</button></td>
             </tr>`).join('')}
             </tbody>
         </table>
         </div>`;
         window[`_tableData_${type}`] = data;
+        window[`_tableFields_${type}`] = fields;
         window[`_tableSaveFn_${type}`] = saveFn;
     };
     render();
     window[`_tableData_${type}`] = data;
+    window[`_tableFields_${type}`] = fields;
     window[`_tableSaveFn_${type}`] = saveFn;
     window[`_tableRender_${type}`] = render;
 }
 
-window.addRowCatalog = function(type, fields) {
+function renderAdminCatalogInput(type, row, idx, field) {
+    const fieldType = ADMIN_CATALOG_FIELD_TYPES[field] || 'text';
+    const value = row?.[field];
+    if (fieldType === 'boolean') {
+        const checked = value === true || String(value).toLowerCase() === 'true' || String(value) === '1';
+        return `<input type="checkbox" ${checked ? 'checked' : ''} data-field="${field}" onchange="updateRowCatalog('${type}',${idx},'${field}',this.checked)">`;
+    }
+    const inputType = fieldType === 'number' ? 'number' : 'text';
+    return `<input value="${escapeHtml(String(value ?? ''))}" type="${inputType}" data-field="${field}" class="admin-table-input" oninput="updateRowCatalog('${type}',${idx},'${field}',this.value)">`;
+}
+
+window.addRowCatalog = function(type) {
     const data = window[`_tableData_${type}`];
+    const fields = window[`_tableFields_${type}`] || [];
     const newRow = {};
-    fields.forEach(f => newRow[f] = '');
+    fields.forEach(f => newRow[f] = ADMIN_CATALOG_FIELD_TYPES[f] === 'boolean' ? true : '');
     data.push(newRow);
     window[`_tableRender_${type}`]?.();
 };
 
 window.updateRowCatalog = function(type, idx, field, value) {
     const data = window[`_tableData_${type}`];
-    if (data[idx]) data[idx][field] = value;
+    if (data[idx]) data[idx][field] = normalizeAdminFieldValue(field, value);
 };
 
 window.deleteRowCatalog = function(type, idx) {
@@ -3426,8 +3508,13 @@ window.saveCatalog = async function(type) {
     const data = window[`_tableData_${type}`];
     const saveFn = window[`_tableSaveFn_${type}`];
     try {
-        await saveFn(data);
-        showToast(`Tabla ${type.toUpperCase()} guardada (${data.length} registros)`, 'ok');
+        const normalized = data
+            .map(row => ({...row}))
+            .filter(row => Object.values(row).some(value => String(value ?? '').trim() !== ''));
+        await saveFn(normalized);
+        window[`_tableData_${type}`] = normalized;
+        window[`_tableRender_${type}`]?.();
+        showToast(`Tabla ${type.toUpperCase()} guardada (${normalized.length} registros)`, 'ok');
     } catch(e) {
         showToast('Error guardando: ' + e.message, 'err');
     }
@@ -3435,8 +3522,11 @@ window.saveCatalog = async function(type) {
 
 window.filterTable = function(type) {
     const q = document.getElementById(`search_${type}`)?.value?.toLowerCase() || '';
+    const data = window[`_tableData_${type}`] || [];
+    const fields = window[`_tableFields_${type}`] || [];
     document.querySelectorAll(`#tbl_${type} tbody tr`).forEach(tr => {
-        tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+        const idx = Number(tr.dataset.index);
+        tr.style.display = readAdminRowSearchText(data[idx], fields).includes(q) ? '' : 'none';
     });
 };
 
@@ -3577,24 +3667,6 @@ function renderRecipientsTable(data) {
     };
 }
 
-async function exportReviews() {
-    const btn = document.getElementById('exportReviewsBtn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Exportando...'; }
-    try {
-        const r = await fetch(`${API_URL}/api/evals/document-reviews/export`);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const blob = await r.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = 'document_reviews.jsonl';
-        document.body.appendChild(a); a.click(); a.remove();
-        URL.revokeObjectURL(url);
-    } catch(e) {
-        showToast('Error exportando: ' + e.message, 'err');
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Exportar revisiones'; }
-    }
-}
-
 // ── MODAL DOCUMENTO ───────────────────────────────────────────
 function openModal(title, caseId, filename, displayName) {
     const modal = document.getElementById('docModal');
@@ -3641,6 +3713,9 @@ function init() {
     // Sidebar nav
     document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
         btn.addEventListener('click', () => switchView(btn.dataset.view));
+    });
+    document.getElementById('mobileViewSelect')?.addEventListener('change', e => {
+        switchView(e.target.value);
     });
 
     // Logout
@@ -3709,11 +3784,6 @@ function init() {
     document.getElementById('searchInput')?.addEventListener('keydown', e => {
         if (e.key === 'Enter') doSearch(e.target.value);
     });
-
-    // Admin
-    document.getElementById('reindexBtn')?.addEventListener('click', reindexKnowledge);
-    document.getElementById('exportReviewsBtn')?.addEventListener('click', exportReviews);
-    document.getElementById('refreshStatusBtn')?.addEventListener('click', loadSystemStatus);
 
     // Modal
     document.getElementById('docModalClose')?.addEventListener('click', closeModal);

@@ -1,16 +1,17 @@
 import logging
 import json
 import uuid
+import asyncio
 from difflib import get_close_matches
 from dataclasses import dataclass
 from pathlib import Path
 from math import sqrt
 from typing import Any, Dict, List, Optional
 
-import httpx
 from qdrant_client import QdrantClient, models
 
 from .config import settings
+from .embeddings import embed_text, get_engine_name
 
 logger = logging.getLogger(__name__)
 
@@ -101,35 +102,19 @@ def load_knowledge_chunks() -> List[KnowledgeChunk]:
 
 
 async def ollama_embed(text: str) -> List[float]:
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{settings.ollama_url}/api/embed",
-            json={"model": settings.embedding_model, "input": text},
-            timeout=60.0,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    embeddings = payload.get("embeddings") or []
-    if not embeddings:
-        raise ValueError("Ollama no devolvio embeddings")
-    return embeddings[0]
+    vector = await asyncio.to_thread(embed_text, text)
+    if not vector:
+        raise ValueError(f"El motor de embeddings {get_engine_name()} no devolvio vector")
+    return vector
 
 
 async def ollama_embed_many(texts: List[str], model: Optional[str] = None) -> List[List[float]]:
     clean_texts = [str(text or "") for text in texts]
     if not clean_texts:
         return []
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{settings.ollama_url}/api/embed",
-            json={"model": model or settings.embedding_model, "input": clean_texts},
-            timeout=120.0,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    embeddings = payload.get("embeddings") or []
+    embeddings = [await ollama_embed(text) for text in clean_texts]
     if not embeddings:
-        raise ValueError("Ollama no devolvio embeddings")
+        raise ValueError(f"El motor de embeddings {get_engine_name()} no devolvio vectores")
     return embeddings
 
 

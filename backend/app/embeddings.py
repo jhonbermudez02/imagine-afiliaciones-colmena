@@ -49,7 +49,7 @@ def _embed_local(text: str) -> List[float]:
     """Embedding con sentence-transformers (local, sin servidor)."""
     try:
         model = _get_local_model()
-        vector = model.encode(text, normalize_embeddings=True)
+        vector = model.encode(text, normalize_embeddings=True, show_progress_bar=False)
         return vector.tolist()
     except Exception as e:
         logger.error("Error en embedding local: %s", e)
@@ -76,3 +76,7 @@ def get_embed_dims() -> int:
 def get_engine_name() -> str:
     """Retorna el nombre del motor activo."""
     return LOCAL_MODEL_NAME if USE_LOCAL_EMBED else OLLAMA_MODEL_NAME
+
+def is_local_embed_enabled() -> bool:
+    """Indica si los embeddings se generan dentro de Python."""
+    return USE_LOCAL_EMBED

@@ -384,6 +384,18 @@ def _is_strict_numeric_value(value: Any) -> bool:
     return bool(re.fullmatch(r"\d+", text))
 
 
+def _worker_document_raw(record: Dict[str, Any]) -> str:
+    return normalize_text(
+        record.get("_raw_numero_de_identificacion")
+        or record.get("_raw_documento")
+        or record.get("documento")
+        or record.get("numero_documento")
+        or record.get("num_id_trabajador")
+        or record.get("numero_de_identificacion")
+        or ""
+    )
+
+
 def _parse_birthdate_from_record(record: Dict[str, Any]) -> Optional[datetime]:
     combined = normalize_text(record.get("fecha_de_nacimiento", ""))
     candidates = [combined]
@@ -520,9 +532,14 @@ def _normalize_modalidad(value: Any) -> str:
     text = "".join(ch for ch in text if ch.isalnum())
     aliases = {
         "PRESENCIAL": "PRESENCIAL",
+        "ENSITIO": "PRESENCIAL",
+        "SITIO": "PRESENCIAL",
         "TELETRABAJO": "TELETRABAJO",
         "CASA": "CASA",
+        "TRABAJOENCASA": "CASA",
         "REMOTO": "REMOTO",
+        "REMOTA": "REMOTO",
+        "TRABAJOREMOTO": "REMOTO",
     }
     return aliases.get(text, text)
 
@@ -672,6 +689,98 @@ def _document_owner_identifier(xlsx_profile: Dict[str, Any]) -> str:
     nit = only_digits(profile.get("nit", ""))
     documento = only_digits(profile.get("documento", ""))
     return nit or documento
+
+
+def _resolve_case_contract_number(payload: Dict[str, Any]) -> str:
+    analysis = payload.get("analysis") or {}
+    xlsx_profile = analysis.get("xlsx_profile") or {}
+    profile = xlsx_profile.get("profile") or {}
+    form_fields = xlsx_profile.get("form_fields") or {}
+    workflow = analysis.get("workflow_run") or {}
+    output_926 = workflow.get("output_926") or analysis.get("output_926") or {}
+    legacy = output_926.get("legacy") or {}
+    for value in [
+        payload.get("contract_number"),
+        payload.get("numero_contrato"),
+        payload.get("nro_contrato"),
+        payload.get("nro_afiliacion"),
+        legacy.get("numero_afiliacion"),
+        legacy.get("nro_afiliacion"),
+        profile.get("numero_contrato"),
+        profile.get("nro_contrato"),
+        profile.get("numero_radicacion"),
+        profile.get("nro_radicacion"),
+        form_fields.get("numero_radicacion"),
+    ]:
+        text = normalize_text(value)
+        if text:
+            return text
+    return ""
+
+
+def _contract_number_key(value: Any) -> str:
+    text = normalize_text(value)
+    if not text:
+        return ""
+    return only_digits(text) or normalize_haystack(text).replace(" ", "")
+
+
+def _looks_like_single_digit_ocr_mismatch(expected: Any, observed: Any) -> bool:
+    expected_key = only_digits(expected)
+    observed_key = only_digits(observed)
+    if len(expected_key) < 6 or len(expected_key) != len(observed_key):
+        return False
+    return sum(1 for left, right in zip(expected_key, observed_key) if left != right) == 1
+
+
+def extract_contract_number_from_uploads(uploads: List[tuple[str, bytes]]) -> str:
+    candidates: List[str] = []
+    for filename, content in uploads:
+        lower_name = str(filename or "").lower()
+        if not lower_name.endswith((".xlsx", ".xlsm", ".xls")) or not content:
+            continue
+        try:
+            workbook = load_workbook(io.BytesIO(content), data_only=True, read_only=True)
+        except Exception:
+            continue
+        for sheet in workbook.worksheets:
+            norm_sheet_name = normalize_haystack(str(sheet.title or ""))
+            if "formulario de afili" in norm_sheet_name:
+                try:
+                    form_fields = _extract_form_fields_from_sheet(sheet)
+                    candidates.extend(
+                        [
+                            form_fields.get("numero_radicacion", ""),
+                            form_fields.get("número_radicacion", ""),
+                            form_fields.get("numero_contrato", ""),
+                            form_fields.get("nro_contrato", ""),
+                        ]
+                    )
+                except Exception:
+                    pass
+            try:
+                for raw_row in sheet.iter_rows(max_row=80, values_only=True):
+                    row = [normalize_text(cell) for cell in (raw_row or [])[:12]]
+                    if len(row) < 2 or not row[0] or not row[1]:
+                        continue
+                    key = normalize_haystack(row[0]).replace(" ", "_")
+                    if key in {
+                        "numero_radicacion",
+                        "número_radicacion",
+                        "numero_de_radicacion",
+                        "número_de_radicacion",
+                        "numero_contrato",
+                        "numero_de_contrato",
+                        "nro_contrato",
+                        "contrato",
+                    }:
+                        candidates.append(row[1])
+            except Exception:
+                continue
+    for candidate in candidates:
+        if _contract_number_key(candidate):
+            return normalize_text(candidate)
+    return ""
 
 
 def _document_alias_code(legacy_code: Any) -> str:
@@ -881,6 +990,11 @@ def _normalize_case_payload(case_payload: Dict[str, Any]) -> Dict[str, Any]:
     if workflow:
         analysis["workflow_run"] = workflow
         case_payload["analysis"] = analysis
+    contract_number = _resolve_case_contract_number(case_payload)
+    if contract_number:
+        case_payload["contract_number"] = contract_number
+        case_payload["numero_contrato"] = contract_number
+        case_payload["nro_afiliacion"] = contract_number
     return case_payload
 
 
@@ -1168,10 +1282,14 @@ def _case_updated_at_sort_value(payload: Dict[str, Any]) -> str:
 def _case_entity_key(payload: Dict[str, Any]) -> tuple[str, str]:
     analysis = payload.get("analysis") or {}
     profile = ((analysis.get("xlsx_profile") or {}).get("profile") or {})
+    contract_number = normalize_haystack(_resolve_case_contract_number(payload))
     nit = only_digits(profile.get("nit") or "")
     documento = only_digits(profile.get("documento") or "")
     empresa = normalize_haystack(profile.get("empresa") or payload.get("label") or "")
-    return (nit or documento or empresa or payload.get("id") or "", empresa or documento or nit or payload.get("id") or "")
+    return (
+        contract_number or nit or documento or empresa or payload.get("id") or "",
+        contract_number or empresa or documento or nit or payload.get("id") or "",
+    )
 
 
 _LIST_CASES_CACHE_TTL_SECONDS = 3.0
@@ -1193,6 +1311,7 @@ def list_cases(include_all: bool = False) -> List[Dict[str, Any]]:
     for path in sorted(get_cases_root().glob("*/case.json"), reverse=True):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
+            payload = _normalize_case_payload(payload)
             rows.append(payload)
         except Exception:
             continue
@@ -1235,9 +1354,11 @@ def search_cases(query: str, limit: int = 10) -> List[Dict[str, Any]]:
         profile = (analysis.get("xlsx_profile") or {}).get("profile") or {}
         docs = analysis.get("documents") or []
         workflow = analysis.get("workflow_run") or {}
+        contract_number = _resolve_case_contract_number(payload)
         case_haystack = " ".join(
             [
                 payload.get("label", ""),
+                contract_number,
                 payload.get("lote_usuario", ""),
                 profile.get("empresa", ""),
                 profile.get("nombre", ""),
@@ -1736,6 +1857,12 @@ def _normalize_company_strict(value: str) -> str:
     return text
 
 
+def _normalize_company_official(value: str) -> str:
+    text = normalize_haystack(_clean_company_name(value))
+    text = re.sub(r"\s+", " ", text).strip(" .,-")
+    return text
+
+
 def _looks_like_person_name(value: str) -> bool:
     text = normalize_text(value)
     if len(text) < 8:
@@ -1789,6 +1916,57 @@ def _looks_like_company_name(value: str) -> bool:
     if any(token in lowered for token in blocked):
         return False
     return True
+
+
+def _extract_entrega_identity_from_text(text: str) -> Dict[str, str]:
+    normalized = normalize_text(text)
+    if not normalized:
+        return {}
+    haystack = normalize_haystack(normalized)
+    if "razon social" not in haystack or "nit" not in haystack:
+        return {}
+    section = normalized
+    header_match = re.search(
+        r"raz[oó]n\s+social\s+nit|nro\.?\s+de\s+contrato.{0,80}raz[oó]n\s+social.{0,20}nit",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if header_match:
+        section = normalized[header_match.end():]
+    for match in re.finditer(
+        r"\b(?P<contract>\d{6,10})\s+"
+        r"(?P<company>[A-ZÁÉÍÓÚÜÑ0-9 .,&'/-]{6,180}?)\s+"
+        r"(?P<nit>\d{8,12})(?:\b|[-\s])",
+        section,
+        flags=re.IGNORECASE,
+    ):
+        company = _clean_company_name(match.group("company"))
+        company = re.sub(
+            r"\b(?:canal|cana)\s+de\s+venta.*$",
+            "",
+            company,
+            flags=re.IGNORECASE,
+        ).strip(" .,-")
+        if not _looks_like_company_name(company):
+            continue
+        return {
+            "numero_contrato": only_digits(match.group("contract")),
+            "razon_social": company,
+            "nit": only_digits(match.group("nit")),
+        }
+    return {}
+
+
+def _extract_entrega_identity_from_doc(doc: Dict[str, Any]) -> Dict[str, str]:
+    fields = doc.get("fields") or {}
+    identity = _extract_entrega_identity_from_text(doc.get("ocr_text") or doc.get("text_preview") or "")
+    if fields.get("company_name") and not identity.get("razon_social"):
+        identity["razon_social"] = _clean_company_name(fields.get("company_name", ""))
+    if fields.get("contract_number") and not identity.get("numero_contrato"):
+        identity["numero_contrato"] = only_digits(fields.get("contract_number", ""))
+    if fields.get("nit") and not identity.get("nit"):
+        identity["nit"] = only_digits(fields.get("nit", ""))
+    return identity
 
 
 def _looks_like_cedula_document(name_txt: str, haystack: str) -> bool:
@@ -1892,6 +2070,41 @@ def _looks_like_entrega_documentos(haystack: str) -> bool:
         "nro. de contrato",
     ]
     return sum(1 for marker in positive_markers if marker in haystack) >= 2
+
+
+def _looks_like_anexo_sedes_document(haystack: str) -> bool:
+    if any(
+        marker in haystack
+        for marker in [
+            "camara de comercio",
+            "certificado de existencia",
+            "matricula mercantil",
+            "registro unico tributario",
+        ]
+    ):
+        return False
+    positive_markers = [
+        "anexo de sedes",
+        "sedes centros de trabajo",
+        "sedes, centros de trabajo",
+        "informacion de la sede",
+        "información de la sede",
+        "nombre de la sede",
+        "informacion de los centros de trabajo",
+        "información de los centros de trabajo",
+        "datos de trabajadores",
+        "trabajadores son de diligenciamiento obligatorio",
+        "monto total de cotizacion",
+        "monto total de cotización",
+    ]
+    hits = sum(1 for marker in positive_markers if marker in haystack)
+    if hits >= 2:
+        return True
+    return (
+        "numero de radicacion" in haystack
+        and "nombre de la sede" in haystack
+        and ("trabajadores" in haystack or "centros de trabajo" in haystack)
+    )
 
 
 def _looks_like_carta_document(haystack: str) -> bool:
@@ -2518,12 +2731,6 @@ def _number_anexo_sedes(docs: List[Dict[str, Any]]) -> None:
 
 
 def _classify_document(filename: str, text: str) -> Dict[str, Any]:
-    # 1. Intentar clasificar con RAG primero (aprendizaje acumulado)
-    if text and len(text.strip()) > 50:
-        rag_result = _rag_classify_document(text, min_score=0.85)
-        if rag_result:
-            return rag_result
-    # 2. Fallback a clasificacion por reglas
     name_txt = normalize_haystack(filename)
     text_txt = normalize_haystack(text)
     haystack = f"{name_txt} {text_txt}".strip()
@@ -2542,14 +2749,23 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
         or ("cps-f-216" in haystack)
     ):
         return {"document_type": "formulario_afiliacion", "legacy_code": 0, "code_source": "ocr_formulario_precise"}
+    if _looks_like_anexo_sedes_document(haystack):
+        return {"document_type": "anexo_sedes", "legacy_code": 1, "code_source": "ocr_sedes_precise"}
+    if _looks_like_entrega_documentos(haystack):
+        return {"document_type": "entrega_documentos", "legacy_code": 10, "code_source": "ocr_entrega_precise"}
+
+    # 1. Intentar clasificar con RAG despues de reglas deterministicas fuertes.
+    if text and len(text.strip()) > 50:
+        rag_result = _rag_classify_document(text, min_score=0.85)
+        if rag_result:
+            return rag_result
+    # 2. Fallback a clasificacion por reglas
     if _looks_like_beneficiario_final_document(haystack):
         return {"document_type": "beneficiario_final", "legacy_code": 27, "code_source": "ocr_beneficiario_precise"}
     if _looks_like_cedula_document(name_txt, haystack):
         return {"document_type": "cedula", "legacy_code": 6, "code_source": "ocr_cedula_precise"}
     if _looks_like_rut_document(haystack):
         return {"document_type": "rut", "legacy_code": 8, "code_source": "ocr_rut_precise"}
-    if _looks_like_entrega_documentos(haystack):
-        return {"document_type": "entrega_documentos", "legacy_code": 10, "code_source": "ocr_entrega_precise"}
     if _looks_like_camara_document(haystack):
         return {"document_type": "camara_comercio", "legacy_code": 5, "code_source": "ocr_camara_precise"}
     if _looks_like_constancia_afiliacion(haystack):
@@ -2790,6 +3006,12 @@ def _extract_fields(text: str) -> Dict[str, Any]:
         match = re.search(r"(PALMAS\s+DE\s+PUERTO\s+GAITAN(?:\s+S\.\s*A\.\s*S\.?)?)", normalized, flags=re.IGNORECASE)
         if match:
             company_name = normalize_text(match.group(1))
+    entrega_identity = _extract_entrega_identity_from_text(normalized)
+    entrega_contract_number = entrega_identity.get("numero_contrato", "")
+    if entrega_identity.get("razon_social") and not company_name:
+        company_name = entrega_identity["razon_social"]
+    if entrega_identity.get("nit") and not nit_match:
+        nit_match = re.search(rf"\b({re.escape(entrega_identity['nit'])})\b", normalized)
     match = re.search(r"apellidos y nombres del representante legal[^A-Za-z0-9]{0,20}([A-ZÁÉÍÓÚÑ ]{6,120})", normalized, flags=re.IGNORECASE)
     if match:
         candidate = normalize_text(match.group(1))
@@ -2925,6 +3147,7 @@ def _extract_fields(text: str) -> Dict[str, Any]:
     return {
         "document_number": doc_number,
         "nit": nit_value,
+        "contract_number": entrega_contract_number,
         "all_numbers": digits[:10],
         "dates": date_matches[:5],
         "company_name": company_name,
@@ -3552,6 +3775,7 @@ def _extract_worker_records_from_rows(rows: List[tuple[Any, ...]]) -> tuple[List
                 break
             if document_value or name_value:
                 if doc_digits and len(doc_digits) >= 5 and doc_type in {"CC", "CE", "CD", "SC", "PE", "PT", "RC", "TI", "NI", "PPT", "PEP", "PA", "AS"}:
+                    record["_raw_numero_de_identificacion"] = normalize_text(document_value)
                     record["numero_de_identificacion"] = doc_digits
                     if not record.get("fecha_de_nacimiento"):
                         parts = [
@@ -3564,6 +3788,7 @@ def _extract_worker_records_from_rows(rows: List[tuple[Any, ...]]) -> tuple[List
                     record["_row"] = str(row_offset)
                     records.append(record)
                 elif not document_value and name_value:
+                    record["_raw_numero_de_identificacion"] = normalize_text(document_value)
                     record["_row"] = str(row_offset)
                     records.append(record)
     return records, header_index
@@ -4869,17 +5094,8 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
             )
     for index, record in enumerate(records[:200], start=1):
         row_excel = int(record.get("_row") or index + 1)  # fila real en el Excel
-        row_excel = int(record.get("_row") or index + 1)  # fila real en el Excel
-        raw_document = normalize_text(
-            record.get("documento")
-            or record.get("numero_documento")
-            or record.get("num_id_trabajador")
-            or record.get("numero_de_identificacion")
-            or ""
-        )
-        row_document = only_digits(
-            raw_document
-        )
+        raw_document = _worker_document_raw(record)
+        row_document = only_digits(raw_document)
         full_name = normalize_text(
             record.get("nombre")
             or record.get("nombre_trabajador")
@@ -4899,8 +5115,8 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
         elif not _is_strict_numeric_value(raw_document):
             row_errors.append({
                 "row": row_excel,
-                "code": "DOCUMENTO_NO_NUMERICO",
-                "message": f"El número de identificación debe ser numérico en fila {row_excel} ({raw_document}).",
+                "code": "DOCUMENTO_FORMATO_INVALIDO",
+                "message": f"El documento del trabajador debe ser completamente numérico en fila {row_excel} ({raw_document}).",
                 "documento": row_document,
             })
         if not full_name:
@@ -5524,6 +5740,7 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     profile_company = normalize_haystack(profile.get("empresa", ""))
     profile_company_cmp = _normalize_company_compare(profile.get("empresa", ""))
     profile_company_strict = _normalize_company_strict(profile.get("empresa", ""))
+    profile_company_official = _normalize_company_official(profile.get("empresa", ""))
     camara_docs = _doc_by_type(docs, "camara_comercio")
     camara_primary = next((d for d in camara_docs if d.get("fields", {}).get("company_name", "").strip()), camara_docs[0] if camara_docs else None)
     formulario_primary = formulario_docs[0] if formulario_docs else None
@@ -5535,26 +5752,46 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     form_company_cmp = _normalize_company_compare(form_company_source)
     camara_company_strict = _normalize_company_strict(camara_company_source)
     form_company_strict = _normalize_company_strict(form_company_source)
+    camara_company_official = _normalize_company_official(camara_company_source)
+    form_company_official = _normalize_company_official(form_company_source)
     company_ok = False
     if not natural_person_with_cedula and camara_primary and (formulario_primary or profile.get("empresa")):
         form_or_xlsx_company = normalize_haystack(form_company_source)
         form_or_xlsx_company_cmp = _normalize_company_compare(form_company_source)
         form_or_xlsx_company_strict = _normalize_company_strict(form_company_source)
+        form_or_xlsx_company_official = _normalize_company_official(form_company_source)
         form_has_company = bool(form_or_xlsx_company)
-        company_ok = bool(
-            camara_company_cmp
-            and (
-                (form_has_company and form_or_xlsx_company_cmp and camara_company_cmp == form_or_xlsx_company_cmp)
-                or (not form_has_company and profile_company_cmp and camara_company_cmp == profile_company_cmp)
+        camara_has_company = bool(camara_company_cmp)
+        expected_company_cmp = form_or_xlsx_company_cmp or profile_company_cmp
+        expected_company_official = form_or_xlsx_company_official or profile_company_official
+        expected_company_label = form_company_source or profile.get("empresa", "")
+        company_identity_ok = bool(camara_has_company and expected_company_cmp and camara_company_cmp == expected_company_cmp)
+        company_formal_ok = bool(company_identity_ok and camara_company_official and expected_company_official and camara_company_official == expected_company_official)
+        company_ok = company_formal_ok
+        company_message = "La razón social coincide entre cámara de comercio y formulario/XLSX."
+        if not camara_has_company:
+            company_message = (
+                "No se pudo leer la razón social en cámara de comercio para comparar contra el Excel/Formulario."
             )
-        )
+        elif not expected_company_cmp:
+            company_message = "No se encontró razón social en Excel/Formulario para comparar contra cámara de comercio."
+        elif not company_identity_ok:
+            company_message = (
+                "La razón social no coincide entre cámara de comercio y Excel/Formulario: "
+                f"cámara='{camara_company_source or 'n/d'}' · Excel/Formulario='{expected_company_label or 'n/d'}'."
+            )
+        elif not company_formal_ok:
+            company_message = (
+                "La razón social tiene diferencia formal entre cámara de comercio y Excel/Formulario: "
+                f"cámara='{camara_company_source or 'n/d'}' · Excel/Formulario='{expected_company_label or 'n/d'}'. "
+                "La forma escrita debe coincidir exactamente, incluyendo puntos y siglas societarias."
+            )
         validations.append(
             {
                 "code": "EMPRESA_MATCH_CAMARA_FORMULARIO",
                 "status": "OK" if company_ok else "ALERTA",
-                "message": "La razón social coincide entre cámara de comercio y formulario/XLSX."
-                if company_ok
-                else "La razón social no coincide entre cámara de comercio y formulario/XLSX.",
+                "severity": "ok" if company_ok else "blocker",
+                "message": company_message,
             }
         )
         matches["empresa_nombre"] = {
@@ -5562,14 +5799,172 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
             "camara": (camara_primary or {}).get("fields", {}).get("company_name", ""),
             "formulario": (formulario_primary or {}).get("fields", {}).get("company_name", "") or profile.get("empresa", ""),
             "camara_compare": camara_company_cmp,
-            "formulario_compare": form_or_xlsx_company_cmp,
+            "formulario_compare": expected_company_cmp,
             "camara_strict": camara_company_strict,
             "formulario_strict": form_or_xlsx_company_strict,
+            "camara_official": camara_company_official,
+            "formulario_official": expected_company_official,
             "camara_file": (camara_primary or {}).get("filename", ""),
             "formulario_file": (formulario_primary or {}).get("filename", "") or (xlsx_profile.get("source_filename") or ""),
             "ok": company_ok,
         }
         if not company_ok:
+            alerts.append(validations[-1])
+
+    expected_support_company_source = form_company_source or profile.get("empresa", "")
+    expected_support_company_cmp = _normalize_company_compare(expected_support_company_source)
+    expected_support_company_official = _normalize_company_official(expected_support_company_source)
+    entrega_company_candidates: List[Dict[str, Any]] = []
+    entrega_company_mismatches: List[Dict[str, Any]] = []
+    if not natural_person_with_cedula and expected_support_company_cmp:
+        for doc in docs:
+            if str(doc.get("document_type") or "") != "entrega_documentos":
+                continue
+            identity = _extract_entrega_identity_from_doc(doc)
+            support_company = normalize_text(identity.get("razon_social", ""))
+            support_company_cmp = _normalize_company_compare(support_company)
+            support_company_official = _normalize_company_official(support_company)
+            if not support_company_cmp:
+                continue
+            support_company_identity_ok = support_company_cmp == expected_support_company_cmp
+            support_company_formal_ok = (
+                support_company_identity_ok
+                and bool(support_company_official)
+                and bool(expected_support_company_official)
+                and support_company_official == expected_support_company_official
+            )
+            item = {
+                "filename": str(doc.get("filename") or ""),
+                "document_type": str(doc.get("document_type") or ""),
+                "razon_social": support_company,
+                "compare": support_company_cmp,
+                "official": support_company_official,
+                "identity_ok": support_company_identity_ok,
+                "formal_ok": support_company_formal_ok,
+                "ok": support_company_formal_ok,
+            }
+            entrega_company_candidates.append(item)
+            if not item["ok"]:
+                entrega_company_mismatches.append(item)
+    if entrega_company_candidates:
+        supports_company_ok = not entrega_company_mismatches
+        if supports_company_ok:
+            supports_company_message = "La razón social del soporte Entrega de documentos coincide con Excel/Formulario."
+        else:
+            mismatch = entrega_company_mismatches[0]
+            if mismatch.get("identity_ok"):
+                supports_company_message = (
+                    "La razón social del soporte Entrega de documentos tiene diferencia formal contra Excel/Formulario: "
+                    f"soporte='{mismatch.get('razon_social') or 'n/d'}' · "
+                    f"Excel/Formulario='{expected_support_company_source or 'n/d'}' "
+                    f"· archivo='{mismatch.get('filename') or 'n/d'}'. "
+                    "La forma escrita debe coincidir exactamente, incluyendo puntos y siglas societarias."
+                )
+            else:
+                supports_company_message = (
+                    "La razón social del soporte Entrega de documentos no coincide con Excel/Formulario: "
+                    f"soporte='{mismatch.get('razon_social') or 'n/d'}' · "
+                    f"Excel/Formulario='{expected_support_company_source or 'n/d'}' "
+                    f"· archivo='{mismatch.get('filename') or 'n/d'}'."
+                )
+        validations.append(
+            {
+                "code": "EMPRESA_MATCH_SOPORTE_ENTREGA",
+                "status": "OK" if supports_company_ok else "ALERTA",
+                "severity": "ok" if supports_company_ok else "blocker",
+                "message": supports_company_message,
+            }
+        )
+        matches["empresa_soporte_entrega"] = {
+            "expected": expected_support_company_source,
+            "expected_compare": expected_support_company_cmp,
+            "expected_official": expected_support_company_official,
+            "candidates": entrega_company_candidates,
+            "ok": supports_company_ok,
+        }
+        if not supports_company_ok:
+            alerts.append(validations[-1])
+
+    expected_contract_source = normalize_text(
+        profile.get("numero_contrato")
+        or profile.get("nro_contrato")
+        or profile.get("numero_radicacion")
+        or profile.get("nro_radicacion")
+        or form_fields.get("numero_radicacion")
+        or form_fields.get("numero_contrato")
+        or ""
+    )
+    expected_contract_key = _contract_number_key(expected_contract_source)
+    entrega_contract_candidates: List[Dict[str, Any]] = []
+    entrega_contract_mismatches: List[Dict[str, Any]] = []
+    if expected_contract_key:
+        for doc in docs:
+            if str(doc.get("document_type") or "") != "entrega_documentos":
+                continue
+            identity = _extract_entrega_identity_from_doc(doc)
+            support_contract = normalize_text(identity.get("numero_contrato", ""))
+            support_contract_key = _contract_number_key(support_contract)
+            if not support_contract_key:
+                continue
+            support_identity_company_cmp = _normalize_company_compare(identity.get("razon_social", ""))
+            support_identity_nit = only_digits(identity.get("nit", ""))
+            support_identity_matches = (
+                (not expected_support_company_cmp or support_identity_company_cmp == expected_support_company_cmp)
+                and (not xlsx_nit or support_identity_nit == xlsx_nit)
+            )
+            ocr_near_match = (
+                support_identity_matches
+                and _looks_like_single_digit_ocr_mismatch(expected_contract_key, support_contract_key)
+            )
+            item = {
+                "filename": str(doc.get("filename") or ""),
+                "document_type": str(doc.get("document_type") or ""),
+                "numero_contrato": support_contract,
+                "compare": support_contract_key,
+                "ok": support_contract_key == expected_contract_key or ocr_near_match,
+                "ocr_near_match": ocr_near_match,
+                "identity_matched": support_identity_matches,
+            }
+            entrega_contract_candidates.append(item)
+            if not item["ok"]:
+                entrega_contract_mismatches.append(item)
+    if entrega_contract_candidates:
+        supports_contract_ok = not entrega_contract_mismatches
+        if supports_contract_ok:
+            ambiguous = next((item for item in entrega_contract_candidates if item.get("ocr_near_match")), None)
+            if ambiguous:
+                supports_contract_message = (
+                    "El número de contrato del soporte Entrega de documentos se aceptó contra Excel/Formulario: "
+                    f"Excel/Formulario='{expected_contract_source or 'n/d'}' · "
+                    f"lectura OCR='{ambiguous.get('numero_contrato') or 'n/d'}' · "
+                    f"archivo='{ambiguous.get('filename') or 'n/d'}'. "
+                    "La razón social y el NIT del soporte coinciden, por lo que la diferencia de un dígito se trata como lectura OCR ambigua."
+                )
+            else:
+                supports_contract_message = "El número de contrato del soporte Entrega de documentos coincide con Excel/Formulario."
+        else:
+            mismatch = entrega_contract_mismatches[0]
+            supports_contract_message = (
+                "El número de contrato del soporte Entrega de documentos no coincide con Excel/Formulario: "
+                f"soporte='{mismatch.get('numero_contrato') or 'n/d'}' · "
+                f"Excel/Formulario='{expected_contract_source or 'n/d'}' "
+                f"· archivo='{mismatch.get('filename') or 'n/d'}'."
+            )
+        validations.append(
+            {
+                "code": "CONTRATO_MATCH_SOPORTE_ENTREGA",
+                "status": "OK" if supports_contract_ok else "ALERTA",
+                "severity": "ok" if supports_contract_ok else "blocker",
+                "message": supports_contract_message,
+            }
+        )
+        matches["contrato_soporte_entrega"] = {
+            "expected": expected_contract_source,
+            "expected_compare": expected_contract_key,
+            "candidates": entrega_contract_candidates,
+            "ok": supports_contract_ok,
+        }
+        if not supports_contract_ok:
             alerts.append(validations[-1])
 
     if "contrato" not in missing_docs:
@@ -5915,7 +6310,7 @@ def _push_comisiones_to_legacy(lote: str, docs: List[Dict[str, Any]], base: str 
         if fname in manual_comisiones:
             for mc in manual_comisiones[fname]:
                 codigo_raw = only_digits(str(mc.get("codigo") or "1"))
-                if codigo_raw == "2":
+                if codigo_raw in {"2", "3"}:
                     continue
                 codigo_plano = {"1": "2", "3": "3", "4": "4"}.get(codigo_raw, "2")
                 linea += 1
@@ -5930,7 +6325,7 @@ def _push_comisiones_to_legacy(lote: str, docs: List[Dict[str, Any]], base: str 
         if not intermediarios:
             data = _extract_intermediario_codigo_y_porcentaje(doc)
             codigo = only_digits(data.get("codigo_intermediario") or "")
-            if codigo and codigo != "2":
+            if codigo and codigo not in {"2", "3"}:
                 codigo_plano = {"1": "2", "3": "3", "4": "4"}.get(codigo, "2")
                 linea += 1
                 comision_rows.append({
@@ -5941,6 +6336,9 @@ def _push_comisiones_to_legacy(lote: str, docs: List[Dict[str, Any]], base: str 
                 })
         else:
             for interm in intermediarios:
+                codigo_intermediario = only_digits(str(interm.get("codigo_intermediario") or interm.get("codigo_vendedor") or ""))
+                if codigo_intermediario in {"2", "3"} or str(interm.get("codigo_vendedor") or "").strip() == "3":
+                    continue
                 linea += 1
                 comision_rows.append({
                     "lote": lote, "linea": str(linea), "sr": "1",

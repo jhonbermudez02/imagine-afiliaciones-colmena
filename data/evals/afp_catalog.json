@@ -1,12 +1,12 @@
 [
   {
-    "codigo": 0,
+    "codigo": "",
     "nombre": "NO SUMINISTRADO",
     "na": 1,
     "activo": false
   },
   {
-    "codigo": 0,
+    "codigo": "",
     "nombre": "DESCONOCIDO",
     "na": 2,
     "activo": false
@@ -21,7 +21,7 @@
     "codigo": 10,
     "nombre": "COLFONDOS",
     "na": 4,
-    "activo": false
+    "activo": true
   },
   {
     "codigo": 11,
@@ -45,7 +45,7 @@
     "codigo": 14,
     "nombre": "PROTECCION",
     "na": 8,
-    "activo": false
+    "activo": true
   },
   {
     "codigo": 16,
@@ -63,7 +63,7 @@
     "codigo": 2,
     "nombre": "COLPENSIONES",
     "na": 11,
-    "activo": false
+    "activo": true
   },
   {
     "codigo": 20,

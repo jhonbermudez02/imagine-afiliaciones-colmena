@@ -94,7 +94,7 @@
       <div class="nav-group" id="navSistema">
         <div class="nav-group-label">Sistema</div>
         <button class="nav-item" data-view="entrenamiento" type="button">
-          <span class="nav-dot"></span>Entrenamiento
+          <span class="nav-dot"></span>Hallazgos
         </button>
         <button class="nav-item" data-view="busqueda" type="button">
           <span class="nav-dot"></span>Búsqueda
@@ -124,6 +124,18 @@
         <div class="page-title" id="pageTitle">Bandeja de entrada</div>
         <div class="page-breadcrumb" id="pageBreadcrumb">Operación · contratos activos</div>
       </div>
+      <select class="mobile-view-select" id="mobileViewSelect" aria-label="Cambiar vista">
+        <option value="bandeja">Bandeja</option>
+        <option value="flujo">Nuevo contrato</option>
+        <option value="clasificacion">Clasificación</option>
+        <option value="validacion">Validación OCR</option>
+        <option value="visor">Visor documental</option>
+        <option value="reporte">Reporte ejecutivo</option>
+        <option value="produccion">Producción</option>
+        <option value="entrenamiento">Hallazgos</option>
+        <option value="busqueda">Búsqueda</option>
+        <option value="admin">Admin</option>
+      </select>
       <div class="topbar-right" id="topbarActions"></div>
     </header>
 
@@ -347,11 +359,11 @@
         </div>
       </section>
 
-      <!-- ENTRENAMIENTO -->
+      <!-- HALLAZGOS -->
       <section class="view" id="view-entrenamiento">
         <div class="section-card">
           <div class="section-card-head">
-            <div class="section-title">Registro de hallazgos · feedback del operador</div>
+            <div class="section-title">Hallazgos y mejoras del sistema</div>
           </div>
           <div class="feedback-form">
             <div class="field-row">
@@ -413,31 +425,10 @@
 
       <!-- ADMIN -->
       <section class="view" id="view-admin">
-        <div class="metrics-row">
-          <div class="metric-card" id="adminStatusCard">
-            <div class="metric-label">Estado del sistema</div>
-            <div class="metric-val" id="adminStatusVal">—</div>
-            <div class="metric-sub" id="adminStatusSub"></div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-label">Versión frontend</div>
-            <div class="metric-val" id="adminBuildId" style="font-size:13px;padding-top:4px">—</div>
-          </div>
-        </div>
         <div class="section-card">
           <div class="section-card-head">
-            <div class="section-title">Acciones del sistema</div>
-          </div>
-          <div class="admin-actions">
-            <button class="btn-secondary" id="exportReviewsBtn" type="button">Exportar revisiones</button>
-            <button class="btn-secondary" id="refreshStatusBtn" type="button">Actualizar estado</button>
-          </div>
-          <div id="adminStatusDetail" style="margin-top:16px"></div>
-        </div>
-        <div class="section-card" style="margin-top:16px">
-          <div class="section-card-head">
             <div class="section-title">Administración de Tablas</div>
-            <div class="section-sub">EPS · AFP · Asesores · SMMLV · Destinatarios de correo</div>
+            <div class="section-sub">PILA · EPS · AFP · Asesores · SMMLV · Destinatarios de correo</div>
           </div>
           <div id="adminTablesPanel" style="padding:12px">
             <div style="font-size:12px;color:var(--c-text-2)">Cargando...</div>
@@ -471,4 +462,3 @@
   <span>RSS <strong id="rwRss">—</strong></span>
   <span id="rwQueue" style="display:none">Cola <strong id="rwQueueVal">—</strong></span>
 </div>
-

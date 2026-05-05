@@ -15,6 +15,38 @@ def _only_digits(value: str) -> str:
     return "".join(ch for ch in value if ch.isdigit())
 
 
+def _normalize_catalog_text(value: Any) -> str:
+    text = _text(value).upper()
+    replacements = {
+        "Á": "A",
+        "É": "E",
+        "Í": "I",
+        "Ó": "O",
+        "Ú": "U",
+        "Ü": "U",
+        "Ñ": "N",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return "".join(ch for ch in text if ch.isalnum())
+
+
+def _normalize_modalidad(value: Any) -> str:
+    aliases = {
+        "PRESENCIAL": "PRESENCIAL",
+        "ENSITIO": "PRESENCIAL",
+        "SITIO": "PRESENCIAL",
+        "TELETRABAJO": "TELETRABAJO",
+        "CASA": "CASA",
+        "TRABAJOENCASA": "CASA",
+        "REMOTO": "REMOTO",
+        "REMOTA": "REMOTO",
+        "TRABAJOREMOTO": "REMOTO",
+    }
+    text = _normalize_catalog_text(value)
+    return aliases.get(text, text)
+
+
 @dataclass
 class RuleResult:
     ok: bool
@@ -285,7 +317,7 @@ class AfiliacionesRulesEngine:
                     }
                 )
 
-            modalidad = self._pick(row, "modalidad").upper()
+            modalidad = _normalize_modalidad(self._pick(row, "modalidad"))
             if modalidad and modalidad not in {"PRESENCIAL", "TELETRABAJO", "CASA", "REMOTO"}:
                 errors.append(
                     {

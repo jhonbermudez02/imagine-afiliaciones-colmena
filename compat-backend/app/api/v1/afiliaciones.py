@@ -82,6 +82,7 @@ TR_IMPORT_RUNS: dict[str, dict[str, Any]] = {}
 FLATFILE_926_REPORTS: dict[str, dict[str, Any]] = {}
 FLATFILE_926_HISTORY_DIR = Path(os.getenv("AFILIACIONES_926_HISTORY_DIR", "/tmp/afiliaciones_926_history"))
 FLATFILE_926_HISTORY_INDEX = FLATFILE_926_HISTORY_DIR / "index.json"
+ACTIVITY_ECONOMICA_ARP_PATH = Path(__file__).resolve().parents[2] / "data" / "actividad_economica_arp.json"
 LEGACY_ENGINE = LegacyCompatEngine(
     Path(os.getenv("AFILIACIONES_ENGINE_STATE_PATH", "/tmp/afiliaciones_engine_state.json"))
 )
@@ -93,6 +94,49 @@ DEFAULT_ORACLE_FLATFILE = os.getenv(
 )
 SAFE_SQL_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 RUTA_IDTRAMITE_PYMES_RE = re.compile(r"^200\d{5}$")
+_ACTIVITY_ECONOMICA_ARP_CACHE: Optional[dict[str, dict[str, Any]]] = None
+
+
+def _activity_economica_arp_catalog() -> dict[str, dict[str, Any]]:
+    global _ACTIVITY_ECONOMICA_ARP_CACHE
+    if _ACTIVITY_ECONOMICA_ARP_CACHE is not None:
+        return _ACTIVITY_ECONOMICA_ARP_CACHE
+    catalog: dict[str, dict[str, Any]] = {}
+    try:
+        payload = json.loads(ACTIVITY_ECONOMICA_ARP_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        payload = []
+    for item in payload or []:
+        if not isinstance(item, dict):
+            continue
+        code = "".join(ch for ch in as_text(item.get("codigo")) if ch.isdigit())
+        if code:
+            catalog[code] = item
+    _ACTIVITY_ECONOMICA_ARP_CACHE = catalog
+    return catalog
+
+
+def _activity_risk_profile_arp(codigoactividad: Any) -> dict[str, str]:
+    code = "".join(ch for ch in as_text(codigoactividad) if ch.isdigit())
+    row = _activity_economica_arp_catalog().get(code) or {}
+    return {
+        "codigo": code,
+        "nombre": as_text(row.get("nombre")).strip(),
+        "clase": as_text(row.get("clase") or row.get("claries")).strip(),
+        "grado": as_text(row.get("grado")).strip(),
+        "tasa": as_text(row.get("tasa")).replace(",", ".").strip(),
+    }
+
+
+def _format_tasa_arp(value: Any) -> str:
+    raw = as_text(value).replace(",", ".").strip()
+    if raw in {"", "0", "0.0", "0.00", "0.000", "0.0000", "00000"}:
+        return ""
+    try:
+        raw = f"{float(raw):.3f}"
+    except Exception:
+        pass
+    return raw[:5].ljust(5, "0")
 
 LOTE_FIELD_BY_TABLE = {
     "brempresasarp": "lt",
@@ -2059,26 +2103,32 @@ def _sync_engine_from_db(lote: str, base: str = "temporal", fecha_proceso: str =
 
         codigoactividad = as_text(ct.get("codigoactividad") or wh_ref.get("f05")).strip()
         codigoactividad_digits = _only_digits(codigoactividad)
+        activity_profile = _activity_risk_profile_arp(codigoactividad_digits or codigoactividad)
         claseriesgo = as_text(ct.get("claseriesgo") or wh_ref.get("f49")).strip()
+        if activity_profile.get("clase") in {"1", "2", "3", "4", "5"}:
+            claseriesgo = activity_profile["clase"]
         if claseriesgo not in {"1", "2", "3", "4", "5"}:
             claseriesgo = codigoactividad_digits[:1] if codigoactividad_digits[:1] in {"1", "2", "3", "4", "5"} else "2"
 
-        grado = as_text(ct.get("grado")).strip()
+        grado = activity_profile.get("grado") or as_text(ct.get("grado")).strip()
         if not grado:
             grado = "12" if codigoactividad_digits == "2851201" else "00"
 
         tasa = as_text(ct.get("tasa")).replace(",", ".").strip()
+        if activity_profile.get("tasa"):
+            tasa = activity_profile["tasa"]
         if tasa in zero_tasa_tokens:
             tasa = tasa_by_clase.get(claseriesgo, "1.044")
         if codigoactividad_digits == "2851201":
             tasa = "1.044"
+        tasa = _format_tasa_arp(tasa) or tasa_by_clase.get(claseriesgo, "1.044")
 
         ct["codigoactividad"] = codigoactividad or "0"
         ct["claseriesgo"] = claseriesgo
         ct["grado"] = grado
         ct["tasa"] = tasa
         if not as_text(ct.get("nombreactividad")).strip():
-            ct["nombreactividad"] = f"RIESGO {claseriesgo}"
+            ct["nombreactividad"] = as_text(wh_ref.get("f71")).strip() or activity_profile.get("nombre") or f"RIESGO {claseriesgo}"
 
     payload = {
         "tables": {
@@ -2347,6 +2397,8 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
     ct_cot_expr = "NULL::text AS ct_montocotizacion"
     if "ct_montocotizacion" in trabajador_cols:
         ct_cot_expr = "w.ct_montocotizacion AS ct_montocotizacion"
+    def _worker_col_expr(column: str) -> str:
+        return f"w.{column} AS {column}" if column in trabajador_cols else f"NULL::text AS {column}"
     ciudad_trab_expr = "w.ciudadresidencia"
     if "municipioresidencia" in trabajador_cols:
         ciudad_trab_expr = "w.municipioresidencia"
@@ -2404,6 +2456,19 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
       {ct_codigo_expr},
       {ct_clase_expr},
       {ct_cot_expr},
+      {_worker_col_expr("ct_ciudad")},
+      {_worker_col_expr("ct_departamento")},
+      {_worker_col_expr("ct_zona")},
+      {_worker_col_expr("ct_direccion")},
+      {_worker_col_expr("ct_telefono")},
+      {_worker_col_expr("ct_correo")},
+      {_worker_col_expr("ct_responsable_pa")},
+      {_worker_col_expr("ct_responsable_sa")},
+      {_worker_col_expr("ct_responsable_pn")},
+      {_worker_col_expr("ct_responsable_sn")},
+      {_worker_col_expr("ct_responsable_td")},
+      {_worker_col_expr("ct_responsable_doc")},
+      {_worker_col_expr("ct_responsable_correo")},
       w.modalidad,
       w.arlanterior,
       w.afp,
@@ -2424,7 +2489,7 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
     LEFT JOIN proc_servicios_obtenerempleadortramite e ON e.idtramite = t.idtramite
     LEFT JOIN proc_servicios_obtenertrabajadortramite w ON w.idtramite = t.idtramite
     WHERE {" AND ".join(conditions)}
-    ORDER BY t.idtramite, w.sr
+    ORDER BY t.idtramite, w.sr, w.idtrabajador
     LIMIT :limit
     """
     try:
@@ -2492,6 +2557,12 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
             "TUBARÁ": "08832",
             "BOGOTA": "11001",
             "BOGOTÁ": "11001",
+            "BOGOTA D.C.": "11001",
+            "BOGOTÁ D.C.": "11001",
+            "CHIA": "25175",
+            "CHÍA": "25175",
+            "TOCANCIPA": "25817",
+            "TOCANCIPÁ": "25817",
             "SOLEDAD": "08758",
             "MEDELLIN": "05001",
             "MEDELLÍN": "05001",
@@ -2595,6 +2666,15 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
         norm = digits[-7:] if digits else code
         if norm in actividad_cache:
             return actividad_cache[norm]
+        activity_profile = _activity_risk_profile_arp(norm)
+        if activity_profile.get("nombre") or activity_profile.get("clase"):
+            out = (
+                activity_profile.get("codigo") or norm,
+                activity_profile.get("nombre") or "SERVICIOS",
+                activity_profile.get("clase") or "2",
+            )
+            actividad_cache[norm] = out
+            return out
         if {"codigo", "nombre"}.issubset(actividad_cols):
             try:
                 rows_act = fetch_all_by_alias(
@@ -2877,6 +2957,7 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                     "zona": sede_zona,
                     "direccion": sede_direccion,
                     "telefono": sede_telefono,
+                    "nombre_sede": sede_nombre,
                     "mail": as_text((sede_row or {}).get("correoresponsable") or row.get("correoelectronicorepresentantelegal")),
                 }
             )
@@ -2898,19 +2979,30 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                 sede_ct_code = _normalize_ct_code_token(ct_code_item) or as_text(slot.get("ct_code"))
                 sede_workers = trabajadores_by_ct.get(sede_ct_code, [])
                 ct_ref = sede_workers[0] if sede_workers else {}
-                ct_nom_act = as_text(ct_ref.get("ct_nombreactividad") or nom_act)
-                if ct_nom_act.strip() == "":
-                    ct_nom_act = f"RIESGO {clase_riesgo}"
                 ct_cod_act = as_text(ct_ref.get("ct_codigoactividad") or cod_act)
+                activity_profile = _activity_risk_profile_arp(ct_cod_act)
+                ct_nom_act = as_text(
+                    ct_ref.get("ct_nombre")
+                    or ct_ref.get("nombre_ct")
+                    or ct_ref.get("ct_nombreactividad")
+                    or slot.get("nombre_sede")
+                    or ""
+                ).strip()
+                if ct_nom_act == "":
+                    ct_nom_act = activity_profile.get("nombre") or nom_act or f"RIESGO {clase_riesgo}"
                 ct_clase = as_text(ct_ref.get("ct_claseriesgo") or clase_riesgo or "2")
+                if activity_profile.get("clase") in {"1", "2", "3", "4", "5"}:
+                    ct_clase = activity_profile["clase"]
                 ct_cot = as_text(ct_ref.get("ct_montocotizacion") or "0")
-                ct_grado = "0"
+                ct_grado = activity_profile.get("grado") or "0"
                 ct_tasa = as_text(
                     ct_ref.get("ct_tasa_riesgo")
                     or ct_ref.get("ct_tasa_riesgo_ct")
                     or ct_ref.get("tasa_riesgo")
                     or "",
                 ).strip()
+                if activity_profile.get("tasa"):
+                    ct_tasa = activity_profile["tasa"]
                 ct_tasa_norm = ct_tasa.replace(",", ".").strip()
                 if ct_tasa_norm in {"", "0", "0.0", "0.00", "0.000", "0.0000", "00000"}:
                     tasa_by_clase = {
@@ -2922,8 +3014,9 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                     }
                     ct_tasa = tasa_by_clase.get(as_text(ct_clase).strip(), "0")
                 if _only_digits(ct_cod_act) == "2851201":
-                    ct_grado = "12"
-                    ct_tasa = "1.044"
+                    ct_grado = activity_profile.get("grado") or "12"
+                    ct_tasa = activity_profile.get("tasa") or "1.044"
+                ct_tasa = _format_tasa_arp(ct_tasa)
                 wcentrot.append(
                     {
                         "sr": sede_sr,
@@ -2936,17 +3029,17 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                         "tasa": ct_tasa,
                         "totaltrabajadores": str(len(sede_workers)),
                         "montocotizacion": ct_cot,
-                        "ciudad": as_text(slot["ciudad"]),
-                        "zona": as_text(slot["zona"]),
-                        "direccion": as_text(slot["direccion"]),
-                        "telefono": as_text(slot["telefono"]),
-                        "tipodocumento": as_text(slot["resp_td"]),
-                        "id_responsable": as_text(slot["resp_doc"]),
-                        "primerapellido": r1,
-                        "segundoapellido": r2,
-                        "primernombre": r3,
-                        "segundonombre": r4,
-                        "mail": as_text(slot["mail"]),
+                        "ciudad": _city_code(ct_ref.get("ct_ciudad")) or as_text(slot["ciudad"]),
+                        "zona": RULES_ENGINE.normalize_zona(ct_ref.get("ct_zona") or slot["zona"]),
+                        "direccion": as_text(ct_ref.get("ct_direccion") or slot["direccion"]),
+                        "telefono": as_text(ct_ref.get("ct_telefono") or slot["telefono"]),
+                        "tipodocumento": as_text(ct_ref.get("ct_responsable_td") or slot["resp_td"]),
+                        "id_responsable": as_text(ct_ref.get("ct_responsable_doc") or slot["resp_doc"]),
+                        "primerapellido": as_text(ct_ref.get("ct_responsable_pa") or r1),
+                        "segundoapellido": as_text(ct_ref.get("ct_responsable_sa") or r2),
+                        "primernombre": as_text(ct_ref.get("ct_responsable_pn") or r3),
+                        "segundonombre": as_text(ct_ref.get("ct_responsable_sn") or r4),
+                        "mail": as_text(ct_ref.get("ct_responsable_correo") or ct_ref.get("ct_correo") or slot["mail"]),
                     }
                 )
 
@@ -4070,26 +4163,47 @@ def _parse_trabajadores_from_sede_clean(
     sanitize_warnings: list[dict[str, Any]] = []
     doc_types = {"CC", "CE", "TI", "RC", "PA", "PT", "SC", "CD", "NI"}
     ct_meta_by_code: dict[str, dict[str, str]] = {}
+
+    def _part(parts: list[str], idx: int) -> str:
+        if idx < 0 or idx >= len(parts):
+            return ""
+        val = _clean_token(parts[idx])
+        return "" if val.upper() == "NULL" else val
+
     for line_no, ln in enumerate(as_text(content).splitlines(), start=1):
         line = ln.strip()
         if not line:
             continue
         parts = [_clean_token(p) for p in line.split("|")]
+        if len(parts) >= 19 and parts[0].isdigit() and parts[1].isdigit() and parts[2].upper() not in doc_types:
+            ct_code = _clean_token(parts[1])
+            ct_meta = {
+                "ct_nombreactividad": _part(parts, 2).upper(),
+                # Layout XLSX clean preserva columnas vacías con NULL:
+                # actividad=5, clase=9, ciudad=10, dirección=15, teléfono=17, cotización=34.
+                "ct_codigoactividad": _to_num_text(_part(parts, 5) or _part(parts, 3)),
+                "ct_claseriesgo": _part(parts, 9) or _part(parts, 4),
+                "ct_ciudad": _part(parts, 10),
+                "ct_departamento": _part(parts, 12),
+                "ct_zona": _part(parts, 14),
+                "ct_direccion": _part(parts, 15),
+                "ct_telefono": _to_num_text(_part(parts, 17)),
+                "ct_correo": _part(parts, 18).lower(),
+                "ct_responsable_pa": _part(parts, 21).upper(),
+                "ct_responsable_sa": _part(parts, 22).upper(),
+                "ct_responsable_pn": _part(parts, 23).upper(),
+                "ct_responsable_sn": _part(parts, 24).upper(),
+                "ct_responsable_td": _part(parts, 25).upper(),
+                "ct_responsable_doc": _to_num_text(_part(parts, 26)),
+                "ct_responsable_correo": _part(parts, 27).lower(),
+                "ct_montocotizacion": _to_num_text(_part(parts, 34) or _part(parts, 20)),
+            }
+            ct_meta_by_code[ct_code] = ct_meta
+            norm_ct_code = _normalize_ct_code_token(ct_code)
+            if norm_ct_code:
+                ct_meta_by_code[norm_ct_code] = ct_meta
+            continue
         if len(parts) < 31:
-            if (
-                len(parts) >= 21
-                and parts[0].isdigit()
-                and parts[1].isdigit()
-                and parts[2].upper() not in doc_types
-                and _only_digits(parts[3])
-            ):
-                ct_code = _clean_token(parts[1])
-                ct_meta_by_code[ct_code] = {
-                    "ct_nombreactividad": _clean_token(parts[2]).upper(),
-                    "ct_codigoactividad": _to_num_text(parts[3]),
-                    "ct_claseriesgo": _clean_token(parts[4]),
-                    "ct_montocotizacion": _to_num_text(parts[20]),
-                }
             continue
         # Filtrar filas de trabajadores (no cabeceras/centro de trabajo)
         # patrón esperado: idx2=tipo doc, idx3=documento.
@@ -4197,6 +4311,19 @@ def _parse_trabajadores_from_sede_clean(
             "ct_codigoactividad": ct_meta.get("ct_codigoactividad", ""),
             "ct_claseriesgo": ct_meta.get("ct_claseriesgo", ""),
             "ct_montocotizacion": ct_meta.get("ct_montocotizacion", ""),
+            "ct_ciudad": ct_meta.get("ct_ciudad", ""),
+            "ct_departamento": ct_meta.get("ct_departamento", ""),
+            "ct_zona": ct_meta.get("ct_zona", ""),
+            "ct_direccion": ct_meta.get("ct_direccion", ""),
+            "ct_telefono": ct_meta.get("ct_telefono", ""),
+            "ct_correo": ct_meta.get("ct_correo", ""),
+            "ct_responsable_pa": ct_meta.get("ct_responsable_pa", ""),
+            "ct_responsable_sa": ct_meta.get("ct_responsable_sa", ""),
+            "ct_responsable_pn": ct_meta.get("ct_responsable_pn", ""),
+            "ct_responsable_sn": ct_meta.get("ct_responsable_sn", ""),
+            "ct_responsable_td": ct_meta.get("ct_responsable_td", ""),
+            "ct_responsable_doc": ct_meta.get("ct_responsable_doc", ""),
+            "ct_responsable_correo": ct_meta.get("ct_responsable_correo", ""),
         }
         if was_sanitized:
             sanitize_warnings.append(
@@ -4335,10 +4462,7 @@ def _parse_comisiones_from_legacy_text(content: str) -> list[dict[str, str]]:
             if v == "1":
                 codigo_vendedor = "2"
                 skip_current = False
-            elif v == "3":
-                codigo_vendedor = "3"
-                skip_current = False
-            elif v == "2":
+            elif v in {"2", "3"}:
                 skip_current = True
             else:
                 codigo_vendedor = "1"
@@ -4380,9 +4504,7 @@ def _parse_comisiones_from_legacy_text(content: str) -> list[dict[str, str]]:
             continue
         if codigo == "1":
             codigo_vendedor = "2"
-        elif codigo == "3":
-            codigo_vendedor = "3"
-        elif codigo == "2":
+        elif codigo in {"2", "3"}:
             continue
         else:
             codigo_vendedor = "1"
@@ -7146,7 +7268,20 @@ def ruta_inclusion_importar_trabajadores_contrato(payload: dict[str, Any]) -> di
             "ADD COLUMN IF NOT EXISTS ct_nombreactividad text, "
             "ADD COLUMN IF NOT EXISTS ct_codigoactividad text, "
             "ADD COLUMN IF NOT EXISTS ct_claseriesgo text, "
-            "ADD COLUMN IF NOT EXISTS ct_montocotizacion text",
+            "ADD COLUMN IF NOT EXISTS ct_montocotizacion text, "
+            "ADD COLUMN IF NOT EXISTS ct_ciudad text, "
+            "ADD COLUMN IF NOT EXISTS ct_departamento text, "
+            "ADD COLUMN IF NOT EXISTS ct_zona text, "
+            "ADD COLUMN IF NOT EXISTS ct_direccion text, "
+            "ADD COLUMN IF NOT EXISTS ct_telefono text, "
+            "ADD COLUMN IF NOT EXISTS ct_correo text, "
+            "ADD COLUMN IF NOT EXISTS ct_responsable_pa text, "
+            "ADD COLUMN IF NOT EXISTS ct_responsable_sa text, "
+            "ADD COLUMN IF NOT EXISTS ct_responsable_pn text, "
+            "ADD COLUMN IF NOT EXISTS ct_responsable_sn text, "
+            "ADD COLUMN IF NOT EXISTS ct_responsable_td text, "
+            "ADD COLUMN IF NOT EXISTS ct_responsable_doc text, "
+            "ADD COLUMN IF NOT EXISTS ct_responsable_correo text",
         )
         if replace_existing:
             deleted = execute_by_alias(
@@ -7162,17 +7297,29 @@ def ruta_inclusion_importar_trabajadores_contrato(payload: dict[str, Any]) -> di
             "eps,actividadeconomica,modalidad,arlanterior,afp,iniciocontrato,finalizacioncontrato,valorcontrato,"
             "ingresomensual,deducciones,ibc,iniciocobertura,tipoafiliadocotizante,subtipoafiliadocotizante,tipocontrato,"
             "jornada,suministratransporte,numeromesescontrato,tipotramite,idtramite,"
-            "cargo,codigoct,ct_nombreactividad,ct_codigoactividad,ct_claseriesgo,ct_montocotizacion"
+            "cargo,codigoct,ct_nombreactividad,ct_codigoactividad,ct_claseriesgo,ct_montocotizacion,"
+            "ct_ciudad,ct_departamento,ct_zona,ct_direccion,ct_telefono,ct_correo,"
+            "ct_responsable_pa,ct_responsable_sa,ct_responsable_pn,ct_responsable_sn,"
+            "ct_responsable_td,ct_responsable_doc,ct_responsable_correo"
             ") VALUES ("
             ":sr,:idtrabajador,:tipodocumento,:numerodocumento,:primerapellido,:segundoapellido,:primernombre,:segundonombre,"
             ":fechanacimiento,:sexo,:direccionresidencia,:ciudadresidencia,:localidad,:zona,:telefono,:celular,:correoelectronico,"
             ":eps,:actividadeconomica,:modalidad,:arlanterior,:afp,:iniciocontrato,:finalizacioncontrato,:valorcontrato,"
             ":ingresomensual,:deducciones,:ibc,:iniciocobertura,:tipoafiliadocotizante,:subtipoafiliadocotizante,:tipocontrato,"
             ":jornada,:suministratransporte,:numeromesescontrato,:tipotramite,:idtramite,"
-            ":cargo,:codigoct,:ct_nombreactividad,:ct_codigoactividad,:ct_claseriesgo,:ct_montocotizacion)"
+            ":cargo,:codigoct,:ct_nombreactividad,:ct_codigoactividad,:ct_claseriesgo,:ct_montocotizacion,"
+            ":ct_ciudad,:ct_departamento,:ct_zona,:ct_direccion,:ct_telefono,:ct_correo,"
+            ":ct_responsable_pa,:ct_responsable_sa,:ct_responsable_pn,:ct_responsable_sn,"
+            ":ct_responsable_td,:ct_responsable_doc,:ct_responsable_correo)"
         )
         for r in rows:
             params = dict(r)
+            for key in (
+                "ct_ciudad", "ct_departamento", "ct_zona", "ct_direccion", "ct_telefono", "ct_correo",
+                "ct_responsable_pa", "ct_responsable_sa", "ct_responsable_pn", "ct_responsable_sn",
+                "ct_responsable_td", "ct_responsable_doc", "ct_responsable_correo",
+            ):
+                params.setdefault(key, "")
             params["idtramite"] = idtramite
             execute_by_alias(base, sql, params)
             inserted += 1

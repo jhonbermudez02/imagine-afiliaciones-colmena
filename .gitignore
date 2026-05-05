@@ -19,6 +19,8 @@ dist/
 
 data/cases/**
 !data/cases/.gitkeep
+data/postgres/**
+!data/postgres/.gitkeep
 data/qdrant/**
 !data/qdrant/.gitkeep
 data/ollama/**
@@ -26,6 +28,8 @@ data/ollama/**
 data/raw/**
 !data/raw/.gitkeep
 data/feed_report.json
+data/evals/notification_log*.jsonl
+data/evals/learning/**
 data/.DS_Store
 
 shared_downloads/**

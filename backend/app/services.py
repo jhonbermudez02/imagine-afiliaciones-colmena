@@ -8,7 +8,8 @@ import asyncpg
 import httpx
 
 from .config import settings
-from .rag import get_collection_stats, list_knowledge_files, load_catalog
+from .embeddings import get_engine_name, is_local_embed_enabled
+from .rag import get_active_collection_name, get_collection_stats, list_knowledge_files, load_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +39,14 @@ async def check_postgres() -> str:
         return "offline"
 
 
-async def get_system_health() -> Dict[str, str]:
+async def get_system_health() -> Dict[str, object]:
     from app.main import build_runtime_resources
+    ollama_status = "disabled" if is_local_embed_enabled() else await check_http_service(settings.ollama_url, "/api/tags")
     return {
         "api": "healthy",
         "version": settings.app_version,
         "qdrant": await check_http_service(settings.qdrant_url, "/healthz"),
-        "ollama": await check_http_service(settings.ollama_url, "/api/tags"),
+        "ollama": ollama_status,
         "postgres": await check_postgres(),
         "resources": build_runtime_resources(),
     }
@@ -170,7 +172,7 @@ def get_compare_926_summary() -> Dict[str, object]:
     }
 
 
-def build_recommended_actions(health: Dict[str, str]) -> List[Dict[str, str]]:
+def build_recommended_actions(health: Dict[str, object]) -> List[Dict[str, str]]:
     actions: List[Dict[str, str]] = []
     collection_stats = get_collection_stats()
 
@@ -190,7 +192,7 @@ def build_recommended_actions(health: Dict[str, str]) -> List[Dict[str, str]]:
                 "description": "Confirmar que la memoria vectorial esta disponible antes de habilitar RAG real.",
             }
         )
-    if health["ollama"] != "ok":
+    if health["ollama"] not in {"ok", "disabled"}:
         actions.append(
             {
                 "id": "check-ollama",
@@ -226,7 +228,7 @@ async def get_system_status() -> Dict[str, object]:
     degraded_components = [
         name
         for name, status in health.items()
-        if name not in {"api", "version"} and status != "ok"
+        if name not in {"api", "version", "resources"} and status not in {"ok", "disabled"}
     ]
     overall = "ok" if not degraded_components else "degraded"
 
@@ -236,11 +238,11 @@ async def get_system_status() -> Dict[str, object]:
         "health": health,
         "models": {
             "chat": settings.model_name,
-            "embeddings": settings.embedding_model,
+            "embeddings": get_engine_name(),
             "reranker": settings.reranker_model if settings.reranker_enabled else "disabled",
         },
         "knowledge_base": {
-            "collection": settings.qdrant_collection,
+            "collection": get_active_collection_name(),
             "documents": len(list_knowledge_files()),
             "indexed_chunks": collection_stats["points"],
             "available_topics": available_topics,
@@ -280,7 +282,7 @@ async def get_system_status() -> Dict[str, object]:
             {
                 "id": "ollama",
                 "name": "Ollama",
-                "role": "Modelos locales de lenguaje y embeddings",
+                "role": "Modelo conversacional opcional; embeddings activos en Python cuando esta deshabilitado",
                 "status": health["ollama"],
                 "target": settings.ollama_url,
             },

@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
 STATIC_DIR = ROOT / "frontend"
+ACTIVITY_ECONOMICA_ARP_PATH = DATA_DIR / "actividad_economica_arp.json"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -206,6 +207,7 @@ class LegacyCompatEngine:
     def __init__(self, state_path: Path):
         self.state_path = state_path
         self.state = self._load_state()
+        self._activity_economica_arp_cache: Optional[Dict[str, Dict[str, Any]]] = None
 
     def _load_state(self) -> Dict[str, Any]:
         if self.state_path.exists():
@@ -224,6 +226,46 @@ class LegacyCompatEngine:
         if t in self.state.get("tables", {}):
             return self.state["tables"][t]
         return []
+
+    def _activity_economica_arp(self) -> Dict[str, Dict[str, Any]]:
+        if self._activity_economica_arp_cache is not None:
+            return self._activity_economica_arp_cache
+        catalog: Dict[str, Dict[str, Any]] = {}
+        try:
+            payload = json.loads(ACTIVITY_ECONOMICA_ARP_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            payload = []
+        for item in payload or []:
+            if not isinstance(item, dict):
+                continue
+            code = "".join(ch for ch in as_text(item.get("codigo")) if ch.isdigit())
+            if not code:
+                continue
+            catalog[code] = item
+        self._activity_economica_arp_cache = catalog
+        return catalog
+
+    def _activity_risk_profile(self, codigoactividad: Any) -> Dict[str, str]:
+        code = "".join(ch for ch in as_text(codigoactividad) if ch.isdigit())
+        row = self._activity_economica_arp().get(code) or {}
+        return {
+            "codigo": code,
+            "clase": as_text(row.get("clase") or row.get("claries")).strip(),
+            "grado": as_text(row.get("grado")).strip(),
+            "tasa": as_text(row.get("tasa")).replace(",", ".").strip(),
+            "nombre": as_text(row.get("nombre")).strip(),
+        }
+
+    @staticmethod
+    def _format_tasa_arp(value: Any) -> str:
+        raw = as_text(value).replace(",", ".").strip()
+        if raw in {"", "0", "0.0", "0.00", "0.000", "0.0000", "00000"}:
+            return ""
+        try:
+            raw = f"{float(raw):.3f}"
+        except Exception:
+            pass
+        return raw[:5].ljust(5, "0")
 
     def _set_rows(self, table: str, rows: List[Dict[str, Any]], db: str = "") -> None:
         key = f"{db.lower()}.{table.lower()}" if db else table.lower()
@@ -1510,18 +1552,38 @@ class LegacyCompatEngine:
 
         csc = 0
         comisiones_written = False
+        tasa_by_clase = {
+            "1": "0.522",
+            "2": "1.044",
+            "3": "2.436",
+            "4": "4.350",
+            "5": "6.960",
+        }
+
+        def _format_pct_926(value: Any) -> str:
+            raw = as_text(value).strip().replace(",", ".").replace("%", "")
+            if raw == "":
+                raw = "0"
+            try:
+                amount = float(raw)
+                # Valores legacy como 10000 significan 100.00; valores humanos como
+                # 100 significan 100.00, no 001.00.
+                if raw.replace(".", "", 1).isdigit() and "." not in raw and len(raw) > 3:
+                    amount = float(int(raw)) / 100.0
+            except Exception:
+                digits = "".join(ch for ch in raw if ch.isdigit())
+                amount = (float(int(digits)) / 100.0) if len(digits) > 3 else float(int(digits or "0"))
+            return f"{amount:06.2f}"[-6:]
+
         def _append_type4_lines() -> None:
             nonlocal comisiones_written
             if comisiones_written:
                 return
             for com in wdcom_rows:
-                perc = as_text(com.get("porcentaje")).replace(".", "").strip()
-                if perc == "":
-                    perc = "00000"
-                if len(perc) <= 2:
-                    por = "000." + perc.rjust(2, "0")
-                else:
-                    por = perc[:-2].rjust(3, "0") + "." + perc[-2:]
+                codigo_vendedor = as_text(com.get("codigo_vendedor")).strip()
+                if codigo_vendedor == "3":
+                    continue
+                por = _format_pct_926(com.get("porcentaje"))
                 t4 = (
                     "4"
                     + ("0" if len(as_text(com.get("vendedor"))) == 9 else "1")
@@ -1610,6 +1672,9 @@ class LegacyCompatEngine:
                 lines.append(self._line_926(line1))
 
             if tp == "S":
+                sede_code_raw = as_text(wh.get("f62")).strip()
+                sede_name_raw = as_text(wh.get("f71")).strip().upper()
+                sede_emision = "1" if sede_code_raw in {"1", "01", "001"} or "PRINCIPAL" in sede_name_raw else "2"
                 line7 = (
                     "7"
                     + self._vb_text(wh.get("f62"), 6)
@@ -1630,9 +1695,9 @@ class LegacyCompatEngine:
                     + (as_text(wh.get("zona")).strip()[:1] or "U")
                     + self._vb_text(wh.get("f20"), 60)
                     + self._vb_text(wh.get("f18"), 125)
-                    + "S"
-                    + " " * 6
                     + "N"
+                    + " " * 6
+                    + sede_emision
                     + " " * 266
                 )
                 lines.append(self._line_926(line7))
@@ -1660,26 +1725,33 @@ class LegacyCompatEngine:
 
                 for ct in ct_by_sr.get(sr, []):
                     ct_codigoactividad = as_text(ct.get("codigoactividad")).strip()
+                    activity_profile = self._activity_risk_profile(ct_codigoactividad)
                     ct_claseriesgo = as_text(ct.get("claseriesgo")).strip()
+                    if activity_profile.get("clase") in {"1", "2", "3", "4", "5"}:
+                        ct_claseriesgo = activity_profile["clase"]
                     if ct_claseriesgo not in {"1", "2", "3", "4", "5"}:
                         ct_digits = "".join(ch for ch in ct_codigoactividad if ch.isdigit())
                         ct_claseriesgo = ct_digits[:1] if ct_digits[:1] in {"1", "2", "3", "4", "5"} else "2"
+                    ct_grado = activity_profile.get("grado") or as_text(ct.get("grado")).strip()
+                    if not ct_grado:
+                        ct_grado = "12" if "".join(ch for ch in ct_codigoactividad if ch.isdigit()) == "2851201" else "00"
                     ct_tasa = as_text(ct.get("tasa")).replace(",", ".").strip()
+                    if activity_profile.get("tasa"):
+                        ct_tasa = activity_profile["tasa"]
                     if ct_tasa in {"", "0", "0.0", "0.00", "0.000", "0.0000", "00000"}:
-                        tasa_by_clase = {
-                            "1": "0.522",
-                            "2": "1.044",
-                            "3": "2.436",
-                            "4": "4.350",
-                            "5": "6.960",
-                        }
                         ct_tasa = tasa_by_clase.get(ct_claseriesgo, "1.044")
-                    ct_tasa = ct_tasa[:5]
+                    ct_tasa = self._format_tasa_arp(ct_tasa) or tasa_by_clase.get(ct_claseriesgo, "1.044")
                     ct_code_display = self._vb_code(ct.get("codigoct"), 6)
+                    ct_nombre = (
+                        as_text(ct.get("nombreactividad")).strip()
+                        or as_text(wh.get("f71")).strip()
+                        or activity_profile.get("nombre")
+                        or f"RIESGO {ct_claseriesgo}"
+                    )
                     line2 = (
                         "2"
                         + ct_code_display
-                        + self._vb_text(f"RIESGO {ct_claseriesgo}", 34)
+                        + self._vb_text(ct_nombre, 34)
                         + self._vb_num(ct.get("ciudad"), 5)
                         + self._vb_text(ct.get("direccion"), 34)
                         + self._vb_num(ct.get("telefono"), 10)
@@ -1687,7 +1759,7 @@ class LegacyCompatEngine:
                         + "2"
                         + self._vb_num(ct_codigoactividad, 7)
                         + self._vb_text(ct_claseriesgo, 1)
-                        + self._vb_num(ct.get("grado"), 2)
+                        + self._vb_num(ct_grado, 2)
                         + "0"
                         + self._vb_text(ct_tasa, 5)
                         + "00"
@@ -1739,9 +1811,9 @@ class LegacyCompatEngine:
                         subtipo_afiliado = self._subtipo_afiliado_code(p_row.get("subtipoafiliado"))
                         wd_tel = as_text(wd.get("telefono")).strip()
                         wd_cel = as_text(wd.get("celular")).strip()
-                        tel_emp = "".join(ch for ch in as_text(wh.get("f14")) if ch.isdigit())
-                        tel1_source = wd_tel if wd_tel not in ("", "0") else tel_emp[:7]
+                        tel1_source = wd_tel if wd_tel not in ("", "0") else "0"
                         cel_source = wd_cel if wd_cel not in ("", "0") else as_text(wh.get("f20"))
+                        worker_activity_ref = "".join(ch for ch in ct_codigoactividad if ch.isdigit()) or "0"
                         line3 = (
                             "3"
                             + self._vb_num(wd.get("f29"), 1)
@@ -1770,7 +1842,7 @@ class LegacyCompatEngine:
                             + self._vb_text(p_row.get("subtipocodigo") or "0", 5)
                             + modalidad
                             + " " * 4
-                            + "000000"
+                            + self._vb_num(worker_activity_ref, 6)
                             + self._code1(wd.get("zona"), default="U")
                             + self._vb_text(wd.get("localidad"), 100)
                             + jornada
