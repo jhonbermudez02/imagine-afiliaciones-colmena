@@ -41,6 +41,8 @@ Al levantar el stack completo se crean estos servicios:
 - `docker-compose.github.yml`: compose interno de desarrollo y pruebas
 - `docker-compose.deploy.yml`: compose oficial de entrega portable
 - `ENTREGA_TECNICA.md`: guia para responsables de pruebas/produccion
+- `docs/MODELO_CONCEPTUAL_AFILIACIONES_ARL.md`: modelo funcional y conceptual del sistema
+- `docs/MATRIZ_TRANSFERENCIA_BUENAS_PRACTICAS_ARL.md`: practicas reutilizables para otros sistemas ARL
 
 ## Levantar el sistema
 
