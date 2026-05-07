@@ -46,6 +46,7 @@ Al levantar el stack completo se crean estos servicios:
 - `docs/GUIA_ADOPCION_OTRO_SISTEMA_ARL.md`: guia para llevar estas practicas a otro sistema ARL
 - `docs/PLANTILLA_LEVANTAMIENTO_OTRO_SISTEMA_ARL.md`: plantilla para documentar otro proceso ARL antes de adaptarlo
 - `docs/ARQUITECTURA_SIMPLE_OPERACION_ARL.md`: explicacion de arquitectura limpia y responsabilidades del flujo
+- `docs/PATRON_PANTALLA_JERARQUICA_CONTRATO_ARL.md`: patron de bandeja y detalle jerarquico por contrato
 
 ## Levantar el sistema
 
