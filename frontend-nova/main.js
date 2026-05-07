@@ -227,6 +227,71 @@ function renderBlockers(blockers, cssClass = 'report-blocker') {
     `).join('');
 }
 
+function getValidationBlockerRecords(payload) {
+    const a = payload?.analysis || {};
+    const reasons = a.validacion_resumen?.precheck?.motivos_de_rechazo || [];
+    if (Array.isArray(reasons) && reasons.length) {
+        return reasons.map((item, index) => ({
+            code: item?.code || 'VALIDATION_ALERT',
+            message: blockerText(item),
+            fingerprint: item?.fingerprint || '',
+            index,
+            raw: item,
+        }));
+    }
+    const blockers = a.decision?.blockers || [];
+    return (Array.isArray(blockers) ? blockers : []).map((message, index) => ({
+        code: 'VALIDATION_ALERT',
+        message: blockerText(message),
+        fingerprint: '',
+        index,
+        raw: message,
+    }));
+}
+
+function getAcceptedValidationExceptions(payload) {
+    const a = payload?.analysis || {};
+    return a.validacion_resumen?.precheck?.accepted_exceptions ||
+           a.validacion_resumen?.accepted_exceptions ||
+           [];
+}
+
+async function acceptValidationException(caseId, blocker) {
+    if (!caseId || !blocker) return;
+    const shortMsg = String(blocker.message || '').slice(0, 220);
+    const reason = prompt(
+        `Justificación para aceptar este hallazgo solo en este contrato:\n\n${shortMsg}`,
+        'Validado manualmente por operador'
+    );
+    if (!reason || !reason.trim()) return;
+    const note = prompt('Observación adicional opcional:', '') || '';
+    const tester = readTester();
+    await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(caseId)}/validation-exceptions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            code: blocker.code || 'VALIDATION_ALERT',
+            message: blocker.message || '',
+            fingerprint: blocker.fingerprint || '',
+            reason: reason.trim(),
+            note: note.trim(),
+            operator: tester.email || tester.name || '',
+        }),
+    });
+    showToast('Excepción guardada. Reprocesando contrato...', 'info', 3500);
+    const r = await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(caseId)}/analyze`, { method: 'POST' });
+    const payload = await r.json();
+    activeCasePayload = payload;
+    const reportEl = document.getElementById('reporteContent');
+    if (reportEl && currentView === 'reporte') renderReporte(reportEl, payload);
+    const validationEl = document.getElementById('validacionContent');
+    if (validationEl && currentView === 'validacion') renderValidacionOCR(validationEl, payload);
+    const resultCard = document.getElementById('workflowResultCard');
+    if (resultCard && resultCard.style.display !== 'none') renderWorkflowResult(payload);
+    loadBandeja().catch(() => {});
+    showToast('Contrato reprocesado con la excepción aplicada.', 'ok', 4500);
+}
+
 function resolveContractNumber(analysis, item = {}) {
     const a = analysis || {};
     const wf = a.workflow_run || {};
@@ -1100,6 +1165,8 @@ function renderWorkflowResult(payload) {
     const decision = a.decision || {};
     const blockers = Array.isArray(decision.blockers) ? decision.blockers :
                      Array.isArray(report.bloqueantes) ? report.bloqueantes : [];
+    const blockerRecords = getValidationBlockerRecords(payload);
+    const acceptedExceptions = getAcceptedValidationExceptions(payload);
     const has926 = Boolean((wf.output_926||{}).legacy?.ok);
     const filename926 = (wf.output_926||{}).legacy?.filename || 'archivo_core.txt';
 
@@ -1126,7 +1193,24 @@ function renderWorkflowResult(payload) {
             ${blockers.length ? `
                 <div class="result-blockers">
                     <div class="result-blockers-title">Bloqueantes detectados (${blockers.length})</div>
-                    ${renderBlockers(blockers, 'result-blocker-item')}
+                    ${(blockerRecords.length ? blockerRecords : blockers.map((b, i) => ({ message: blockerText(b), code: 'VALIDATION_ALERT', fingerprint: '', index: i }))).slice(0,10).map((b, i) => `
+                        <div class="result-blocker-item">
+                            <span>✗</span>
+                            <span style="flex:1">${escapeHtml(b.message)}</span>
+                            <button class="btn-secondary validation-exception-btn" data-blocker-idx="${i}" type="button">Aceptar para este contrato</button>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
+            ${acceptedExceptions.length ? `
+                <div class="result-blockers" style="border-left-color:var(--c-ok)">
+                    <div class="result-blockers-title">Aceptados manualmente (${acceptedExceptions.length})</div>
+                    ${acceptedExceptions.map(item => `
+                        <div class="result-blocker-item" style="background:var(--c-ok-bg);color:var(--c-ok)">
+                            <span>✓</span>
+                            <span>${escapeHtml(item.message || '')}<br><small>${escapeHtml(item.accepted_reason || item.reason || '')}</small></span>
+                        </div>
+                    `).join('')}
                 </div>
             ` : ''}
             <div class="result-actions">
@@ -1138,6 +1222,15 @@ function renderWorkflowResult(payload) {
     `;
     el.querySelectorAll('[data-action]').forEach(btn => {
         btn.addEventListener('click', () => handleCaseAction(btn.dataset.action, btn.dataset.case, btn.dataset.file));
+    });
+    el.querySelectorAll('.validation-exception-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const records = blockerRecords.length ? blockerRecords : blockers.map((b, i) => ({ message: blockerText(b), code: 'VALIDATION_ALERT', fingerprint: '', index: i }));
+            const record = records[Number(btn.dataset.blockerIdx || 0)];
+            btn.disabled = true;
+            try { await acceptValidationException(payload.id || activeCaseId, record); }
+            catch(e) { showToast('No pude guardar la excepción: ' + e.message, 'err', 6000); btn.disabled = false; }
+        });
     });
 }
 
@@ -1729,6 +1822,8 @@ function renderValidacionOCR(container, payload) {
     const empresa = profile.empresa || payload.label || 'n/d';
     const nit = profile.nit || 'n/d';
     const nroAfiliacion = resolveContractNumber(a, payload);
+    const blockerRecords = getValidationBlockerRecords(payload);
+    const acceptedExceptions = getAcceptedValidationExceptions(payload);
 
     // Extraer validaciones adicionales de múltiples fuentes
     const vrMatches = a.validacion_resumen?.matches || a.reporte_ejecutivo?.matches || {};
@@ -1745,6 +1840,38 @@ function renderValidacionOCR(container, payload) {
             <div style="font-size:12px;color:var(--c-text-2)">NIT: ${escapeHtml(nit)}${nroAfiliacion ? ` · Contrato ${escapeHtml(nroAfiliacion)}` : ''}</div>
         </div>
     </div>`;
+
+    if (blockerRecords.length) {
+        html += `<div class="report-section-title" style="margin-bottom:8px">Bloqueantes de prevalidación</div>`;
+        html += `<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">`;
+        for (const [i, b] of blockerRecords.entries()) {
+            html += `
+                <div class="ocr-field mismatch">
+                    <div class="ocr-field-label">${escapeHtml(b.code || 'Validación')}</div>
+                    <div class="ocr-field-val">✗ Bloqueante</div>
+                    <div style="font-size:11px;color:var(--c-text-2);margin-top:4px">${escapeHtml(b.message || '')}</div>
+                    <button class="btn-secondary validation-exception-btn" data-blocker-idx="${i}" type="button" style="margin-top:8px">Aceptar para este contrato</button>
+                </div>
+            `;
+        }
+        html += `</div>`;
+    }
+
+    if (acceptedExceptions.length) {
+        html += `<div class="report-section-title" style="margin-bottom:8px">Aceptados manualmente</div>`;
+        html += `<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">`;
+        for (const item of acceptedExceptions) {
+            html += `
+                <div class="ocr-field match">
+                    <div class="ocr-field-label">${escapeHtml(item.code || 'Validación')}</div>
+                    <div class="ocr-field-val">✓ Aceptado para este contrato</div>
+                    <div style="font-size:11px;color:var(--c-text-2);margin-top:4px">${escapeHtml(item.message || '')}</div>
+                    <div style="font-size:11px;color:var(--c-text-2);margin-top:2px">Motivo: ${escapeHtml(item.accepted_reason || item.reason || 'Validado manualmente')}</div>
+                </div>
+            `;
+        }
+        html += `</div>`;
+    }
 
     // Documentos recibidos
     if (docs.length) {
@@ -1825,6 +1952,14 @@ function renderValidacionOCR(container, payload) {
         if (selectorRow) selectorRow.style.display = '';
         const sel = document.getElementById('validacionCaseSelect');
         if (sel) sel.value = '';
+    });
+    container.querySelectorAll('.validation-exception-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const record = blockerRecords[Number(btn.dataset.blockerIdx || 0)];
+            btn.disabled = true;
+            try { await acceptValidationException(payload.id || activeCaseId, record); }
+            catch(e) { showToast('No pude guardar la excepción: ' + e.message, 'err', 6000); btn.disabled = false; }
+        });
     });
 }
 
@@ -2022,6 +2157,8 @@ function renderReporte(container, payload) {
 
     const blockers = Array.isArray(decision.blockers) ? decision.blockers :
                      Array.isArray(report.bloqueantes) ? report.bloqueantes : [];
+    const blockerRecords = getValidationBlockerRecords(payload);
+    const acceptedExceptions = getAcceptedValidationExceptions(payload);
     const observaciones = Array.isArray(report.observaciones) ? report.observaciones : [];
 
     // Extraer datos de comparación de razón social
@@ -2127,8 +2264,8 @@ function renderReporte(container, payload) {
                 <div class="report-section">
                     <div class="report-section-title">Bloqueantes (${blockers.length}) · haz clic en uno para ver el documento fuente</div>
                     <div class="report-blockers-list" id="reportBlockersList">
-                        ${blockers.slice(0,10).map((b, i) => {
-                            const raw = blockerText(b);
+                        ${(blockerRecords.length ? blockerRecords : blockers.map((b, i) => ({ message: blockerText(b), code: 'VALIDATION_ALERT', fingerprint: '', index: i }))).slice(0,10).map((b, i) => {
+                            const raw = b.message || blockerText(b);
                             const txt = enrichBlockerText(raw);
                             const parsed = parseBlocker(b);
                             const isMultiLine = txt.includes('\n');
@@ -2154,7 +2291,10 @@ function renderReporte(container, payload) {
                                             }
                                         </div>
                                     </div>
-                                    ${isClickable ? `<span class="report-blocker-action-hint">${escapeHtml(parsed.actionLabel)} →</span>` : ''}
+                                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                                        ${isClickable ? `<span class="report-blocker-action-hint">${escapeHtml(parsed.actionLabel)} →</span>` : ''}
+                                        <button class="btn-secondary validation-exception-btn" data-blocker-idx="${i}" type="button">Aceptar para este contrato</button>
+                                    </div>
                                 </div>
                             `;
                         }).join('')}
@@ -2174,6 +2314,19 @@ function renderReporte(container, payload) {
                     ` : ''}
                 </div>
             ` : '<div class="empty-state" style="color:var(--c-ok);padding:16px">✓ Sin bloqueantes — contrato aprobable</div>'}
+            ${acceptedExceptions.length ? `
+                <div class="report-section">
+                    <div class="report-section-title">Hallazgos aceptados manualmente (${acceptedExceptions.length})</div>
+                    <div style="display:flex;flex-direction:column;gap:6px">
+                        ${acceptedExceptions.map(item => `
+                            <div style="padding:8px 12px;background:var(--c-ok-bg);border-radius:var(--radius);font-size:12px;color:var(--c-ok)">
+                                <strong>Aceptado para este contrato:</strong> ${escapeHtml(item.message || '')}
+                                <div style="margin-top:3px;color:var(--c-text-2)">Motivo: ${escapeHtml(item.accepted_reason || item.reason || 'Validado manualmente')}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            ` : ''}
             ${observaciones.length ? `
                 <div class="report-section">
                     <div class="report-section-title">Observaciones</div>
@@ -2210,6 +2363,16 @@ function renderReporte(container, payload) {
     // Botones de acción del header
     container.querySelectorAll('[data-action]').forEach(btn => {
         btn.addEventListener('click', () => handleCaseAction(btn.dataset.action, btn.dataset.case, btn.dataset.file));
+    });
+    container.querySelectorAll('.validation-exception-btn').forEach(btn => {
+        btn.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            const records = blockerRecords.length ? blockerRecords : blockers.map((b, i) => ({ message: blockerText(b), code: 'VALIDATION_ALERT', fingerprint: '', index: i }));
+            const record = records[Number(btn.dataset.blockerIdx || 0)];
+            btn.disabled = true;
+            try { await acceptValidationException(caseId, record); }
+            catch(e) { showToast('No pude guardar la excepción: ' + e.message, 'err', 6000); btn.disabled = false; }
+        });
     });
 
     // Chips de documentos → abrir preview inline

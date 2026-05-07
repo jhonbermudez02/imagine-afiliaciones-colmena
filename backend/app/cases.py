@@ -733,6 +733,13 @@ def _looks_like_single_digit_ocr_mismatch(expected: Any, observed: Any) -> bool:
     return sum(1 for left, right in zip(expected_key, observed_key) if left != right) == 1
 
 
+def validation_exception_fingerprint(code: Any, message: Any) -> str:
+    code_text = normalize_haystack(code)
+    message_text = normalize_haystack(message)
+    base = f"{code_text}|{message_text}"
+    return hashlib.sha256(base.encode("utf-8")).hexdigest()[:16]
+
+
 def extract_contract_number_from_uploads(uploads: List[tuple[str, bytes]]) -> str:
     candidates: List[str] = []
     for filename, content in uploads:
@@ -1065,6 +1072,127 @@ def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, exp
     save_case(payload)
     _refresh_learning_artifacts()
     return review_store
+
+
+def save_validation_exception(
+    case_id: str,
+    code: str,
+    message: str,
+    reason: str,
+    operator: str = "",
+    note: str = "",
+    fingerprint: str = "",
+) -> Dict[str, Any]:
+    payload = load_case(case_id)
+    analysis = payload.setdefault("analysis", {}) or {}
+    if payload.get("analysis") is None:
+        payload["analysis"] = analysis
+    review_store = analysis.setdefault("manual_review", {})
+    exceptions = review_store.setdefault("validation_exceptions", [])
+    code_text = normalize_text(code) or "VALIDATION_ALERT"
+    message_text = normalize_text(message)
+    fingerprint_text = normalize_text(fingerprint) or validation_exception_fingerprint(code_text, message_text)
+    now = utc_now()
+    item = {
+        "code": code_text,
+        "message": message_text,
+        "fingerprint": fingerprint_text,
+        "reason": normalize_text(reason) or "Aceptado manualmente por operador",
+        "operator": normalize_text(operator),
+        "note": normalize_text(note),
+        "scope": "case_only",
+        "active": True,
+        "created_at": now,
+        "updated_at": now,
+    }
+    replaced = False
+    for index, existing in enumerate(exceptions):
+        if str(existing.get("fingerprint") or "") == fingerprint_text:
+            item["created_at"] = existing.get("created_at") or now
+            exceptions[index] = item
+            replaced = True
+            break
+    if not replaced:
+        exceptions.append(item)
+    payload["updated_at"] = now
+    save_case(payload)
+    return review_store
+
+
+def _active_validation_exceptions(manual_review: Dict[str, Any]) -> List[Dict[str, Any]]:
+    exceptions = manual_review.get("validation_exceptions") if isinstance(manual_review, dict) else []
+    if not isinstance(exceptions, list):
+        return []
+    return [item for item in exceptions if isinstance(item, dict) and item.get("active", True)]
+
+
+def _decorate_validation_reason(reason: Dict[str, Any]) -> Dict[str, Any]:
+    item = dict(reason or {})
+    code = item.get("code") or "VALIDATION_ALERT"
+    message = item.get("message") or ""
+    item["fingerprint"] = item.get("fingerprint") or validation_exception_fingerprint(code, message)
+    return item
+
+
+def _apply_validation_exceptions(validation_summary: Dict[str, Any], manual_review: Dict[str, Any]) -> Dict[str, Any]:
+    active_exceptions = _active_validation_exceptions(manual_review)
+    precheck = validation_summary.setdefault("precheck", {})
+    reasons = [
+        _decorate_validation_reason(item)
+        for item in (precheck.get("motivos_de_rechazo") or [])
+        if isinstance(item, dict)
+    ]
+    if not active_exceptions:
+        precheck["motivos_de_rechazo"] = reasons
+        precheck["approved"] = not reasons
+        validation_summary["ok"] = bool(precheck["approved"])
+        return validation_summary
+
+    exception_by_fingerprint = {
+        str(item.get("fingerprint") or ""): item
+        for item in active_exceptions
+        if str(item.get("fingerprint") or "")
+    }
+    remaining: List[Dict[str, Any]] = []
+    accepted: List[Dict[str, Any]] = []
+    accepted_keys: set[tuple[str, str]] = set()
+    for reason in reasons:
+        exception = exception_by_fingerprint.get(str(reason.get("fingerprint") or ""))
+        if not exception:
+            remaining.append(reason)
+            continue
+        accepted_item = dict(reason)
+        accepted_item.update(
+            {
+                "accepted_manually": True,
+                "accepted_reason": exception.get("reason", ""),
+                "accepted_note": exception.get("note", ""),
+                "accepted_operator": exception.get("operator", ""),
+                "accepted_at": exception.get("updated_at") or exception.get("created_at", ""),
+            }
+        )
+        accepted.append(accepted_item)
+        accepted_keys.add((str(reason.get("code") or ""), str(reason.get("message") or "")))
+
+    alerts = []
+    for alert in validation_summary.get("alerts", []) or []:
+        if not isinstance(alert, dict):
+            alerts.append(alert)
+            continue
+        decorated = _decorate_validation_reason(alert)
+        key = (str(decorated.get("code") or ""), str(decorated.get("message") or ""))
+        if key in accepted_keys or str(decorated.get("fingerprint") or "") in exception_by_fingerprint:
+            continue
+        alerts.append(decorated)
+
+    precheck["motivos_de_rechazo"] = remaining
+    precheck["accepted_exceptions"] = accepted
+    precheck["validation_exceptions"] = active_exceptions
+    precheck["approved"] = not remaining
+    validation_summary["alerts"] = alerts
+    validation_summary["accepted_exceptions"] = accepted
+    validation_summary["ok"] = bool(precheck["approved"])
+    return validation_summary
 
 
 def _ensure_document_workspace(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -6152,7 +6280,11 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
             }
         )
         existing_reason_keys.add(reason_key)
-    precheck["motivos_de_rechazo"] = precheck_reasons
+    precheck["motivos_de_rechazo"] = [
+        _decorate_validation_reason(item)
+        for item in precheck_reasons
+        if isinstance(item, dict)
+    ]
     precheck["approved"] = not precheck_reasons
     return {
         "ok": precheck["approved"] and not missing_docs,
@@ -7571,6 +7703,7 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
     mismatches: List[str] = []
 
     validation_summary = _build_validation_summary(xlsx_profile, docs, missing_docs)
+    validation_summary = _apply_validation_exceptions(validation_summary, previous_manual_review)
     blockers = []
     blockers.extend(
         item["message"]

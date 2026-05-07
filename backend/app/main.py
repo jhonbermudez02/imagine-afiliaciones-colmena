@@ -32,6 +32,7 @@ from .cases import (
     save_case,
     save_document_workspace,
     save_manual_review,
+    save_validation_exception,
     search_cases,
     search_document_registry,
     store_case_files,
@@ -156,6 +157,15 @@ class CaseManualReviewRequest(BaseModel):
     verdict: str
     expected_type: Optional[str] = None
     comisiones: Optional[List[Dict[str, Any]]] = None
+
+
+class CaseValidationExceptionRequest(BaseModel):
+    code: str
+    message: str
+    fingerprint: Optional[str] = None
+    reason: str
+    note: Optional[str] = None
+    operator: Optional[str] = None
 
 
 class CaseDocumentWorkspaceRequest(BaseModel):
@@ -3157,6 +3167,34 @@ async def case_manual_review(case_id: str, request: CaseManualReviewRequest):
         return {"case_id": case_id, "manual_review": review_store}
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
+
+
+@app.post("/api/cases/{case_id}/validation-exceptions")
+async def case_validation_exception(case_id: str, request: CaseValidationExceptionRequest):
+    try:
+        if not normalize_haystack(request.code):
+            raise HTTPException(status_code=400, detail="La excepción requiere código de validación.")
+        if not normalize_haystack(request.message):
+            raise HTTPException(status_code=400, detail="La excepción requiere el mensaje del hallazgo.")
+        if not normalize_haystack(request.reason):
+            raise HTTPException(status_code=400, detail="La excepción requiere una justificación.")
+        review_store = save_validation_exception(
+            case_id=case_id,
+            code=request.code,
+            message=request.message,
+            fingerprint=request.fingerprint or "",
+            reason=request.reason,
+            note=request.note or "",
+            operator=request.operator or "",
+        )
+        return {"case_id": case_id, "manual_review": review_store}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Error guardando excepción de validación %s: %s", case_id, exc)
+        raise HTTPException(status_code=500, detail=f"No pude guardar excepción de validación: {exc}") from exc
 
 
 @app.post("/api/cases/{case_id}/document-workspace")
