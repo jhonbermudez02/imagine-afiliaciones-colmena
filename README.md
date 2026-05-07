@@ -45,6 +45,7 @@ Al levantar el stack completo se crean estos servicios:
 - `docs/MATRIZ_TRANSFERENCIA_BUENAS_PRACTICAS_ARL.md`: practicas reutilizables para otros sistemas ARL
 - `docs/GUIA_ADOPCION_OTRO_SISTEMA_ARL.md`: guia para llevar estas practicas a otro sistema ARL
 - `docs/PLANTILLA_LEVANTAMIENTO_OTRO_SISTEMA_ARL.md`: plantilla para documentar otro proceso ARL antes de adaptarlo
+- `docs/ARQUITECTURA_SIMPLE_OPERACION_ARL.md`: explicacion de arquitectura limpia y responsabilidades del flujo
 
 ## Levantar el sistema
 
