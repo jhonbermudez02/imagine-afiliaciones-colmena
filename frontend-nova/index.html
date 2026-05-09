@@ -14,8 +14,8 @@
     <div class="login-brand">
       <img src="/imagine-logo.jpeg" alt="Imagine S.A.S." class="login-logo-img" />
       <div class="login-brand-text">
-        <div class="login-title">AFI Colima</div>
-        <div class="login-sub">Portal ARL · Afiliaciones</div>
+        <div class="login-title" id="loginTitle">AFI Colima</div>
+        <div class="login-sub" id="loginSub">Portal ARL · Afiliaciones</div>
       </div>
     </div>
     <div class="login-section-label">Selecciona tu perfil</div>
@@ -52,8 +52,17 @@
       <img src="/imagine-logo.jpeg" alt="Imagine S.A.S." class="sidebar-logo-img" />
       <div>
         <div class="brand-name">IMAGINE S.A.S.</div>
-        <div class="brand-sub">AFI Colima · Portal ARL</div>
+        <div class="brand-sub" id="brandSub">AFI Colima · Portal ARL</div>
       </div>
+    </div>
+
+    <div class="operation-switch" id="operationSwitch" aria-label="Operacion activa">
+      <div class="operation-switch-label">Operación separada</div>
+      <div class="operation-switch-buttons">
+        <button class="operation-switch-btn active" data-operation-switch="colima" type="button">COLIMA</button>
+        <button class="operation-switch-btn" data-operation-switch="alfa" type="button">ALFA</button>
+      </div>
+      <div class="operation-switch-note">Datos y validaciones aisladas</div>
     </div>
 
     <nav class="sidebar-nav">
@@ -207,7 +216,8 @@
       <section class="view" id="view-flujo">
         <div class="section-card">
           <div class="section-card-head">
-            <div class="section-title">Cargar nuevo contrato</div>
+            <div class="section-title">Cargar nuevo contrato · <span data-operation-label>AFI Colima</span></div>
+            <div class="pill pill-neutral" data-validation-profile-label>Reglas Colima</div>
           </div>
           <div class="upload-zone" id="uploadZone">
             <div class="upload-icon">↑</div>
@@ -347,7 +357,7 @@
       <section class="view" id="view-produccion">
         <div class="section-card">
           <div class="section-card-head">
-            <div class="section-title">Contratos aprobados · lote Colmena</div>
+            <div class="section-title">Contratos aprobados · <span data-operation-label>AFI Colima</span></div>
             <div style="display:flex;gap:8px">
               <button class="btn-secondary" id="clearColmenaBtn" type="button">Limpiar selección</button>
               <button class="btn-primary" id="downloadColmenaBtn" type="button">Descargar lote plano</button>

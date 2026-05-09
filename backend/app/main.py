@@ -24,7 +24,9 @@ from .cases import (
     get_case_file_path,
     list_cases,
     load_case,
+    normalize_operation,
     normalize_haystack,
+    operation_label,
     only_digits,
     rebuild_document_registry,
     _resolve_case_contract_number,
@@ -176,6 +178,7 @@ class CaseDocumentWorkspaceRequest(BaseModel):
 
 class Consolidated926Request(BaseModel):
     case_ids: List[str]
+    operation: Optional[str] = "colima"
 
 
 class FeedbackNoteRequest(BaseModel):
@@ -590,11 +593,23 @@ def _is_aprobable_case(payload: Dict[str, Any]) -> bool:
     return bool(precheck.get("approved")) and normalize_haystack(workflow.get("status")) == "completed"
 
 
-def _find_aprobable_case_by_contract(contract_number: str) -> Optional[Dict[str, Any]]:
+def _case_operation(payload: Dict[str, Any]) -> str:
+    return normalize_operation(payload.get("operation") or payload.get("validation_profile"))
+
+
+def _ensure_case_operation(payload: Dict[str, Any], operation: Optional[str]) -> None:
+    if operation is None:
+        return
+    if _case_operation(payload) != normalize_operation(operation):
+        raise HTTPException(status_code=404, detail="Caso no encontrado para esta operacion.")
+
+
+def _find_aprobable_case_by_contract(contract_number: str, operation: str = "colima") -> Optional[Dict[str, Any]]:
     contract_key = _contract_number_key(contract_number)
     if not contract_key:
         return None
-    for payload in list_cases(include_all=True):
+    operation_key = normalize_operation(operation)
+    for payload in list_cases(include_all=True, operation=operation_key):
         existing_key = _contract_number_key(_resolve_case_contract_number(payload))
         if existing_key and existing_key == contract_key and _is_aprobable_case(payload):
             return payload
@@ -697,6 +712,9 @@ class ReindexResponse(BaseModel):
 class CaseCreateResponse(BaseModel):
     id: str
     label: str
+    operation: Optional[str] = "colima"
+    operation_label: Optional[str] = "AFI Colima"
+    validation_profile: Optional[str] = "colima"
     status: str
     created_at: str
     updated_at: str
@@ -1501,10 +1519,12 @@ def _build_case_result_from_payload(payload: Dict[str, Any], score: int = 100) -
 def _resolve_context_case(request_context: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not isinstance(request_context, dict):
         return None
+    operation = request_context.get("operation")
     case_id = str(request_context.get("active_case_id") or request_context.get("last_case_id") or "").strip()
     if case_id:
         try:
             payload = load_case(case_id)
+            _ensure_case_operation(payload, str(operation)) if operation else None
             return _build_case_result_from_payload(payload, score=120)
         except Exception:
             pass
@@ -1513,7 +1533,7 @@ def _resolve_context_case(request_context: Optional[Dict[str, Any]]) -> Optional
     active_company = normalize_haystack(str(request_context.get("active_company") or ""))
     best_payload: Optional[Dict[str, Any]] = None
     best_key: tuple[float, int] = (0.0, 0)
-    for payload in list_cases(include_all=True):
+    for payload in list_cases(include_all=True, operation=operation if operation else None):
         analysis = payload.get("analysis") or {}
         profile = ((analysis.get("xlsx_profile") or {}).get("profile") or {})
         payload_nit = only_digits(str(profile.get("nit") or profile.get("documento_empleador") or ""))
@@ -2630,7 +2650,8 @@ async def consultar_afiliacion(request: ConsultaRequest):
         intent = _detect_consulta_intent(effective_query)
         consulta_lower = effective_query.lower()
         document_first = any(token in consulta_lower for token in ["cedula", "cédula", "rut", "camara", "cámara", "pdf", "documento", "soporte", "formulario"])
-        case_results = search_cases(effective_query, limit=10)
+        operation_key = normalize_operation(request_context.get("operation"))
+        case_results = search_cases(effective_query, limit=10, operation=operation_key)
         if _should_prefer_context_case(effective_query, request_context, context_case):
             if context_case:
                 case_results = [context_case] + [item for item in case_results if str(item.get("case_id") or "") != str(context_case.get("case_id") or "")]
@@ -2639,7 +2660,7 @@ async def consultar_afiliacion(request: ConsultaRequest):
             merged_by_case: Dict[str, Dict[str, Any]] = {}
             extra_results: List[Dict[str, Any]] = []
             for token in anchor_tokens[:3]:
-                extra_results.extend(search_cases(token, limit=10))
+                extra_results.extend(search_cases(token, limit=10, operation=operation_key))
             for item in case_results + extra_results:
                 case_id = str(item.get("case_id") or "")
                 if not case_id:
@@ -2782,14 +2803,16 @@ async def operate_afiliacion(request: ConsultaRequest):
 
 
 @app.get("/api/cases", response_model=CaseListResponse)
-async def cases_list():
-    return CaseListResponse(cases=list_cases())
+async def cases_list(operation: str = Query(default="colima")):
+    operation_key = normalize_operation(operation)
+    return CaseListResponse(cases=list_cases(operation=operation_key))
 
 
 @app.get("/api/cases/production-summary")
-async def cases_production_summary():
+async def cases_production_summary(operation: str = Query(default="colima")):
+    operation_key = normalize_operation(operation)
     deduped: Dict[str, Dict[str, Any]] = {}
-    for payload in list_cases():
+    for payload in list_cases(operation=operation_key):
         analysis = payload.get("analysis") or {}
         workflow = analysis.get("workflow_run") or {}
         decision = analysis.get("decision") or {}
@@ -2818,6 +2841,9 @@ async def cases_production_summary():
         item = {
             "id": payload.get("id"),
             "label": payload.get("label"),
+            "operation": operation_key,
+            "operation_label": operation_label(operation_key),
+            "validation_profile": payload.get("validation_profile") or operation_key,
             "contract_number": contract_number,
             "numero_contrato": contract_number,
             "nro_afiliacion": contract_number,
@@ -2847,9 +2873,10 @@ async def cases_production_summary():
 
 
 @app.get("/api/cases/precheck-failed")
-async def cases_precheck_failed():
+async def cases_precheck_failed(operation: str = Query(default="colima")):
+    operation_key = normalize_operation(operation)
     deduped: Dict[str, Dict[str, Any]] = {}
-    for payload in list_cases():
+    for payload in list_cases(operation=operation_key):
         analysis = payload.get("analysis") or {}
         decision = analysis.get("decision") or {}
         workflow = analysis.get("workflow_run") or {}
@@ -2864,6 +2891,9 @@ async def cases_precheck_failed():
         item = {
             "id": payload.get("id"),
             "label": payload.get("label"),
+            "operation": operation_key,
+            "operation_label": operation_label(operation_key),
+            "validation_profile": payload.get("validation_profile") or operation_key,
             "contract_number": contract_number,
             "numero_contrato": contract_number,
             "nro_afiliacion": contract_number,
@@ -2895,8 +2925,9 @@ async def workflow_queue_status():
 
 
 @app.get("/api/cases/search")
-async def cases_search(q: str = Query(..., min_length=2), limit: int = Query(10, ge=1, le=30)):
-    return {"query": q, "results": search_cases(q, limit=limit)}
+async def cases_search(q: str = Query(..., min_length=2), limit: int = Query(10, ge=1, le=30), operation: str = Query(default="colima")):
+    operation_key = normalize_operation(operation)
+    return {"query": q, "operation": operation_key, "results": search_cases(q, limit=limit, operation=operation_key)}
 
 
 @app.post("/api/926/compare")
@@ -2958,10 +2989,12 @@ async def documents_search(q: str = Query(..., min_length=2), limit: int = Query
 @app.post("/api/cases", response_model=CaseCreateResponse)
 async def create_case(
     label: str = Form(default=""),
+    operation: str = Form(default="colima"),
     files: Optional[List[UploadFile]] = File(default=None),
     xlsx_file: Optional[UploadFile] = File(default=None),
     attachments: Optional[List[UploadFile]] = File(default=None),
 ):
+    operation_key = normalize_operation(operation)
     uploads: List[tuple[str, bytes]] = []
     rejected_files: List[Dict[str, str]] = []
     for item in files or []:
@@ -3014,7 +3047,7 @@ async def create_case(
             },
         )
     incoming_contract_number = extract_contract_number_from_uploads(accepted_uploads)
-    existing_aprobable = _find_aprobable_case_by_contract(incoming_contract_number)
+    existing_aprobable = _find_aprobable_case_by_contract(incoming_contract_number, operation=operation_key)
     if existing_aprobable:
         existing_contract_number = _resolve_case_contract_number(existing_aprobable) or incoming_contract_number
         existing_case_id = existing_aprobable.get("id")
@@ -3023,7 +3056,7 @@ async def create_case(
             status_code=409,
             detail={
                 "message": (
-                    "Este contrato ya fue cargado y se encuentra en estado aprobable. "
+                    f"Este contrato ya fue cargado en {operation_label(operation_key)} y se encuentra en estado aprobable. "
                     f"No se permite volver a cargar el mismo contrato. Caso existente: {existing_label} ({existing_case_id})."
                 ),
                 "code": "CONTRATO_APROBABLE_DUPLICADO",
@@ -3032,7 +3065,7 @@ async def create_case(
                 "existing_label": existing_label,
             },
         )
-    case_payload = store_case_files(label=label, uploads=accepted_uploads)
+    case_payload = store_case_files(label=label, uploads=accepted_uploads, operation=operation_key)
     case_payload["upload_summary"] = {
         "accepted_files": [filename for filename, _ in accepted_uploads],
         "rejected_files": rejected_files,
@@ -3041,20 +3074,22 @@ async def create_case(
 
 
 @app.get("/api/cases/{case_id}", response_model=CaseCreateResponse)
-async def case_detail(case_id: str):
+async def case_detail(case_id: str, operation: Optional[str] = Query(default=None)):
     try:
         payload = load_case(case_id)
+        _ensure_case_operation(payload, operation)
         return CaseCreateResponse(**payload)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
 
 
 @app.delete("/api/cases/{case_id}")
-async def case_delete(case_id: str):
+async def case_delete(case_id: str, operation: Optional[str] = Query(default=None)):
     """Elimina un caso y todos sus archivos adjuntos."""
     import shutil
     try:
         payload = load_case(case_id)
+        _ensure_case_operation(payload, operation)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Caso no encontrado.")
     case_dir = Path(settings.cases_dir) / case_id
@@ -3065,8 +3100,9 @@ async def case_delete(case_id: str):
 
 
 @app.post("/api/cases/{case_id}/analyze", response_model=CaseCreateResponse)
-async def case_analyze(case_id: str):
+async def case_analyze(case_id: str, operation: Optional[str] = Query(default=None)):
     try:
+        _ensure_case_operation(load_case(case_id), operation)
         payload = analyze_case(case_id)
         return CaseCreateResponse(**payload)
     except FileNotFoundError as exc:
@@ -3077,8 +3113,9 @@ async def case_analyze(case_id: str):
 
 
 @app.post("/api/cases/{case_id}/run-workflow", response_model=CaseCreateResponse)
-async def case_run_workflow(case_id: str):
+async def case_run_workflow(case_id: str, operation: Optional[str] = Query(default=None)):
     try:
+        _ensure_case_operation(load_case(case_id), operation)
         with WORKFLOW_QUEUE_LOCK:
             state = _repair_stale_workflow_queue_state()
             active = state.get("active") or {}
@@ -3152,8 +3189,9 @@ async def case_run_workflow(case_id: str):
 
 
 @app.post("/api/cases/{case_id}/manual-review")
-async def case_manual_review(case_id: str, request: CaseManualReviewRequest):
+async def case_manual_review(case_id: str, request: CaseManualReviewRequest, operation: Optional[str] = Query(default=None)):
     try:
+        _ensure_case_operation(load_case(case_id), operation)
         if normalize_haystack(request.kind) != "comisiones" and normalize_haystack(request.verdict) not in {"si", "no"}:
             raise HTTPException(status_code=400, detail="La calificación debe ser 'si' o 'no'.")
         review_store = save_manual_review(
@@ -3170,8 +3208,9 @@ async def case_manual_review(case_id: str, request: CaseManualReviewRequest):
 
 
 @app.post("/api/cases/{case_id}/validation-exceptions")
-async def case_validation_exception(case_id: str, request: CaseValidationExceptionRequest):
+async def case_validation_exception(case_id: str, request: CaseValidationExceptionRequest, operation: Optional[str] = Query(default=None)):
     try:
+        _ensure_case_operation(load_case(case_id), operation)
         if not normalize_haystack(request.code):
             raise HTTPException(status_code=400, detail="La excepción requiere código de validación.")
         if not normalize_haystack(request.message):
@@ -3237,6 +3276,7 @@ async def export_document_reviews():
 
 @app.post("/api/926/consolidated")
 async def consolidated_926(request: Consolidated926Request):
+    operation_key = normalize_operation(request.operation)
     case_ids: List[str] = []
     seen = set()
     for case_id in request.case_ids or []:
@@ -3252,6 +3292,7 @@ async def consolidated_926(request: Consolidated926Request):
     selected_cases: List[str] = []
     for case_id in case_ids:
         payload = load_case(case_id)
+        _ensure_case_operation(payload, operation_key)
         analysis = payload.get("analysis") or {}
         workflow = analysis.get("workflow_run") or {}
         output_926 = workflow.get("output_926") or analysis.get("output_926") or {}
@@ -3270,7 +3311,7 @@ async def consolidated_926(request: Consolidated926Request):
     if not chunks:
         raise HTTPException(status_code=400, detail="Los contratos seleccionados no tienen un 926 disponible para consolidar.")
 
-    filename = f"lote_colmena_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    filename = f"lote_{operation_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     return Response(
         content="\n\n".join(chunks),
         media_type="text/plain; charset=utf-8",

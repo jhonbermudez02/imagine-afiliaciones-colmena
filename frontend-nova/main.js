@@ -14,6 +14,12 @@ const PROFILE_KEY = 'afi-colima-profile-v1';
 const TESTER_KEY = 'afi-colima-tester-v1';
 const PROCESS_STATE_KEY = 'afi-colima-process-v1';
 const CLASSIFICATION_ORDER_KEY = 'afi-colima-classif-order-v1';
+const OPERATION_KEY = 'afi-active-operation-v1';
+
+const OPERATION_OPTIONS = {
+    colima: { key: 'colima', short: 'COLIMA', name: 'AFI Colima', brand: 'AFI Colima · Portal ARL', validation: 'Reglas Colima' },
+    alfa:   { key: 'alfa',   short: 'ALFA',   name: 'ALFA',       brand: 'ALFA · Portal ARL',       validation: 'Reglas ALFA' },
+};
 
 const REVIEW_TYPE_OPTIONS = [
     ['formulario_afiliacion', 'Afiliación',        '01'],
@@ -61,6 +67,36 @@ let selectedColmenaCaseIds = new Set();
 let currentView = 'bandeja';
 let bandejaActiveTab = 'todos';
 let allCases = [];
+
+function normalizeOperation(value = '') {
+    const key = String(value || '').toLowerCase().trim();
+    return OPERATION_OPTIONS[key] ? key : 'colima';
+}
+
+function readOperation() {
+    try { return normalizeOperation(localStorage.getItem(OPERATION_KEY) || 'colima'); } catch { return 'colima'; }
+}
+
+function saveOperation(operation) {
+    try { localStorage.setItem(OPERATION_KEY, normalizeOperation(operation)); } catch {}
+}
+
+function currentOperation() {
+    return OPERATION_OPTIONS[readOperation()] || OPERATION_OPTIONS.colima;
+}
+
+function operationApiUrl(path, params = {}) {
+    const url = new URL(`${API_URL}${path}`, window.location.origin);
+    url.searchParams.set('operation', readOperation());
+    for (const [key, value] of Object.entries(params || {})) {
+        if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
+    }
+    return url.toString();
+}
+
+function caseApiUrl(caseId, suffix = '', params = {}) {
+    return operationApiUrl(`/api/cases/${encodeURIComponent(caseId)}${suffix}`, params);
+}
 
 // ── Utilidades ───────────────────────────────────────────────
 function escapeHtml(v) {
@@ -194,14 +230,15 @@ function hasSession() {
 
 // ── URL helpers ──────────────────────────────────────────────
 function caseFileUrl(caseId, filename, inline = false) {
-    const base = `${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${filename.split('/').map(encodeURIComponent).join('/')}`;
-    const url = new URL(base, window.location.origin);
+    const path = `/api/cases/${encodeURIComponent(caseId)}/files/${filename.split('/').map(encodeURIComponent).join('/')}`;
+    const url = new URL(`${API_URL}${path}`, window.location.origin);
+    url.searchParams.set('operation', readOperation());
     if (inline) url.searchParams.set('inline', '1');
     return url.toString();
 }
 
 function case926Url(caseId) {
-    return `${API_URL}/api/cases/${encodeURIComponent(caseId)}/926`;
+    return caseApiUrl(caseId, '/926');
 }
 
 // ── Resolvers de caso ────────────────────────────────────────
@@ -266,7 +303,7 @@ async function acceptValidationException(caseId, blocker) {
     if (!reason || !reason.trim()) return;
     const note = prompt('Observación adicional opcional:', '') || '';
     const tester = readTester();
-    await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(caseId)}/validation-exceptions`, {
+    await fetchWithRetry(caseApiUrl(caseId, '/validation-exceptions'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -279,7 +316,7 @@ async function acceptValidationException(caseId, blocker) {
         }),
     });
     showToast('Excepción guardada. Reprocesando contrato...', 'info', 3500);
-    const r = await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(caseId)}/analyze`, { method: 'POST' });
+    const r = await fetchWithRetry(caseApiUrl(caseId, '/analyze'), { method: 'POST' });
     const payload = await r.json();
     activeCasePayload = payload;
     const reportEl = document.getElementById('reporteContent');
@@ -398,6 +435,7 @@ function renderLoginUsers() {
 function openLogin() {
     document.getElementById('loginScreen').classList.remove('hidden');
     document.getElementById('appShell').classList.add('hidden');
+    updateOperationChrome();
     renderLoginUsers();
     const profile = readProfile();
     document.querySelectorAll('.login-profile-btn').forEach(btn => {
@@ -410,6 +448,7 @@ function bootApp() {
     document.getElementById('loginScreen').classList.add('hidden');
     document.getElementById('appShell').classList.remove('hidden');
     updateSidebarUser();
+    updateOperationChrome();
     showNavColmena();
     switchView('bandeja');
     loadBandeja();
@@ -423,6 +462,45 @@ function updateSidebarUser() {
     document.getElementById('userAvatar').textContent = initials;
     document.getElementById('userName').textContent = name;
     document.getElementById('userRole').textContent = p === 'colmena' ? 'Perfil Colmena' : 'Perfil Imagine';
+}
+
+function updateOperationChrome() {
+    const op = currentOperation();
+    document.body.dataset.operation = op.key;
+    const brandSub = document.getElementById('brandSub');
+    if (brandSub) brandSub.textContent = op.brand;
+    const loginTitle = document.getElementById('loginTitle');
+    if (loginTitle) loginTitle.textContent = op.name;
+    const loginSub = document.getElementById('loginSub');
+    if (loginSub) loginSub.textContent = 'Portal ARL · Afiliaciones';
+    document.querySelectorAll('[data-operation-switch]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.operationSwitch === op.key);
+    });
+    document.querySelectorAll('[data-operation-label]').forEach(el => {
+        el.textContent = op.name;
+    });
+    document.querySelectorAll('[data-validation-profile-label]').forEach(el => {
+        el.textContent = op.validation;
+    });
+}
+
+function setActiveOperation(operation) {
+    const next = normalizeOperation(operation);
+    const previous = readOperation();
+    saveOperation(next);
+    updateOperationChrome();
+    if (next === previous) return;
+    activeCaseId = null;
+    activeCasePayload = null;
+    selectedColmenaCaseIds = new Set();
+    allCases = [];
+    bandejaActiveTab = 'todos';
+    try { localStorage.removeItem(PROCESS_STATE_KEY); } catch {}
+    stopBandejaLivePolling();
+    if (hasSession()) {
+        showToast(`Operación activa: ${OPERATION_OPTIONS[next].name}. Bandejas y validaciones separadas.`, 'info');
+        switchView(readProfile() === 'colmena' ? 'produccion' : 'bandeja');
+    }
 }
 
 function showNavColmena() {
@@ -480,8 +558,9 @@ function switchView(viewId) {
     });
 
     const meta = VIEW_META[viewId] || { title: viewId, breadcrumb: '' };
-    document.getElementById('pageTitle').textContent = meta.title;
-    document.getElementById('pageBreadcrumb').textContent = meta.breadcrumb;
+    const op = currentOperation();
+    document.getElementById('pageTitle').textContent = viewId === 'produccion' ? `${meta.title} · ${op.short}` : meta.title;
+    document.getElementById('pageBreadcrumb').textContent = `${op.name} · ${meta.breadcrumb}`;
     updateMobileNavOptions();
     updateTopbarActions(viewId);
 
@@ -551,7 +630,7 @@ function openGallery(items, payload, startIndex = 0) {
             const item = _galleryItems[_galleryIndex];
             if (!item) return;
             try {
-                await fetch(`${API_URL}/api/cases/${encodeURIComponent(_galleryPayload.id)}/manual-review`, {
+                await fetch(caseApiUrl(_galleryPayload.id, '/manual-review'), {
                     method: 'POST',
                     headers: {'Content-Type':'application/json'},
                     body: JSON.stringify({kind: newType, filename: item.file, verdict: 'no', expected_type: newType})
@@ -592,7 +671,7 @@ function galleryNav(dir) {
 function renderGalleryItem() {
     const item = _galleryItems[_galleryIndex];
     if (!item || !_galleryPayload) return;
-    const url = `${API_URL}/api/cases/${encodeURIComponent(_galleryPayload.id)}/files/${encodeURIComponent(item.file)}?inline=true`;
+    const url = caseFileUrl(_galleryPayload.id, item.file, true);
     document.getElementById('galleryCounter').textContent = `${_galleryIndex + 1} / ${_galleryItems.length}`;
     document.getElementById('galleryLabel').textContent = item.displayName || item.file;
     document.getElementById('galleryType').textContent = item.label || item.type || '';
@@ -623,7 +702,7 @@ async function loadBandeja() {
     if (!wrap) return;
     wrap.innerHTML = '<div class="loading-msg">Cargando contratos...</div>';
     try {
-        const r = await fetchWithRetry(`${API_URL}/api/cases/production-summary`);
+        const r = await fetchWithRetry(operationApiUrl('/api/cases/production-summary'));
         const data = await r.json();
         allCases = Array.isArray(data.cases) ? data.cases : [];
         allCases.sort((a,b) => String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
@@ -708,7 +787,7 @@ function startBandejaLivePolling() {
     bandejaLiveInterval = setInterval(async () => {
         if (currentView !== 'bandeja') return;
         try {
-            const r = await fetch(`${API_URL}/api/cases/production-summary`);
+            const r = await fetch(operationApiUrl('/api/cases/production-summary'));
             const data = await r.json();
             const cases = Array.isArray(data.cases) ? data.cases : [];
 
@@ -801,6 +880,7 @@ function renderCasesTable(cases, tab = 'todos') {
                 </div>
                 <div class="case-card-right">
                     <span class="pill pill-${cls}">${escapeHtml(label)}</span>
+                    <span class="pill pill-neutral">${escapeHtml((item.operation_label || currentOperation().name))}</span>
                     <div class="case-card-actions" role="group">
                         <button class="table-action-link" data-action="reporte" data-case="${escapeHtml(id)}" type="button">Reporte</button>
                         <button class="table-action-link" data-action="clasificacion" data-case="${escapeHtml(id)}" type="button">Docs</button>
@@ -864,7 +944,7 @@ async function handleCaseAction(action, caseId, file) {
         const empresa = document.querySelector(`[data-action="eliminar"][data-case="${caseId}"]`)?.dataset?.empresa || caseId;
         if (!confirm(`¿Eliminar el contrato de ${empresa}?\n\nSe eliminarán todos los archivos adjuntos. No se puede deshacer.`)) return;
         try {
-            const r = await fetch(`${API_URL}/api/cases/${encodeURIComponent(caseId)}`, { method: 'DELETE' });
+            const r = await fetch(caseApiUrl(caseId), { method: 'DELETE' });
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
             const card = document.querySelector(`[data-default-case="${caseId}"]`);
             if (card) { card.style.opacity = '0'; card.style.transition = 'opacity 0.3s'; setTimeout(() => card.remove(), 300); }
@@ -879,7 +959,7 @@ async function handleCaseAction(action, caseId, file) {
 
 async function loadActiveCaseFull(caseId) {
     try {
-        const r = await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(caseId)}`);
+        const r = await fetchWithRetry(caseApiUrl(caseId));
         activeCasePayload = await r.json();
     } catch(e) {
         console.error('loadActiveCaseFull:', e);
@@ -1027,11 +1107,12 @@ async function runWorkflow() {
         const formData = new FormData();
         const label = deriveCaseLabel(files);
         formData.append('label', label);
+        formData.append('operation', readOperation());
         formData.append('tester_email', tester.email);
         formData.append('tester_name', tester.name || tester.email);
         for (const f of files) formData.append('files', f, f.name);
 
-        const uploadRes = await fetchWithRetry(`${API_URL}/api/cases`, {
+        const uploadRes = await fetchWithRetry(operationApiUrl('/api/cases'), {
             method: 'POST',
             body: formData,
         });
@@ -1045,7 +1126,7 @@ async function runWorkflow() {
         renderStep(1, 'active');
         if (statusPill) { statusPill.className = 'status-pill info'; statusPill.textContent = 'En cola...'; }
 
-        const wfRes = await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(caseId)}/run-workflow`, {
+        const wfRes = await fetchWithRetry(caseApiUrl(caseId, '/run-workflow'), {
             method: 'POST',
         });
         if (!wfRes.ok) throw new Error(`HTTP ${wfRes.status}`);
@@ -1081,7 +1162,7 @@ async function runWorkflow() {
             await new Promise(r => setTimeout(r, 2000));
             pollCount++;
             try {
-                const statusRes = await fetch(`${API_URL}/api/cases/${encodeURIComponent(caseId)}`);
+                const statusRes = await fetch(caseApiUrl(caseId));
                 const statusData = await statusRes.json();
                 const wfRun = statusData?.analysis?.workflow_run || {};
                 const wfStatus = normalizeText(wfRun.status || statusData?.status || '');
@@ -1239,7 +1320,7 @@ async function populateCaseSelect(selectId, onChangeFn) {
     const sel = document.getElementById(selectId);
     if (!sel) return;
     try {
-        const r = await fetchWithRetry(`${API_URL}/api/cases/production-summary`);
+        const r = await fetchWithRetry(operationApiUrl('/api/cases/production-summary'));
         const data = await r.json();
         const cases = Array.isArray(data.cases) ? data.cases : [];
         sel.innerHTML = '<option value="">Selecciona un contrato...</option>' +
@@ -1262,7 +1343,7 @@ async function loadClassifForCase(caseId) {
     const listEl = document.getElementById('classifDocList');
     if (listEl) listEl.innerHTML = '<div class="loading-msg">Cargando documentos...</div>';
     try {
-        const r = await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(caseId)}`);
+        const r = await fetchWithRetry(caseApiUrl(caseId));
         const payload = await r.json();
         activeCaseId = caseId;
         activeCasePayload = payload;
@@ -1496,7 +1577,7 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
             if (!filename || !payload?.id) return;
             if (!confirm(`¿Eliminar "${filename}"?\n\nEste archivo se eliminará permanentemente del expediente.`)) return;
             try {
-                const r = await fetch(`${API_URL}/api/cases/${encodeURIComponent(payload.id)}/files/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+                const r = await fetch(caseApiUrl(payload.id, `/files/${encodeURIComponent(filename)}`), { method: 'DELETE' });
                 if (r.ok) {
                     btn.closest('.doc-item')?.remove();
                     showToast(`Archivo eliminado: ${filename}`, 'ok');
@@ -1516,7 +1597,7 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
             const filename = btn.dataset.file;
             if (!filename || !payload?.id) return;
             try {
-                const r = await fetch(`${API_URL}/api/cases/${encodeURIComponent(payload.id)}/files/${encodeURIComponent(filename)}/duplicate`, { method: 'POST' });
+                const r = await fetch(caseApiUrl(payload.id, `/files/${encodeURIComponent(filename)}/duplicate`), { method: 'POST' });
                 if (r.ok) {
                     const data = await r.json();
                     showToast(`Duplicado creado: ${data.filename || filename}`, 'ok');
@@ -1543,7 +1624,7 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
             newItems.splice(newPos, 0, moved);
             const newOrder = newItems.map(it => it.file);
             try {
-                await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(payload.id)}/document-workspace`, {
+                await fetchWithRetry(caseApiUrl(payload.id, '/document-workspace'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ action: 'set_order', order: newOrder }),
@@ -1631,7 +1712,7 @@ function renderClassifActions(item, payload) {
         if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
         if (status) { status.textContent = ''; status.style.color = ''; }
         try {
-            const r = await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(payload.id)}/manual-review`, {
+            const r = await fetchWithRetry(caseApiUrl(payload.id, '/manual-review'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
@@ -1750,7 +1831,7 @@ function renderClassifActions(item, payload) {
 
             try {
                 saveBtn.disabled = true; saveBtn.textContent = 'Guardando...';
-                const r = await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(payload.id)}/manual-review`, {
+                const r = await fetchWithRetry(caseApiUrl(payload.id, '/manual-review'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1775,7 +1856,7 @@ function renderClassifActions(item, payload) {
 
 async function reclassifyDocument(caseId, item, newType) {
     try {
-        const r = await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(caseId)}/manual-review`, {
+        const r = await fetchWithRetry(caseApiUrl(caseId, '/manual-review'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ kind: item.kind||'document', filename: item.file, file: item.file, expected_type: newType, verdict: 'no' }),
@@ -1802,7 +1883,7 @@ async function loadValidacionForCase(caseId) {
     if (!el) return;
     el.innerHTML = '<div class="loading-msg">Cargando validaciones...</div>';
     try {
-        const r = await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(caseId)}`);
+        const r = await fetchWithRetry(caseApiUrl(caseId));
         const payload = await r.json();
         renderValidacionOCR(el, payload);
     } catch(e) {
@@ -1976,7 +2057,7 @@ async function loadVisorForCase(caseId) {
     listEl.innerHTML = '<div class="loading-msg">Cargando...</div>';
     if (frame) frame.innerHTML = '<div class="empty-state">Selecciona un documento</div>';
     try {
-        const r = await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(caseId)}`);
+        const r = await fetchWithRetry(caseApiUrl(caseId));
         const payload = await r.json();
         const items = buildDocItems(payload);
         if (!items.length) { listEl.innerHTML = '<div class="empty-state">Sin documentos</div>'; return; }
@@ -2018,7 +2099,7 @@ async function loadReporteSidebar() {
     if (!listEl) return;
     listEl.innerHTML = '<div class="loading-msg">Cargando...</div>';
     try {
-        const r = await fetchWithRetry(`${API_URL}/api/cases/production-summary`);
+        const r = await fetchWithRetry(operationApiUrl('/api/cases/production-summary'));
         const data = await r.json();
         let cases = Array.isArray(data.cases) ? data.cases : [];
         // Perfil Colmena: solo mostrar contratos aprobables
@@ -2106,7 +2187,7 @@ async function loadReporteForCase(caseId) {
     el.dataset.caseId = caseId;  // marcar qué caso se está mostrando
     el.innerHTML = '<div class="loading-msg">Cargando reporte...</div>';
     try {
-        const r = await fetchWithRetry(`${API_URL}/api/cases/${encodeURIComponent(caseId)}`);
+        const r = await fetchWithRetry(caseApiUrl(caseId));
         const payload = await r.json();
         el.dataset.caseId = caseId;  // confirmar después de cargar
         renderReporte(el, payload);
@@ -2737,7 +2818,7 @@ function renderReporte(container, payload) {
                             const sedeNum = parseInt(sedeName.match(/\d+/)?.[0] || String(si + 1));
                             const sedeGroup = sedeDocGroupList[si] || sedeDocGroupList[0] || [];
                             const pdfLinks = sedeGroup.map(doc =>
-                                `${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(doc.filename)}?inline=true`
+                                caseFileUrl(caseId, doc.filename, true)
                             );
 
                             html += `<div style="margin-bottom:16px;border:0.5px solid var(--c-border);border-radius:8px;overflow:hidden">
@@ -2848,7 +2929,7 @@ function renderReporte(container, payload) {
                     comisionHTML += `<div style="font-size:12px;font-weight:600;margin-top:16px;margin-bottom:8px">Documentos fuente (Entrega Doc):</div>
                         <div style="display:flex;flex-wrap:wrap;gap:8px">`;
                     for (const doc of entregaDocs) {
-                        const url = `/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(doc.filename||'')}`;
+                        const url = caseFileUrl(caseId, doc.filename || '');
                         comisionHTML += `<a href="${escapeHtml(url)}" target="_blank" class="btn-secondary" style="font-size:11px;padding:5px 10px">
                             📄 ${escapeHtml(doc.filename||'Entrega Doc')}
                         </a>`;
@@ -2925,12 +3006,12 @@ function renderReporte(container, payload) {
         let visorHTML = '';
         if (entregaDocs.length) {
             const firstDoc = entregaDocs[0];
-            const pdfUrl = `${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(firstDoc.filename||'')}?inline=true`;
+            const pdfUrl = caseFileUrl(caseId, firstDoc.filename || '', true);
             visorHTML = `
                 <div style="font-size:12px;font-weight:600;margin-top:12px;margin-bottom:6px">📄 Documento fuente — ${escapeHtml(firstDoc.filename||'Entrega Doc')}</div>
                 <iframe src="${escapeHtml(pdfUrl)}" style="width:100%;height:480px;border:1px solid var(--c-border);border-radius:6px" title="Entrega Doc"></iframe>
                 ${entregaDocs.length > 1 ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${entregaDocs.slice(1).map(d => {
-                    const u = `${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(d.filename||'')}?inline=true`;
+                    const u = caseFileUrl(caseId, d.filename || '', true);
                     return `<button class="btn-secondary" style="font-size:11px" onclick="this.closest('.report-data-panel').querySelector('iframe').src='${escapeHtml(u)}'">📄 ${escapeHtml(d.filename||'')}</button>`;
                 }).join('')}</div>` : ''}`;
         }
@@ -2962,7 +3043,7 @@ function renderReporte(container, payload) {
         btn.textContent = '↺ Enviando...';
         if (statusBar) { statusBar.style.display = ''; statusBar.textContent = 'Enviando a la cola...'; }
         try {
-            const r = await fetch(`${API_URL}/api/cases/${encodeURIComponent(id)}/run-workflow`, { method: 'POST' });
+            const r = await fetch(caseApiUrl(id, '/run-workflow'), { method: 'POST' });
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
             if (statusBar) {
                 statusBar.textContent = '✓ En cola — puedes ver el progreso en la Bandeja.';
@@ -3032,7 +3113,7 @@ function renderReporte(container, payload) {
             const sal = nominaSede > 0 ? '$ ' + nominaSede.toLocaleString('es-CO') : '';
             const info = getSedeInfoInline(sedeName);
             const sedeGroup = sedeDocGroupList[si] || [];
-            const pdfUrl = sedeGroup[0] ? `${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(sedeGroup[0].filename)}?inline=true` : '';
+            const pdfUrl = sedeGroup[0] ? caseFileUrl(caseId, sedeGroup[0].filename, true) : '';
 
             const infoFields = [
                 ['Código', info.codigo], ['Nombre', info.nombre],
@@ -3071,7 +3152,7 @@ function renderReporte(container, payload) {
                         ${infoFields.map(([k,v]) => `<div style="font-size:11px"><span style="color:var(--c-text-2);font-weight:600">${escapeHtml(k)}: </span><span style="color:var(--c-text-1)">${escapeHtml(String(v))}</span></div>`).join('')}
                     </div>` : ''}
                     ${pdfUrl ? `<details style="margin-bottom:6px"><summary style="cursor:pointer;font-size:11px;color:var(--c-blue);font-weight:600">📄 Ver formulario (${sedeGroup.length} pág.)</summary>
-                        ${sedeGroup.map((doc,pi) => `<iframe src="${escapeHtml(`${API_URL}/api/cases/${encodeURIComponent(caseId)}/files/${encodeURIComponent(doc.filename)}?inline=true`)}" style="width:100%;height:350px;border:1px solid var(--c-border);border-radius:4px;margin-top:4px"></iframe>`).join('')}
+                        ${sedeGroup.map((doc,pi) => `<iframe src="${escapeHtml(caseFileUrl(caseId, doc.filename, true))}" style="width:100%;height:350px;border:1px solid var(--c-border);border-radius:4px;margin-top:4px"></iframe>`).join('')}
                     </details>` : ''}
                     <div id="${trabId}" style="display:none;margin-top:8px;max-height:400px;overflow-y:auto">${buildWorkerTableSimple(workers)}</div>
                 </div>
@@ -3089,7 +3170,7 @@ async function loadProduccion() {
     productionLoadController = new AbortController();
     el.innerHTML = '<div class="loading-msg">Cargando contratos...</div>';
     try {
-        const r = await fetchWithRetry(`${API_URL}/api/cases/production-summary`, { signal: productionLoadController.signal });
+        const r = await fetchWithRetry(operationApiUrl('/api/cases/production-summary'), { signal: productionLoadController.signal });
         const data = await r.json();
         let cases = Array.isArray(data.cases) ? data.cases : [];
         cases = cases.filter(c => {
@@ -3098,7 +3179,7 @@ async function loadProduccion() {
             return s === 'completed' && (f.includes('aprob') || f === 'ok' || f === 'completed' || !f);
         });
         cases.sort((a,b) => String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
-        if (!cases.length) { el.innerHTML = '<div class="empty-state">No hay contratos aprobados para Colmena</div>'; return; }
+        if (!cases.length) { el.innerHTML = `<div class="empty-state">No hay contratos aprobados para ${escapeHtml(currentOperation().name)}</div>`; return; }
         el.innerHTML = `<div class="production-cards">${cases.map(item => {
             const { empresa, nit, fecha, has926, filename, nroAfiliacion } = resolveCase(item);
             const id = item.id || '';
@@ -3154,7 +3235,7 @@ async function downloadColmenaBatch() {
         const r = await fetch(`${API_URL}/api/926/consolidated`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ case_ids: ids }),
+            body: JSON.stringify({ case_ids: ids, operation: readOperation() }),
         });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const blob = await r.blob();
@@ -3186,7 +3267,7 @@ async function loadFeedbackCaseSelect() {
     const sel = document.getElementById('feedbackCaseSelect');
     if (!sel) return;
     try {
-        const r = await fetch(`${API_URL}/api/cases/production-summary`);
+        const r = await fetch(operationApiUrl('/api/cases/production-summary'));
         const data = await r.json();
         const cases = Array.isArray(data.cases) ? data.cases : [];
         cases.sort((a,b) => String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
@@ -3296,8 +3377,8 @@ async function doSearch(query) {
     el.innerHTML = '<div class="loading-msg">Buscando...</div>';
     try {
         const url = query?.trim()
-            ? `${API_URL}/api/cases/search?q=${encodeURIComponent(query.trim())}&limit=20`
-            : `${API_URL}/api/cases/production-summary`;
+            ? operationApiUrl('/api/cases/search', { q: query.trim(), limit: 20 })
+            : operationApiUrl('/api/cases/production-summary');
         const r = await fetch(url);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const data = await r.json();
@@ -3881,6 +3962,10 @@ function init() {
         switchView(e.target.value);
     });
 
+    document.querySelectorAll('[data-operation-switch]').forEach(btn => {
+        btn.addEventListener('click', () => setActiveOperation(btn.dataset.operationSwitch));
+    });
+
     // Logout
     document.getElementById('logoutBtn')?.addEventListener('click', () => {
         clearSession(); activeCaseId = null; activeCasePayload = null;
@@ -3971,7 +4056,7 @@ function init() {
         try {
             const [hR, cR] = await Promise.all([
                 fetch(`${API_URL}/health`).catch(() => null),
-                fetch(`${API_URL}/api/cases/production-summary`).catch(() => null),
+                fetch(operationApiUrl('/api/cases/production-summary')).catch(() => null),
             ]);
             const h = hR?.ok ? await hR.json() : {};
             const c = cR?.ok ? await cR.json() : {};

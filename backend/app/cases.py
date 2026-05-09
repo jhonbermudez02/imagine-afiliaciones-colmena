@@ -104,6 +104,22 @@ DOCUMENT_SUPERVISION_PATH = Path(settings.cases_dir).parent / "evals" / "learnin
 LEARNING_MANIFEST_PATH = Path(settings.cases_dir).parent / "evals" / "learning" / "manifest.json"
 _DOCUMENT_CALIBRATION_CACHE: Optional[Dict[str, Any]] = None
 
+OPERATION_LABELS = {
+    "colima": "AFI Colima",
+    "alfa": "ALFA",
+}
+
+
+def normalize_operation(value: Any = "") -> str:
+    operation = normalize_text(str(value or "")).lower()
+    if operation in OPERATION_LABELS:
+        return operation
+    return "colima"
+
+
+def operation_label(value: Any = "") -> str:
+    return OPERATION_LABELS.get(normalize_operation(value), OPERATION_LABELS["colima"])
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -984,7 +1000,15 @@ def load_case(case_id: str) -> Dict[str, Any]:
 
 
 def _normalize_case_payload(case_payload: Dict[str, Any]) -> Dict[str, Any]:
+    operation = normalize_operation(case_payload.get("operation") or case_payload.get("tenant") or case_payload.get("workspace"))
+    case_payload["operation"] = operation
+    case_payload["operation_label"] = operation_label(operation)
+    case_payload["validation_profile"] = operation
     analysis = case_payload.get("analysis") or {}
+    if isinstance(analysis, dict):
+        analysis.setdefault("operation", operation)
+        analysis.setdefault("operation_label", operation_label(operation))
+        analysis.setdefault("validation_profile", operation)
     workflow = analysis.get("workflow_run") or {}
     steps = workflow.get("steps")
     if isinstance(steps, list):
@@ -1421,15 +1445,16 @@ def _case_entity_key(payload: Dict[str, Any]) -> tuple[str, str]:
 
 
 _LIST_CASES_CACHE_TTL_SECONDS = 3.0
-_LIST_CASES_CACHE: Dict[bool, tuple[float, List[Dict[str, Any]]]] = {}
+_LIST_CASES_CACHE: Dict[tuple[bool, str], tuple[float, List[Dict[str, Any]]]] = {}
 
 
 def _clone_case_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [dict(item) for item in rows]
 
 
-def list_cases(include_all: bool = False) -> List[Dict[str, Any]]:
-    cache_key = bool(include_all)
+def list_cases(include_all: bool = False, operation: Optional[str] = None) -> List[Dict[str, Any]]:
+    operation_key = normalize_operation(operation) if operation is not None else ""
+    cache_key = (bool(include_all), operation_key or "*")
     cached = _LIST_CASES_CACHE.get(cache_key)
     now = time.monotonic()
     if cached and (now - cached[0]) <= _LIST_CASES_CACHE_TTL_SECONDS:
@@ -1440,6 +1465,8 @@ def list_cases(include_all: bool = False) -> List[Dict[str, Any]]:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
             payload = _normalize_case_payload(payload)
+            if operation_key and normalize_operation(payload.get("operation")) != operation_key:
+                continue
             rows.append(payload)
         except Exception:
             continue
@@ -1466,7 +1493,7 @@ def get_case_file_path(case_id: str, filename: str) -> Path:
     return target
 
 
-def search_cases(query: str, limit: int = 10) -> List[Dict[str, Any]]:
+def search_cases(query: str, limit: int = 10, operation: Optional[str] = None) -> List[Dict[str, Any]]:
     needle = normalize_haystack(query)
     needle_company = _normalize_company_compare(query)
     query_tokens: List[str] = []
@@ -1477,7 +1504,7 @@ def search_cases(query: str, limit: int = 10) -> List[Dict[str, Any]]:
         if token.endswith("s") and len(token) >= 5:
             query_tokens.append(token[:-1])
     results: List[Dict[str, Any]] = []
-    for payload in list_cases(include_all=True):
+    for payload in list_cases(include_all=True, operation=operation):
         analysis = payload.get("analysis") or {}
         profile = (analysis.get("xlsx_profile") or {}).get("profile") or {}
         docs = analysis.get("documents") or []
@@ -1945,11 +1972,15 @@ def search_document_registry(query: str, limit: int = 12) -> List[Dict[str, Any]
     return deduped
 
 
-def create_case_record(label: str, source_files: List[Dict[str, Any]]) -> Dict[str, Any]:
-    case_id = f"case-{uuid.uuid4().hex[:10]}"
+def create_case_record(label: str, source_files: List[Dict[str, Any]], operation: str = "colima") -> Dict[str, Any]:
+    operation_key = normalize_operation(operation)
+    case_id = f"case-{operation_key}-{uuid.uuid4().hex[:10]}"
     payload = {
         "id": case_id,
         "label": normalize_text(label) or case_id,
+        "operation": operation_key,
+        "operation_label": operation_label(operation_key),
+        "validation_profile": operation_key,
         "status": "uploaded",
         "created_at": utc_now(),
         "updated_at": utc_now(),
@@ -7779,8 +7810,9 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
     return payload
 
 
-def store_case_files(label: str, uploads: List[tuple[str, bytes]]) -> Dict[str, Any]:
-    case_id = f"case-{uuid.uuid4().hex[:10]}"
+def store_case_files(label: str, uploads: List[tuple[str, bytes]], operation: str = "colima") -> Dict[str, Any]:
+    operation_key = normalize_operation(operation)
+    case_id = f"case-{operation_key}-{uuid.uuid4().hex[:10]}"
     case_dir = get_case_dir(case_id)
     files_dir = case_dir / "files"
     files_dir.mkdir(parents=True, exist_ok=True)
@@ -7838,6 +7870,9 @@ def store_case_files(label: str, uploads: List[tuple[str, bytes]]) -> Dict[str, 
     payload = {
         "id": case_id,
         "label": normalize_text(label) or case_id,
+        "operation": operation_key,
+        "operation_label": operation_label(operation_key),
+        "validation_profile": operation_key,
         "status": "uploaded",
         "created_at": utc_now(),
         "updated_at": utc_now(),
