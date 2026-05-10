@@ -36,5 +36,6 @@ shared_downloads/**
 !shared_downloads/.gitkeep
 
 offline_bundle/
+imagine-afiliaciones/
 
 *.log
