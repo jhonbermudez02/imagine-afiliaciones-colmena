@@ -106,7 +106,6 @@ _DOCUMENT_CALIBRATION_CACHE: Optional[Dict[str, Any]] = None
 
 OPERATION_LABELS = {
     "colima": "AFI Colima",
-    "alfa": "ALFA",
 }
 
 

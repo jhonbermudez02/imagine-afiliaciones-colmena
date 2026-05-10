@@ -122,11 +122,9 @@ function buildNovaContext(query='') {
     const ctx = readNovaChatContext();
     const proc = readNovaProcessState();
     const reference = buildNovaReference();
-    let operation = 'colima';
-    try { operation = String(localStorage.getItem('afi-active-operation-v1') || 'colima').toLowerCase().trim() || 'colima'; } catch {}
     return {
         topics: [],
-        operation,
+        operation: 'colima',
         active_case_id: proc.activeCaseId || ctx.active_case_id || ctx.last_case_id || '',
         active_company: reference || ctx.active_company || '',
         active_nit: ctx.active_nit || '',

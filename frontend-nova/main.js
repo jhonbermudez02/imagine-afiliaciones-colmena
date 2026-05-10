@@ -14,11 +14,9 @@ const PROFILE_KEY = 'afi-colima-profile-v1';
 const TESTER_KEY = 'afi-colima-tester-v1';
 const PROCESS_STATE_KEY = 'afi-colima-process-v1';
 const CLASSIFICATION_ORDER_KEY = 'afi-colima-classif-order-v1';
-const OPERATION_KEY = 'afi-active-operation-v1';
 
 const OPERATION_OPTIONS = {
     colima: { key: 'colima', short: 'COLIMA', name: 'AFI Colima', brand: 'AFI Colima · Portal ARL', validation: 'Reglas Colima' },
-    alfa:   { key: 'alfa',   short: 'ALFA',   name: 'ALFA',       brand: 'ALFA · Portal ARL',       validation: 'Reglas ALFA' },
 };
 
 const REVIEW_TYPE_OPTIONS = [
@@ -69,16 +67,15 @@ let bandejaActiveTab = 'todos';
 let allCases = [];
 
 function normalizeOperation(value = '') {
-    const key = String(value || '').toLowerCase().trim();
-    return OPERATION_OPTIONS[key] ? key : 'colima';
+    return 'colima';
 }
 
 function readOperation() {
-    try { return normalizeOperation(localStorage.getItem(OPERATION_KEY) || 'colima'); } catch { return 'colima'; }
+    return 'colima';
 }
 
 function saveOperation(operation) {
-    try { localStorage.setItem(OPERATION_KEY, normalizeOperation(operation)); } catch {}
+    return 'colima';
 }
 
 function currentOperation() {
@@ -473,9 +470,6 @@ function updateOperationChrome() {
     if (loginTitle) loginTitle.textContent = op.name;
     const loginSub = document.getElementById('loginSub');
     if (loginSub) loginSub.textContent = 'Portal ARL · Afiliaciones';
-    document.querySelectorAll('[data-operation-switch]').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.operationSwitch === op.key);
-    });
     document.querySelectorAll('[data-operation-label]').forEach(el => {
         el.textContent = op.name;
     });
@@ -3960,10 +3954,6 @@ function init() {
     });
     document.getElementById('mobileViewSelect')?.addEventListener('change', e => {
         switchView(e.target.value);
-    });
-
-    document.querySelectorAll('[data-operation-switch]').forEach(btn => {
-        btn.addEventListener('click', () => setActiveOperation(btn.dataset.operationSwitch));
     });
 
     // Logout
