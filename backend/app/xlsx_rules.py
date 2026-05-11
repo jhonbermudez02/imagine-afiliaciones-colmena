@@ -22,10 +22,21 @@ def only_digits(value: Any) -> str:
 
 
 def _is_strict_numeric_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float, Decimal)):
+        try:
+            return Decimal(str(value)) >= 0
+        except (InvalidOperation, ValueError):
+            return False
     text = normalize_text(value)
     if not text:
         return False
     return bool(re.fullmatch(r"\d+", text))
+
+
+def _is_blank_value(value: Any) -> bool:
+    return not normalize_text(value)
 
 
 def _worker_document_raw(record: Dict[str, Any]) -> str:
@@ -357,6 +368,7 @@ def _load_pila_name_catalog(subsystem: str) -> set[str]:
 
 def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]:
     form_fields = dict((xlsx_profile or {}).get("form_fields") or {})
+    form_cell_values = dict((xlsx_profile or {}).get("form_cell_values") or {})
     profile = dict((xlsx_profile or {}).get("profile") or {})
     worker_sheet_counts = dict((xlsx_profile or {}).get("worker_sheet_counts") or {})
     has_independientes_723 = bool((xlsx_profile or {}).get("has_independientes_723"))
@@ -456,6 +468,38 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                 }
             )
     elif "afili" in tipo_tramite:
+        direct_cell_fields = [
+            "a_clase_riesgo",
+            "a_numero_sedes",
+            "a_numero_centros_trabajo",
+            "a_numero_inicial_trabajadores_estudiantes",
+            "a_valor_total_nomina",
+        ]
+        for field in direct_cell_fields:
+            cell_info = form_cell_values.get(field) or {}
+            raw_value = cell_info.get("value")
+            label = cell_info.get("label") or field
+            cell = cell_info.get("cell") or "fila 26"
+            if _is_blank_value(raw_value):
+                blockers.append(
+                    {
+                        "code": "XLSX_AFILIACION_REQUIRED_CELL_EMPTY",
+                        "severity": "blocker",
+                        "field": field,
+                        "cell": cell,
+                        "message": f"El campo '{label}' ({cell}) no puede estar vacío.",
+                    }
+                )
+            elif not _is_strict_numeric_value(raw_value):
+                blockers.append(
+                    {
+                        "code": "XLSX_AFILIACION_REQUIRED_CELL_NOT_NUMERIC",
+                        "severity": "blocker",
+                        "field": field,
+                        "cell": cell,
+                        "message": f"El campo '{label}' ({cell}) debe ser numérico. Valor recibido: {raw_value}.",
+                    }
+                )
         if not (traslado_payload and not afiliacion_payload):
             for field in PRIMARY_REQUIRED_AFILIACION:
                 if not normalize_text(form_fields.get(field, "")):
@@ -470,6 +514,7 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
             tolerated = {"a_codigo_actividad_economica_principal", "a_valor_total_nomina"}
             if set(missing_fields).issubset(tolerated):
                 missing_fields = [field for field in missing_fields if field not in tolerated]
+        missing_fields = [field for field in missing_fields if field not in direct_cell_fields]
 
         radicacion_date = _parse_date_value(form_fields.get("fecha_radicacion", ""))
         inicio_cobertura_date = _parse_date_value(form_fields.get("fecha_inicio_cobertura", ""))

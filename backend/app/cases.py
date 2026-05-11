@@ -4191,6 +4191,27 @@ def _extract_form_fields_from_sheet(sheet: Any) -> Dict[str, str]:
     }
 
 
+def _extract_form_cell_values_from_sheet(sheet: Any) -> Dict[str, Dict[str, str]]:
+    if sheet is None:
+        return {}
+
+    required_afiliacion_cells = {
+        "a_clase_riesgo": ("M26", 26, 13, "Clase de riesgo"),
+        "a_numero_sedes": ("Q26", 26, 17, "Número de sedes"),
+        "a_numero_centros_trabajo": ("V26", 26, 22, "Número de centros de trabajo"),
+        "a_numero_inicial_trabajadores_estudiantes": ("AD26", 26, 30, "Número inicial de trabajadores o estudiantes"),
+        "a_valor_total_nomina": ("AQ26", 26, 43, "Valor total de nómina"),
+    }
+    out: Dict[str, Dict[str, str]] = {}
+    for field, (cell, row, col, label) in required_afiliacion_cells.items():
+        out[field] = {
+            "cell": cell,
+            "label": label,
+            "value": _sheet_value(sheet, row, col),
+        }
+    return out
+
+
 def _read_xlsx(path: Path) -> Dict[str, Any]:
     workbook = load_workbook(path, data_only=True)
     sheets: List[Dict[str, Any]] = []
@@ -4199,6 +4220,7 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
     worker_sheet_counts: Dict[str, int] = {}
     worker_sheet_salary_totals: Dict[str, int] = {}
     form_fields: Dict[str, str] = {}
+    form_cell_values: Dict[str, Dict[str, str]] = {}
     activity_catalog_codes: List[str] = []
     has_independientes_723 = False
     for sheet in workbook.worksheets:
@@ -4215,6 +4237,7 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
                 activity_catalog_codes = extracted_codes
         if "formulario de afili" in norm_sheet_name:
             form_fields = _extract_form_fields_from_sheet(sheet)
+            form_cell_values = _extract_form_cell_values_from_sheet(sheet)
         for row in [[normalize_text(cell) for cell in raw_row[:12]] for raw_row in rows[:80]]:
             if len(row) >= 2 and row[0] and row[1]:
                 key = normalize_haystack(normalize_text(row[0])).replace(" ", "_")
@@ -4278,6 +4301,7 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
         "sheets": sheets,
         "profile": profile,
         "form_fields": {**form_fields, **{k:v for sede in (clean_preview.get("sede_info_extra") or {}).values() for k,v in sede.items() if v}},
+        "form_cell_values": form_cell_values,
         "flat_pairs": flat_pairs,
         "records": records,
         "worker_sheet_counts": worker_sheet_counts,

@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     compare_926_history_path: str = "/data/evals/compare_926_history.json"
     notification_recipients_path: str = "/data/evals/pilot_notification_recipients.json"
     notification_log_path: str = "/data/evals/notification_log.jsonl"
-    notification_enabled: bool = True
+    notification_enabled: bool = False
     notification_sender_email: str = "hdescobarmesa@gmail.com"
     notification_sender_name: str = "Imagine S.A.S."
     smtp_host: str = "smtp.gmail.com"
