@@ -253,7 +253,7 @@ function blockerText(b) {
 
 function renderBlockers(blockers, cssClass = 'report-blocker') {
     if (!blockers?.length) return '';
-    return blockers.slice(0,10).map(b => `
+    return blockers.map(b => `
         <div class="${cssClass}">
             <span>✗</span>
             <span>${escapeHtml(blockerText(b))}</span>
@@ -1268,7 +1268,7 @@ function renderWorkflowResult(payload) {
             ${blockers.length ? `
                 <div class="result-blockers">
                     <div class="result-blockers-title">Bloqueantes detectados (${blockers.length})</div>
-                    ${(blockerRecords.length ? blockerRecords : blockers.map((b, i) => ({ message: blockerText(b), code: 'VALIDATION_ALERT', fingerprint: '', index: i }))).slice(0,10).map((b, i) => `
+                    ${(blockerRecords.length ? blockerRecords : blockers.map((b, i) => ({ message: blockerText(b), code: 'VALIDATION_ALERT', fingerprint: '', index: i }))).map((b, i) => `
                         <div class="result-blocker-item">
                             <span>✗</span>
                             <span style="flex:1">${escapeHtml(b.message)}</span>
@@ -2339,7 +2339,7 @@ function renderReporte(container, payload) {
                 <div class="report-section">
                     <div class="report-section-title">Bloqueantes (${blockers.length}) · haz clic en uno para ver el documento fuente</div>
                     <div class="report-blockers-list" id="reportBlockersList">
-                        ${(blockerRecords.length ? blockerRecords : blockers.map((b, i) => ({ message: blockerText(b), code: 'VALIDATION_ALERT', fingerprint: '', index: i }))).slice(0,10).map((b, i) => {
+                        ${(blockerRecords.length ? blockerRecords : blockers.map((b, i) => ({ message: blockerText(b), code: 'VALIDATION_ALERT', fingerprint: '', index: i }))).map((b, i) => {
                             const raw = b.message || blockerText(b);
                             const txt = enrichBlockerText(raw);
                             const parsed = parseBlocker(b);
