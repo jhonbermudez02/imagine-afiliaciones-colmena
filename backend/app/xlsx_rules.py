@@ -605,6 +605,14 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
         ("rep_legal_tipo_documento", False, False),
         ("rep_legal_numero_documento", False, False),
         ("rep_legal_correo_electronico", False, True),
+        ("sede_principal_codigo", True, False),
+        ("sede_principal_nombre", False, False),
+        ("sede_principal_direccion", False, False),
+        ("sede_principal_telefono", True, False),
+        ("sede_principal_correo", False, True),
+        ("responsable_sede_tipo_documento", False, False),
+        ("responsable_sede_numero_documento", False, False),
+        ("responsable_sede_correo", False, True),
     ]
     for field, require_numeric, require_email in common_cell_fields:
         _append_required_cell_validation(
