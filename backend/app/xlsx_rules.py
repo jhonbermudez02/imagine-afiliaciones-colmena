@@ -39,12 +39,20 @@ def _is_blank_value(value: Any) -> bool:
     return not normalize_text(value)
 
 
+def _is_email_value(value: Any) -> bool:
+    text = normalize_text(value)
+    if not text:
+        return False
+    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", text))
+
+
 def _append_required_cell_validation(
     blockers: List[Dict[str, Any]],
     form_cell_values: Dict[str, Any],
     field: str,
     *,
     require_numeric: bool,
+    require_email: bool = False,
     code_prefix: str,
 ) -> None:
     cell_info = form_cell_values.get(field) or {}
@@ -69,6 +77,16 @@ def _append_required_cell_validation(
                 "field": field,
                 "cell": cell,
                 "message": f"El campo '{label}' ({cell}) debe ser numérico. Valor recibido: {raw_value}.",
+            }
+        )
+    elif require_email and not _is_email_value(raw_value):
+        blockers.append(
+            {
+                "code": f"{code_prefix}_INVALID_EMAIL",
+                "severity": "blocker",
+                "field": field,
+                "cell": cell,
+                "message": f"El campo '{label}' ({cell}) debe tener formato de correo electrónico válido. Valor recibido: {raw_value}.",
             }
         )
 
@@ -569,6 +587,34 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                         ),
                     }
                 )
+
+    common_cell_fields = [
+        ("lugar_afiliacion", False, False),
+        ("codigo_lugar", False, False),
+        ("nombre_lugar", False, False),
+        ("naturaleza_juridica_codigo_tramite", True, False),
+        ("naturaleza_juridica_nombre", False, False),
+        ("tipo_aportante_codigo", True, False),
+        ("tipo_aportante_nombre", False, False),
+        ("tipo_persona", False, False),
+        ("empleador_razon_social", False, False),
+        ("empleador_tipo_documento", False, False),
+        ("empleador_numero_documento_nit", True, False),
+        ("rep_legal_primer_apellido", False, False),
+        ("rep_legal_primer_nombre", False, False),
+        ("rep_legal_tipo_documento", False, False),
+        ("rep_legal_numero_documento", False, False),
+        ("rep_legal_correo_electronico", False, True),
+    ]
+    for field, require_numeric, require_email in common_cell_fields:
+        _append_required_cell_validation(
+            blockers,
+            form_cell_values,
+            field,
+            require_numeric=require_numeric,
+            require_email=require_email,
+            code_prefix="XLSX_COMMON_REQUIRED_CELL",
+        )
 
     for field in ["autorizacion_1", "autorizacion_2", "autorizacion_3"]:
         _append_required_cell_validation(

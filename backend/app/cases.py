@@ -4196,6 +4196,22 @@ def _extract_form_cell_values_from_sheet(sheet: Any) -> Dict[str, Dict[str, Any]
         return {}
 
     required_form_cells = {
+        "lugar_afiliacion": ("AP6", 6, 42, "Lugar de afiliación"),
+        "codigo_lugar": ("AK7", 7, 37, "Código lugar"),
+        "nombre_lugar": ("AR7", 7, 44, "Nombre lugar"),
+        "naturaleza_juridica_codigo_tramite": ("Z13", 13, 26, "Naturaleza jurídica del empleador / Código trámite"),
+        "naturaleza_juridica_nombre": ("AB13", 13, 28, "Naturaleza jurídica del empleador / Nombre"),
+        "tipo_aportante_codigo": ("AM13", 13, 39, "Tipo de aportante / Código"),
+        "tipo_aportante_nombre": ("AO13", 13, 41, "Tipo de aportante / Nombre"),
+        "tipo_persona": ("AU13", 13, 47, "Tipo de persona"),
+        "empleador_razon_social": ("J16", 16, 10, "Apellidos y nombres o razón social"),
+        "empleador_tipo_documento": ("V16", 16, 22, "Tipo de documento del empleador"),
+        "empleador_numero_documento_nit": ("AG16", 16, 33, "Número de documento o NIT"),
+        "rep_legal_primer_apellido": ("J17", 17, 10, "Representante legal / Primer apellido"),
+        "rep_legal_primer_nombre": ("AG17", 17, 33, "Representante legal / Primer nombre"),
+        "rep_legal_tipo_documento": ("H18", 18, 8, "Representante legal / Tipo de documento"),
+        "rep_legal_numero_documento": ("P18", 18, 16, "Representante legal / Número de documento"),
+        "rep_legal_correo_electronico": ("AA18", 18, 27, "Correo electrónico del representante legal"),
         "a_clase_riesgo": ("M26", 26, 13, "Clase de riesgo"),
         "a_numero_sedes": ("Q26", 26, 17, "Número de sedes"),
         "a_numero_centros_trabajo": ("V26", 26, 22, "Número de centros de trabajo"),
