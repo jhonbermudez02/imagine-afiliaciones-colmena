@@ -39,6 +39,40 @@ def _is_blank_value(value: Any) -> bool:
     return not normalize_text(value)
 
 
+def _append_required_cell_validation(
+    blockers: List[Dict[str, Any]],
+    form_cell_values: Dict[str, Any],
+    field: str,
+    *,
+    require_numeric: bool,
+    code_prefix: str,
+) -> None:
+    cell_info = form_cell_values.get(field) or {}
+    raw_value = cell_info.get("value")
+    label = cell_info.get("label") or field
+    cell = cell_info.get("cell") or "celda requerida"
+    if _is_blank_value(raw_value):
+        blockers.append(
+            {
+                "code": f"{code_prefix}_EMPTY",
+                "severity": "blocker",
+                "field": field,
+                "cell": cell,
+                "message": f"El campo '{label}' ({cell}) no puede estar vacío.",
+            }
+        )
+    elif require_numeric and not _is_strict_numeric_value(raw_value):
+        blockers.append(
+            {
+                "code": f"{code_prefix}_NOT_NUMERIC",
+                "severity": "blocker",
+                "field": field,
+                "cell": cell,
+                "message": f"El campo '{label}' ({cell}) debe ser numérico. Valor recibido: {raw_value}.",
+            }
+        )
+
+
 def _worker_document_raw(record: Dict[str, Any]) -> str:
     return normalize_text(
         record.get("_raw_numero_de_identificacion")
@@ -441,9 +475,27 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
     )
 
     if "traslado" in tipo_tramite:
+        direct_cell_fields = [
+            ("b_arl_de_la_cual_se_traslada", False),
+            ("b_clase_riesgo", True),
+            ("b_codigo_actividad_economica_principal", True),
+            ("b_numero_sedes", True),
+            ("b_numero_centros_trabajo", True),
+            ("b_numero_total_trabajadores_estudiantes", True),
+            ("b_monto_total_cotizacion", True),
+        ]
+        for field, require_numeric in direct_cell_fields:
+            _append_required_cell_validation(
+                blockers,
+                form_cell_values,
+                field,
+                require_numeric=require_numeric,
+                code_prefix="XLSX_TRASLADO_REQUIRED_CELL",
+            )
         for field in PRIMARY_REQUIRED_TRASLADO:
             if not normalize_text(form_fields.get(field, "")):
                 missing_fields.append(field)
+        missing_fields = [field for field in missing_fields if field not in {field for field, _ in direct_cell_fields}]
         estado = normalize_haystack(form_fields.get("estado_cuenta_empleador", ""))
         if estado and estado not in ALLOWED_ESTADO_CUENTA:
             blockers.append(
@@ -476,30 +528,13 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
             "a_valor_total_nomina",
         ]
         for field in direct_cell_fields:
-            cell_info = form_cell_values.get(field) or {}
-            raw_value = cell_info.get("value")
-            label = cell_info.get("label") or field
-            cell = cell_info.get("cell") or "fila 26"
-            if _is_blank_value(raw_value):
-                blockers.append(
-                    {
-                        "code": "XLSX_AFILIACION_REQUIRED_CELL_EMPTY",
-                        "severity": "blocker",
-                        "field": field,
-                        "cell": cell,
-                        "message": f"El campo '{label}' ({cell}) no puede estar vacío.",
-                    }
-                )
-            elif not _is_strict_numeric_value(raw_value):
-                blockers.append(
-                    {
-                        "code": "XLSX_AFILIACION_REQUIRED_CELL_NOT_NUMERIC",
-                        "severity": "blocker",
-                        "field": field,
-                        "cell": cell,
-                        "message": f"El campo '{label}' ({cell}) debe ser numérico. Valor recibido: {raw_value}.",
-                    }
-                )
+            _append_required_cell_validation(
+                blockers,
+                form_cell_values,
+                field,
+                require_numeric=True,
+                code_prefix="XLSX_AFILIACION_REQUIRED_CELL",
+            )
         if not (traslado_payload and not afiliacion_payload):
             for field in PRIMARY_REQUIRED_AFILIACION:
                 if not normalize_text(form_fields.get(field, "")):
@@ -534,6 +569,15 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                         ),
                     }
                 )
+
+    for field in ["autorizacion_1", "autorizacion_2", "autorizacion_3"]:
+        _append_required_cell_validation(
+            blockers,
+            form_cell_values,
+            field,
+            require_numeric=False,
+            code_prefix="XLSX_AUTHORIZATION_REQUIRED_CELL",
+        )
 
     total_worker_rows = sum(int(count or 0) for count in worker_sheet_counts.values())
     if not worker_sheet_counts and not has_independientes_723:

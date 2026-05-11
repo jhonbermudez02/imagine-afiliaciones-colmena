@@ -4191,19 +4191,29 @@ def _extract_form_fields_from_sheet(sheet: Any) -> Dict[str, str]:
     }
 
 
-def _extract_form_cell_values_from_sheet(sheet: Any) -> Dict[str, Dict[str, str]]:
+def _extract_form_cell_values_from_sheet(sheet: Any) -> Dict[str, Dict[str, Any]]:
     if sheet is None:
         return {}
 
-    required_afiliacion_cells = {
+    required_form_cells = {
         "a_clase_riesgo": ("M26", 26, 13, "Clase de riesgo"),
         "a_numero_sedes": ("Q26", 26, 17, "Número de sedes"),
         "a_numero_centros_trabajo": ("V26", 26, 22, "Número de centros de trabajo"),
         "a_numero_inicial_trabajadores_estudiantes": ("AD26", 26, 30, "Número inicial de trabajadores o estudiantes"),
         "a_valor_total_nomina": ("AQ26", 26, 43, "Valor total de nómina"),
+        "b_arl_de_la_cual_se_traslada": ("D30", 30, 4, "ARL de la cual se traslada"),
+        "b_clase_riesgo": ("M29", 29, 13, "Clase de riesgo"),
+        "b_codigo_actividad_economica_principal": ("S29", 29, 19, "Actividad económica"),
+        "b_numero_sedes": ("AA29", 29, 27, "Número de sedes"),
+        "b_numero_centros_trabajo": ("AG29", 29, 33, "Número de centros de trabajo"),
+        "b_numero_total_trabajadores_estudiantes": ("AM29", 29, 39, "Número total de trabajadores o estudiantes"),
+        "b_monto_total_cotizacion": ("AT29", 29, 46, "Monto total de la cotización"),
+        "autorizacion_1": ("E34", 34, 5, "Autorización 1"),
+        "autorizacion_2": ("E36", 36, 5, "Autorización 2"),
+        "autorizacion_3": ("E38", 38, 5, "Autorización 3"),
     }
-    out: Dict[str, Dict[str, str]] = {}
-    for field, (cell, row, col, label) in required_afiliacion_cells.items():
+    out: Dict[str, Dict[str, Any]] = {}
+    for field, (cell, row, col, label) in required_form_cells.items():
         out[field] = {
             "cell": cell,
             "label": label,
@@ -4220,7 +4230,7 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
     worker_sheet_counts: Dict[str, int] = {}
     worker_sheet_salary_totals: Dict[str, int] = {}
     form_fields: Dict[str, str] = {}
-    form_cell_values: Dict[str, Dict[str, str]] = {}
+    form_cell_values: Dict[str, Dict[str, Any]] = {}
     activity_catalog_codes: List[str] = []
     has_independientes_723 = False
     for sheet in workbook.worksheets:
