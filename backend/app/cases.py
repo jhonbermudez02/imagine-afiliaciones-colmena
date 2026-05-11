@@ -6445,7 +6445,7 @@ def _build_executive_report(label: str, xlsx_profile: Dict[str, Any], checklist:
         report_lines.append(f"Faltantes: {', '.join(checklist.get('missing', []))}")
     if errores:
         report_lines.append("Hallazgos:")
-        for item in errores[:8]:
+        for item in errores:
             lines = format_reason_lines(item)
             if not lines:
                 continue
@@ -6453,7 +6453,7 @@ def _build_executive_report(label: str, xlsx_profile: Dict[str, Any], checklist:
             report_lines.extend(lines[1:])
     if observaciones:
         report_lines.append("Observaciones:")
-        for item in observaciones[:8]:
+        for item in observaciones:
             lines = format_reason_lines(item)
             if not lines:
                 continue
