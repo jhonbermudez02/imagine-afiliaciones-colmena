@@ -184,6 +184,91 @@ def _append_sede_cell_validation(
         )
 
 
+def _center_cell_info(row_values: Dict[str, Any], field: str) -> Dict[str, Any]:
+    return dict((row_values or {}).get(field) or {})
+
+
+def _append_center_cell_validation(
+    blockers: List[Dict[str, Any]],
+    sheet_name: str,
+    row_values: Dict[str, Any],
+    field: str,
+    *,
+    require_numeric: bool = False,
+    require_email: bool = False,
+    min_length: int | None = None,
+    max_length: int | None = None,
+) -> None:
+    cell_info = _center_cell_info(row_values, field)
+    raw_value = cell_info.get("value")
+    label = cell_info.get("label") or field
+    cell = cell_info.get("cell") or "celda requerida"
+    row_number = cell_info.get("row")
+    message_prefix = f"{sheet_name}, fila {row_number}: el campo '{label}' ({cell})"
+    if _is_blank_value(raw_value):
+        blockers.append(
+            {
+                "code": "XLSX_CENTRO_REQUIRED_CELL_EMPTY",
+                "severity": "blocker",
+                "field": field,
+                "sheet": sheet_name,
+                "cell": cell,
+                "row": row_number,
+                "message": f"{message_prefix} no puede estar vacío.",
+            }
+        )
+        return
+    if require_numeric and not _is_strict_numeric_value(raw_value):
+        blockers.append(
+            {
+                "code": "XLSX_CENTRO_REQUIRED_CELL_NOT_NUMERIC",
+                "severity": "blocker",
+                "field": field,
+                "sheet": sheet_name,
+                "cell": cell,
+                "row": row_number,
+                "message": f"{message_prefix} debe ser numérico. Valor recibido: {raw_value}.",
+            }
+        )
+    if require_email and not _is_email_value(raw_value):
+        blockers.append(
+            {
+                "code": "XLSX_CENTRO_REQUIRED_CELL_INVALID_EMAIL",
+                "severity": "blocker",
+                "field": field,
+                "sheet": sheet_name,
+                "cell": cell,
+                "row": row_number,
+                "message": f"{message_prefix} debe tener formato de correo electrónico válido. Valor recibido: {raw_value}.",
+            }
+        )
+    if min_length is not None and max_length is not None:
+        text = normalize_text(raw_value)
+        if not (min_length <= len(text) <= max_length):
+            blockers.append(
+                {
+                    "code": "XLSX_CENTRO_REQUIRED_CELL_INVALID_LENGTH",
+                    "severity": "blocker",
+                    "field": field,
+                    "sheet": sheet_name,
+                    "cell": cell,
+                    "row": row_number,
+                    "message": (
+                        f"{message_prefix} debe tener entre {min_length} y {max_length} caracteres. "
+                        f"Valor recibido: {raw_value}."
+                    ),
+                }
+            )
+
+
+def _is_allowed_centralization_value(value: Any) -> bool:
+    normalized = normalize_haystack(value)
+    if not normalized:
+        return False
+    normalized = unicodedata.normalize("NFKD", normalized).encode("ascii", "ignore").decode("ascii")
+    return normalized in {"centralizada", "descentralizada"}
+
+
 def _same_date_value(left: Any, right: Any) -> bool:
     left_date = _parse_date_value(left)
     right_date = _parse_date_value(right)
@@ -535,6 +620,7 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
     profile = dict((xlsx_profile or {}).get("profile") or {})
     worker_sheet_counts = dict((xlsx_profile or {}).get("worker_sheet_counts") or {})
     sede_sheet_values = dict((xlsx_profile or {}).get("sede_sheet_values") or {})
+    sede_center_rows = dict((xlsx_profile or {}).get("sede_center_rows") or {})
     has_independientes_723 = bool((xlsx_profile or {}).get("has_independientes_723"))
 
     blockers: List[Dict[str, Any]] = []
@@ -879,6 +965,180 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                     ),
                 }
             )
+
+    validated_sede_codes = {
+        normalize_text(_sheet_cell_info(sede_sheet_values.get(sheet_name) or {}, "codigo_sede").get("value"))
+        for sheet_name in sede_sheet_names
+        if normalize_text(_sheet_cell_info(sede_sheet_values.get(sheet_name) or {}, "codigo_sede").get("value"))
+    }
+    expected_activity = form_raw("b_codigo_actividad_economica_principal") if "traslado" in tipo_tramite else form_raw("a_codigo_actividad_economica_principal")
+    expected_centros_value = form_raw("b_numero_centros_trabajo") if "traslado" in tipo_tramite else form_raw("a_numero_centros_trabajo")
+    expected_workers_value = form_raw("b_numero_total_trabajadores_estudiantes") if "traslado" in tipo_tramite else form_raw("a_numero_inicial_trabajadores_estudiantes")
+    expected_amount_value = form_raw("b_monto_total_cotizacion") if "traslado" in tipo_tramite else form_raw("a_valor_total_nomina")
+    center_required_fields = [
+        ("codigo_centro_trabajo", True, False, None, None),
+        ("nombre_centro_trabajo", False, False, None, None),
+        ("codigo_actividad_economica", True, False, None, None),
+        ("descripcion_actividad_economica", False, False, None, None),
+        ("clase_riesgo", True, False, None, None),
+        ("municipio_sede", False, False, None, None),
+        ("departamento_sede", False, False, None, None),
+        ("zona_sede", False, False, None, None),
+        ("direccion_sede", False, False, None, None),
+        ("telefono_sede", True, False, 6, 12),
+        ("correo_sede", False, True, None, None),
+        ("responsable_primer_apellido", False, False, None, None),
+        ("responsable_primer_nombre", False, False, None, None),
+        ("responsable_tipo_documento", False, False, None, None),
+        ("responsable_numero_identificacion", False, False, 6, 12),
+        ("responsable_correo", False, True, None, None),
+        ("centralizada_descentralizada", False, False, None, None),
+        ("cantidad_trabajadores_estudiantes", True, False, None, None),
+        ("monto_total_cotizacion", True, False, None, None),
+    ]
+    center_codes_seen: Dict[str, Dict[str, Any]] = {}
+    total_center_rows = 0
+    total_center_workers = 0
+    total_center_amount = 0
+    for sheet_name in sede_sheet_names:
+        for row_values in list(sede_center_rows.get(sheet_name) or []):
+            total_center_rows += 1
+            for field, require_numeric, require_email, min_length, max_length in center_required_fields:
+                _append_center_cell_validation(
+                    blockers,
+                    sheet_name,
+                    row_values,
+                    field,
+                    require_numeric=require_numeric,
+                    require_email=require_email,
+                    min_length=min_length,
+                    max_length=max_length,
+                )
+            center_code_info = _center_cell_info(row_values, "codigo_centro_trabajo")
+            center_code = normalize_text(center_code_info.get("value"))
+            if center_code:
+                if center_code in validated_sede_codes:
+                    blockers.append(
+                        {
+                            "code": "XLSX_CENTRO_CODE_EQUALS_SEDE_CODE",
+                            "severity": "blocker",
+                            "field": "codigo_centro_trabajo",
+                            "sheet": sheet_name,
+                            "cell": center_code_info.get("cell"),
+                            "row": center_code_info.get("row"),
+                            "message": (
+                                f"{sheet_name}, fila {center_code_info.get('row')}: el código del centro de trabajo "
+                                f"({center_code_info.get('cell')}) no puede ser igual al código de una sede. "
+                                f"Valor recibido: {center_code}."
+                            ),
+                        }
+                    )
+                previous = center_codes_seen.get(center_code)
+                if previous:
+                    blockers.append(
+                        {
+                            "code": "XLSX_CENTRO_CODE_DUPLICATE",
+                            "severity": "blocker",
+                            "field": "codigo_centro_trabajo",
+                            "sheet": sheet_name,
+                            "cell": center_code_info.get("cell"),
+                            "row": center_code_info.get("row"),
+                            "message": (
+                                f"{sheet_name}, fila {center_code_info.get('row')}: el código del centro de trabajo "
+                                f"({center_code}) está duplicado. Ya existe en {previous.get('sheet')} "
+                                f"{previous.get('cell')}."
+                            ),
+                        }
+                    )
+                else:
+                    center_codes_seen[center_code] = {
+                        "sheet": sheet_name,
+                        "cell": center_code_info.get("cell"),
+                        "row": center_code_info.get("row"),
+                    }
+            activity_info = _center_cell_info(row_values, "codigo_actividad_economica")
+            activity_value = activity_info.get("value")
+            if normalize_text(expected_activity) and normalize_text(activity_value):
+                expected_activity_digits = only_digits(expected_activity)
+                activity_digits = only_digits(activity_value)
+                if expected_activity_digits and activity_digits and expected_activity_digits != activity_digits:
+                    blockers.append(
+                        {
+                            "code": "XLSX_CENTRO_ACTIVITY_MISMATCH",
+                            "severity": "blocker",
+                            "field": "codigo_actividad_economica",
+                            "sheet": sheet_name,
+                            "cell": activity_info.get("cell"),
+                            "row": activity_info.get("row"),
+                            "message": (
+                                f"{sheet_name}, fila {activity_info.get('row')}: el código de actividad económica "
+                                f"({activity_info.get('cell')}) debe coincidir con el formulario. "
+                                f"Centro='{activity_value}' · Formulario='{expected_activity}'."
+                            ),
+                        }
+                    )
+            central_info = _center_cell_info(row_values, "centralizada_descentralizada")
+            central_value = central_info.get("value")
+            if normalize_text(central_value) and not _is_allowed_centralization_value(central_value):
+                blockers.append(
+                    {
+                        "code": "XLSX_CENTRO_CENTRALIZACION_INVALID",
+                        "severity": "blocker",
+                        "field": "centralizada_descentralizada",
+                        "sheet": sheet_name,
+                        "cell": central_info.get("cell"),
+                        "row": central_info.get("row"),
+                        "message": (
+                            f"{sheet_name}, fila {central_info.get('row')}: el campo 'Centralizada o descentralizada' "
+                            f"({central_info.get('cell')}) debe ser Centralizada o Descentralizada. "
+                            f"Valor recibido: {central_value}."
+                        ),
+                    }
+                )
+            total_center_workers += _parse_amount(_center_cell_info(row_values, "cantidad_trabajadores_estudiantes").get("value"))
+            total_center_amount += _parse_amount(_center_cell_info(row_values, "monto_total_cotizacion").get("value"))
+
+    if sede_sheet_names and total_center_rows <= 0 and not has_independientes_723:
+        blockers.append(
+            {
+                "code": "XLSX_CENTRO_ROWS_MISSING",
+                "severity": "blocker",
+                "message": "Las hojas de sedes validadas no traen centros de trabajo desde la fila 24.",
+            }
+        )
+    if normalize_text(expected_centros_value) and _parse_amount(expected_centros_value) != total_center_rows:
+        blockers.append(
+            {
+                "code": "XLSX_CENTRO_TOTAL_COUNT_MISMATCH",
+                "severity": "blocker",
+                "message": (
+                    "El número de centros de trabajo del formulario no coincide con las filas de centros "
+                    f"detectadas desde la fila 24. Formulario='{expected_centros_value}' · Centros detectados='{total_center_rows}'."
+                ),
+            }
+        )
+    if normalize_text(expected_workers_value) and _parse_amount(expected_workers_value) != total_center_workers:
+        blockers.append(
+            {
+                "code": "XLSX_CENTRO_TOTAL_WORKERS_MISMATCH",
+                "severity": "blocker",
+                "message": (
+                    "El número de trabajadores/estudiantes del formulario no coincide con la suma de AJ "
+                    f"en centros de trabajo. Formulario='{expected_workers_value}' · Suma AJ='{total_center_workers}'."
+                ),
+            }
+        )
+    if normalize_text(expected_amount_value) and _parse_amount(expected_amount_value) != total_center_amount:
+        blockers.append(
+            {
+                "code": "XLSX_CENTRO_TOTAL_AMOUNT_MISMATCH",
+                "severity": "blocker",
+                "message": (
+                    "El valor total de nómina/cotización del formulario no coincide con la suma de AL "
+                    f"en centros de trabajo. Formulario='{expected_amount_value}' · Suma AL='{total_center_amount}'."
+                ),
+            }
+        )
 
     total_worker_rows = sum(int(count or 0) for count in worker_sheet_counts.values())
     if not worker_sheet_counts and not has_independientes_723:

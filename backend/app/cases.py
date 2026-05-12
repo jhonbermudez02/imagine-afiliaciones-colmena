@@ -4281,6 +4281,49 @@ def _extract_sede_sheet_values_from_sheet(sheet: Any) -> Dict[str, Dict[str, Any
     return out
 
 
+def _extract_sede_center_rows_from_sheet(sheet: Any) -> List[Dict[str, Dict[str, Any]]]:
+    if sheet is None:
+        return []
+
+    center_cells = {
+        "codigo_centro_trabajo": ("E", 5, "Código del centro de trabajo"),
+        "nombre_centro_trabajo": ("F", 6, "Nombre del centro de trabajo"),
+        "codigo_actividad_economica": ("I", 9, "Código de actividad económica"),
+        "descripcion_actividad_economica": ("K", 11, "Descripción de actividad económica"),
+        "clase_riesgo": ("M", 13, "Clase de riesgo"),
+        "municipio_sede": ("N", 14, "Municipio sede"),
+        "departamento_sede": ("P", 16, "Departamento sede"),
+        "zona_sede": ("R", 18, "Zona"),
+        "direccion_sede": ("S", 19, "Dirección sede"),
+        "telefono_sede": ("U", 21, "Teléfono sede"),
+        "correo_sede": ("V", 22, "Correo electrónico sede"),
+        "responsable_primer_apellido": ("Y", 25, "Primer apellido responsable sede"),
+        "responsable_primer_nombre": ("AA", 27, "Primer nombre responsable sede"),
+        "responsable_tipo_documento": ("AC", 29, "Tipo de documento responsable sede"),
+        "responsable_numero_identificacion": ("AD", 30, "Número de identificación responsable sede"),
+        "responsable_correo": ("AE", 31, "Correo electrónico responsable sede"),
+        "centralizada_descentralizada": ("AH", 34, "Centralizada o descentralizada"),
+        "cantidad_trabajadores_estudiantes": ("AJ", 36, "Cantidad de trabajadores y estudiantes sede"),
+        "monto_total_cotizacion": ("AL", 38, "Monto total de cotización sede"),
+    }
+    stop_fields = [field for field in center_cells if field != "descripcion_actividad_economica"]
+    rows: List[Dict[str, Dict[str, Any]]] = []
+    max_row = max(int(getattr(sheet, "max_row", 0) or 0), 24)
+    for row_number in range(24, max_row + 1):
+        row_values: Dict[str, Dict[str, Any]] = {}
+        for field, (col_letter, col_index, label) in center_cells.items():
+            row_values[field] = {
+                "cell": f"{col_letter}{row_number}",
+                "label": label,
+                "row": row_number,
+                "value": _sheet_value(sheet, row_number, col_index),
+            }
+        if all(not normalize_text(row_values[field].get("value")) for field in stop_fields):
+            break
+        rows.append(row_values)
+    return rows
+
+
 def _read_xlsx(path: Path) -> Dict[str, Any]:
     workbook = load_workbook(path, data_only=True)
     sheets: List[Dict[str, Any]] = []
@@ -4289,6 +4332,7 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
     worker_sheet_counts: Dict[str, int] = {}
     worker_sheet_salary_totals: Dict[str, int] = {}
     sede_sheet_values: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    sede_center_rows: Dict[str, List[Dict[str, Dict[str, Any]]]] = {}
     form_fields: Dict[str, str] = {}
     form_cell_values: Dict[str, Dict[str, Any]] = {}
     activity_catalog_codes: List[str] = []
@@ -4310,6 +4354,7 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
             form_cell_values = _extract_form_cell_values_from_sheet(sheet)
         if "sede" in norm_sheet_name and "trabajador" in norm_sheet_name:
             sede_sheet_values[normalized_sheet_name] = _extract_sede_sheet_values_from_sheet(sheet)
+            sede_center_rows[normalized_sheet_name] = _extract_sede_center_rows_from_sheet(sheet)
         for row in [[normalize_text(cell) for cell in raw_row[:12]] for raw_row in rows[:80]]:
             if len(row) >= 2 and row[0] and row[1]:
                 key = normalize_haystack(normalize_text(row[0])).replace(" ", "_")
@@ -4379,6 +4424,7 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
         "worker_sheet_counts": worker_sheet_counts,
         "worker_sheet_salary_totals": worker_sheet_salary_totals,
         "sede_sheet_values": sede_sheet_values,
+        "sede_center_rows": sede_center_rows,
         "activity_catalog_codes": activity_catalog_codes,
         "has_independientes_723": has_independientes_723,
         "source_filename": path.name,
