@@ -4196,6 +4196,9 @@ def _extract_form_cell_values_from_sheet(sheet: Any) -> Dict[str, Dict[str, Any]
         return {}
 
     required_form_cells = {
+        "fecha_radicacion": ("G7", 7, 7, "Fecha de radicación"),
+        "fecha_inicio_cobertura": ("L7", 7, 12, "Fecha inicio de cobertura"),
+        "numero_radicacion": ("Y7", 7, 25, "Número radicación"),
         "lugar_afiliacion": ("AP6", 6, 42, "Lugar de afiliación"),
         "codigo_lugar": ("AK7", 7, 37, "Código lugar"),
         "nombre_lugar": ("AR7", 7, 44, "Nombre lugar"),
@@ -4220,6 +4223,7 @@ def _extract_form_cell_values_from_sheet(sheet: Any) -> Dict[str, Dict[str, Any]
         "responsable_sede_tipo_documento": ("H24", 24, 8, "Responsable sede / Tipo de documento"),
         "responsable_sede_numero_documento": ("P24", 24, 16, "Responsable sede / Número de documento"),
         "responsable_sede_correo": ("AA24", 24, 27, "Responsable sede / Correo electrónico"),
+        "a_codigo_actividad_economica_principal": ("G26", 26, 7, "Actividad económica"),
         "a_clase_riesgo": ("M26", 26, 13, "Clase de riesgo"),
         "a_numero_sedes": ("Q26", 26, 17, "Número de sedes"),
         "a_numero_centros_trabajo": ("V26", 26, 22, "Número de centros de trabajo"),
@@ -4246,6 +4250,37 @@ def _extract_form_cell_values_from_sheet(sheet: Any) -> Dict[str, Dict[str, Any]
     return out
 
 
+def _extract_sede_sheet_values_from_sheet(sheet: Any) -> Dict[str, Dict[str, Any]]:
+    if sheet is None:
+        return {}
+
+    required_sede_cells = {
+        "numero_radicacion": ("G7", 7, 7, "Número de radicación"),
+        "fecha_radicacion": ("I7", 7, 9, "Fecha de radicación"),
+        "fecha_inicio_cobertura": ("K7", 7, 11, "Fecha inicio de cobertura"),
+        "codigo_sede": ("F12", 12, 6, "Código de la sede"),
+        "nombre_sede": ("H12", 12, 8, "Nombre de la sede"),
+        "municipio": ("F13", 13, 6, "Municipio"),
+        "direccion_sede": ("F14", 14, 6, "Dirección de la sede"),
+        "telefono_sede": ("F15", 15, 6, "Teléfono fijo/celular"),
+        "departamento": ("I13", 13, 9, "Departamento"),
+        "zona_sede": ("I14", 14, 9, "Zona sede"),
+        "correo_sede": ("F16", 16, 6, "Correo electrónico de la sede"),
+        "responsable_primer_apellido": ("M12", 12, 13, "Primer apellido responsable"),
+        "responsable_primer_nombre": ("M13", 13, 13, "Primer nombre responsable"),
+        "responsable_tipo_documento": ("M14", 14, 13, "Tipo de documento responsable"),
+        "responsable_numero_documento": ("Q14", 14, 17, "Número de documento responsable"),
+    }
+    out: Dict[str, Dict[str, Any]] = {}
+    for field, (cell, row, col, label) in required_sede_cells.items():
+        out[field] = {
+            "cell": cell,
+            "label": label,
+            "value": _sheet_value(sheet, row, col),
+        }
+    return out
+
+
 def _read_xlsx(path: Path) -> Dict[str, Any]:
     workbook = load_workbook(path, data_only=True)
     sheets: List[Dict[str, Any]] = []
@@ -4253,6 +4288,7 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
     records: List[Dict[str, str]] = []
     worker_sheet_counts: Dict[str, int] = {}
     worker_sheet_salary_totals: Dict[str, int] = {}
+    sede_sheet_values: Dict[str, Dict[str, Dict[str, Any]]] = {}
     form_fields: Dict[str, str] = {}
     form_cell_values: Dict[str, Dict[str, Any]] = {}
     activity_catalog_codes: List[str] = []
@@ -4272,6 +4308,8 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
         if "formulario de afili" in norm_sheet_name:
             form_fields = _extract_form_fields_from_sheet(sheet)
             form_cell_values = _extract_form_cell_values_from_sheet(sheet)
+        if "sede" in norm_sheet_name and "trabajador" in norm_sheet_name:
+            sede_sheet_values[normalized_sheet_name] = _extract_sede_sheet_values_from_sheet(sheet)
         for row in [[normalize_text(cell) for cell in raw_row[:12]] for raw_row in rows[:80]]:
             if len(row) >= 2 and row[0] and row[1]:
                 key = normalize_haystack(normalize_text(row[0])).replace(" ", "_")
@@ -4340,6 +4378,7 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
         "records": records,
         "worker_sheet_counts": worker_sheet_counts,
         "worker_sheet_salary_totals": worker_sheet_salary_totals,
+        "sede_sheet_values": sede_sheet_values,
         "activity_catalog_codes": activity_catalog_codes,
         "has_independientes_723": has_independientes_723,
         "source_filename": path.name,

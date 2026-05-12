@@ -91,6 +91,89 @@ def _append_required_cell_validation(
         )
 
 
+def _sheet_cell_info(sheet_values: Dict[str, Any], field: str) -> Dict[str, Any]:
+    return dict((sheet_values or {}).get(field) or {})
+
+
+def _append_sede_cell_validation(
+    blockers: List[Dict[str, Any]],
+    sheet_name: str,
+    sheet_values: Dict[str, Any],
+    field: str,
+    *,
+    require_numeric: bool = False,
+    require_email: bool = False,
+    require_date: bool = False,
+) -> None:
+    cell_info = _sheet_cell_info(sheet_values, field)
+    raw_value = cell_info.get("value")
+    label = cell_info.get("label") or field
+    cell = cell_info.get("cell") or "celda requerida"
+    message_prefix = f"{sheet_name}: el campo '{label}' ({cell})"
+    if _is_blank_value(raw_value):
+        blockers.append(
+            {
+                "code": "XLSX_SEDE_REQUIRED_CELL_EMPTY",
+                "severity": "blocker",
+                "field": field,
+                "sheet": sheet_name,
+                "cell": cell,
+                "message": f"{message_prefix} no puede estar vacío.",
+            }
+        )
+    elif require_numeric and not _is_strict_numeric_value(raw_value):
+        blockers.append(
+            {
+                "code": "XLSX_SEDE_REQUIRED_CELL_NOT_NUMERIC",
+                "severity": "blocker",
+                "field": field,
+                "sheet": sheet_name,
+                "cell": cell,
+                "message": f"{message_prefix} debe ser numérico. Valor recibido: {raw_value}.",
+            }
+        )
+    elif require_email and not _is_email_value(raw_value):
+        blockers.append(
+            {
+                "code": "XLSX_SEDE_REQUIRED_CELL_INVALID_EMAIL",
+                "severity": "blocker",
+                "field": field,
+                "sheet": sheet_name,
+                "cell": cell,
+                "message": f"{message_prefix} debe tener formato de correo electrónico válido. Valor recibido: {raw_value}.",
+            }
+        )
+    elif require_date and not _parse_date_value(raw_value):
+        blockers.append(
+            {
+                "code": "XLSX_SEDE_REQUIRED_CELL_INVALID_DATE",
+                "severity": "blocker",
+                "field": field,
+                "sheet": sheet_name,
+                "cell": cell,
+                "message": f"{message_prefix} debe tener una fecha válida. Valor recibido: {raw_value}.",
+            }
+        )
+
+
+def _same_date_value(left: Any, right: Any) -> bool:
+    left_date = _parse_date_value(left)
+    right_date = _parse_date_value(right)
+    if not left_date or not right_date:
+        return False
+    return left_date.date() == right_date.date()
+
+
+def _sede_sheet_number(sheet_name: str) -> int | None:
+    match = re.search(r"sede\s+0*(\d+)", normalize_haystack(sheet_name))
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
 def _worker_document_raw(record: Dict[str, Any]) -> str:
     return normalize_text(
         record.get("_raw_numero_de_identificacion")
@@ -423,6 +506,7 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
     form_cell_values = dict((xlsx_profile or {}).get("form_cell_values") or {})
     profile = dict((xlsx_profile or {}).get("profile") or {})
     worker_sheet_counts = dict((xlsx_profile or {}).get("worker_sheet_counts") or {})
+    sede_sheet_values = dict((xlsx_profile or {}).get("sede_sheet_values") or {})
     has_independientes_723 = bool((xlsx_profile or {}).get("has_independientes_723"))
 
     blockers: List[Dict[str, Any]] = []
@@ -632,6 +716,130 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
             require_numeric=False,
             code_prefix="XLSX_AUTHORIZATION_REQUIRED_CELL",
         )
+
+    def form_raw(field: str) -> Any:
+        return (form_cell_values.get(field) or {}).get("value") or form_fields.get(field, "")
+
+    expected_sedes_value = form_raw("b_numero_sedes") if "traslado" in tipo_tramite else form_raw("a_numero_sedes")
+    expected_sedes = _parse_amount(expected_sedes_value)
+    sede_sheet_names = sorted(
+        sede_sheet_values.keys(),
+        key=lambda name: (_sede_sheet_number(name) is None, _sede_sheet_number(name) or 0, name),
+    )
+    if expected_sedes > 0:
+        if len(sede_sheet_names) != expected_sedes:
+            blockers.append(
+                {
+                    "code": "XLSX_SEDE_SHEET_COUNT_MISMATCH",
+                    "severity": "blocker",
+                    "message": (
+                        f"El formulario declara {expected_sedes} sede(s), pero el XLSX trae "
+                        f"{len(sede_sheet_names)} hoja(s) de sede: {', '.join(sede_sheet_names) or 'ninguna'}."
+                    ),
+                }
+            )
+        actual_numbers = {number for number in (_sede_sheet_number(name) for name in sede_sheet_names) if number is not None}
+        expected_numbers = set(range(1, expected_sedes + 1))
+        missing_numbers = sorted(expected_numbers - actual_numbers)
+        extra_numbers = sorted(number for number in actual_numbers if number > expected_sedes)
+        if missing_numbers:
+            blockers.append(
+                {
+                    "code": "XLSX_SEDE_SHEET_SEQUENCE_MISSING",
+                    "severity": "blocker",
+                    "message": "Faltan hojas de sede esperadas por el formulario: "
+                    + ", ".join(f"Sede {number:02d} - Trabajadores" for number in missing_numbers)
+                    + ".",
+                }
+            )
+        if extra_numbers:
+            blockers.append(
+                {
+                    "code": "XLSX_SEDE_SHEET_SEQUENCE_EXTRA",
+                    "severity": "blocker",
+                    "message": "El XLSX trae hojas de sede por encima de la cantidad declarada: "
+                    + ", ".join(f"Sede {number:02d} - Trabajadores" for number in extra_numbers)
+                    + ".",
+                }
+            )
+
+    sede_required_fields = [
+        ("numero_radicacion", False, False, False),
+        ("fecha_radicacion", False, False, True),
+        ("fecha_inicio_cobertura", False, False, True),
+        ("codigo_sede", True, False, False),
+        ("nombre_sede", False, False, False),
+        ("municipio", False, False, False),
+        ("direccion_sede", False, False, False),
+        ("telefono_sede", True, False, False),
+        ("departamento", False, False, False),
+        ("zona_sede", False, False, False),
+        ("correo_sede", False, True, False),
+        ("responsable_primer_apellido", False, False, False),
+        ("responsable_primer_nombre", False, False, False),
+        ("responsable_tipo_documento", False, False, False),
+        ("responsable_numero_documento", False, False, False),
+    ]
+    expected_numero_radicacion = form_raw("numero_radicacion")
+    expected_fecha_radicacion = form_raw("fecha_radicacion")
+    expected_fecha_inicio = form_raw("fecha_inicio_cobertura")
+    for sheet_name in sede_sheet_names:
+        sheet_values = sede_sheet_values.get(sheet_name) or {}
+        for field, require_numeric, require_email, require_date in sede_required_fields:
+            _append_sede_cell_validation(
+                blockers,
+                sheet_name,
+                sheet_values,
+                field,
+                require_numeric=require_numeric,
+                require_email=require_email,
+                require_date=require_date,
+            )
+        radicacion_value = _sheet_cell_info(sheet_values, "numero_radicacion").get("value")
+        if normalize_text(expected_numero_radicacion) and normalize_text(radicacion_value) and normalize_text(radicacion_value) != normalize_text(expected_numero_radicacion):
+            blockers.append(
+                {
+                    "code": "XLSX_SEDE_RADICACION_MISMATCH",
+                    "severity": "blocker",
+                    "sheet": sheet_name,
+                    "field": "numero_radicacion",
+                    "cell": "G7",
+                    "message": (
+                        f"{sheet_name}: el número de radicación (G7) debe coincidir con el formulario "
+                        f"(Y7). Sede='{radicacion_value}' · Formulario='{expected_numero_radicacion}'."
+                    ),
+                }
+            )
+        sede_fecha_radicacion = _sheet_cell_info(sheet_values, "fecha_radicacion").get("value")
+        if normalize_text(expected_fecha_radicacion) and normalize_text(sede_fecha_radicacion) and not _same_date_value(sede_fecha_radicacion, expected_fecha_radicacion):
+            blockers.append(
+                {
+                    "code": "XLSX_SEDE_FECHA_RADICACION_MISMATCH",
+                    "severity": "blocker",
+                    "sheet": sheet_name,
+                    "field": "fecha_radicacion",
+                    "cell": "I7",
+                    "message": (
+                        f"{sheet_name}: la fecha de radicación (I7) debe coincidir con el formulario "
+                        f"(G7). Sede='{_format_date_value(sede_fecha_radicacion)}' · Formulario='{_format_date_value(expected_fecha_radicacion)}'."
+                    ),
+                }
+            )
+        sede_fecha_inicio = _sheet_cell_info(sheet_values, "fecha_inicio_cobertura").get("value")
+        if normalize_text(expected_fecha_inicio) and normalize_text(sede_fecha_inicio) and not _same_date_value(sede_fecha_inicio, expected_fecha_inicio):
+            blockers.append(
+                {
+                    "code": "XLSX_SEDE_FECHA_INICIO_MISMATCH",
+                    "severity": "blocker",
+                    "sheet": sheet_name,
+                    "field": "fecha_inicio_cobertura",
+                    "cell": "K7",
+                    "message": (
+                        f"{sheet_name}: la fecha inicio de cobertura (K7) debe coincidir con el formulario "
+                        f"(L7). Sede='{_format_date_value(sede_fecha_inicio)}' · Formulario='{_format_date_value(expected_fecha_inicio)}'."
+                    ),
+                }
+            )
 
     total_worker_rows = sum(int(count or 0) for count in worker_sheet_counts.values())
     if not worker_sheet_counts and not has_independientes_723:
