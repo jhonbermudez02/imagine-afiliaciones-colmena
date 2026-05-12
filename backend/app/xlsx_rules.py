@@ -269,6 +269,112 @@ def _is_allowed_centralization_value(value: Any) -> bool:
     return normalized in {"centralizada", "descentralizada"}
 
 
+def _worker_cell_info(row_values: Dict[str, Any], field: str) -> Dict[str, Any]:
+    return dict((row_values or {}).get(field) or {})
+
+
+def _append_worker_cell_validation(
+    blockers: List[Dict[str, Any]],
+    sheet_name: str,
+    row_values: Dict[str, Any],
+    field: str,
+    *,
+    require_numeric: bool = False,
+    require_email: bool = False,
+    min_length: int | None = None,
+    max_length: int | None = None,
+) -> None:
+    cell_info = _worker_cell_info(row_values, field)
+    raw_value = cell_info.get("value")
+    label = cell_info.get("label") or field
+    cell = cell_info.get("cell") or "celda requerida"
+    row_number = cell_info.get("row")
+    message_prefix = f"{sheet_name}, fila {row_number}: el campo '{label}' ({cell})"
+    if _is_blank_value(raw_value):
+        blockers.append(
+            {
+                "code": "XLSX_TRABAJADOR_REQUIRED_CELL_EMPTY",
+                "severity": "blocker",
+                "field": field,
+                "sheet": sheet_name,
+                "cell": cell,
+                "row": row_number,
+                "message": f"{message_prefix} no puede estar vacío.",
+            }
+        )
+        return
+    if require_numeric and not _is_strict_numeric_value(raw_value):
+        blockers.append(
+            {
+                "code": "XLSX_TRABAJADOR_REQUIRED_CELL_NOT_NUMERIC",
+                "severity": "blocker",
+                "field": field,
+                "sheet": sheet_name,
+                "cell": cell,
+                "row": row_number,
+                "message": f"{message_prefix} debe ser numérico. Valor recibido: {raw_value}.",
+            }
+        )
+    if require_email and not _is_email_value(raw_value):
+        blockers.append(
+            {
+                "code": "XLSX_TRABAJADOR_REQUIRED_CELL_INVALID_EMAIL",
+                "severity": "blocker",
+                "field": field,
+                "sheet": sheet_name,
+                "cell": cell,
+                "row": row_number,
+                "message": f"{message_prefix} debe tener formato de correo electrónico válido. Valor recibido: {raw_value}.",
+            }
+        )
+    if min_length is not None and max_length is not None:
+        text = normalize_text(raw_value)
+        if not (min_length <= len(text) <= max_length):
+            blockers.append(
+                {
+                    "code": "XLSX_TRABAJADOR_REQUIRED_CELL_INVALID_LENGTH",
+                    "severity": "blocker",
+                    "field": field,
+                    "sheet": sheet_name,
+                    "cell": cell,
+                    "row": row_number,
+                    "message": (
+                        f"{message_prefix} debe tener entre {min_length} y {max_length} caracteres. "
+                        f"Valor recibido: {raw_value}."
+                    ),
+                }
+            )
+
+
+def _is_allowed_worker_sex_value(value: Any) -> bool:
+    normalized = normalize_haystack(value)
+    if not normalized:
+        return False
+    normalized = unicodedata.normalize("NFKD", normalized).encode("ascii", "ignore").decode("ascii")
+    return normalized in {"masculino", "maculino", "femenino", "otro", "no binario", "transexual", "m", "f", "o", "nb", "t"}
+
+
+def _is_allowed_salary_type_value(value: Any) -> bool:
+    normalized = normalize_haystack(value)
+    if not normalized:
+        return False
+    normalized = unicodedata.normalize("NFKD", normalized).encode("ascii", "ignore").decode("ascii")
+    return normalized in {"1", "1-fijo", "fijo", "2", "2-variable", "variable"}
+
+
+def _valid_date_parts(day_value: Any, month_value: Any, year_value: Any) -> bool:
+    if not (_is_strict_numeric_value(day_value) and _is_strict_numeric_value(month_value) and _is_strict_numeric_value(year_value)):
+        return False
+    try:
+        day = int(Decimal(str(day_value)))
+        month = int(Decimal(str(month_value)))
+        year = int(Decimal(str(year_value)))
+        datetime(year, month, day)
+        return True
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+
+
 def _same_date_value(left: Any, right: Any) -> bool:
     left_date = _parse_date_value(left)
     right_date = _parse_date_value(right)
@@ -621,6 +727,7 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
     worker_sheet_counts = dict((xlsx_profile or {}).get("worker_sheet_counts") or {})
     sede_sheet_values = dict((xlsx_profile or {}).get("sede_sheet_values") or {})
     sede_center_rows = dict((xlsx_profile or {}).get("sede_center_rows") or {})
+    sede_worker_rows = dict((xlsx_profile or {}).get("sede_worker_rows") or {})
     has_independientes_723 = bool((xlsx_profile or {}).get("has_independientes_723"))
 
     blockers: List[Dict[str, Any]] = []
@@ -1136,6 +1243,216 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                 "message": (
                     "El valor total de nómina/cotización del formulario no coincide con la suma de AL "
                     f"en centros de trabajo. Formulario='{expected_amount_value}' · Suma AL='{total_center_amount}'."
+                ),
+            }
+        )
+
+    worker_required_fields = [
+        ("codigo_centro_trabajo", True, False, None, None),
+        ("tipo_documento", False, False, None, None),
+        ("numero_identificacion", False, False, 6, 12),
+        ("primer_apellido", False, False, None, None),
+        ("primer_nombre", False, False, None, None),
+        ("fecha_nacimiento_dia", True, False, None, None),
+        ("fecha_nacimiento_mes", True, False, None, None),
+        ("fecha_nacimiento_anio", True, False, None, None),
+        ("sexo_identificacion", False, False, None, None),
+        ("cargo", False, False, None, None),
+        ("salario", True, False, None, None),
+        ("tipo_salario", False, False, None, None),
+        ("eps", False, False, None, None),
+        ("pension", False, False, None, None),
+        ("direccion", False, False, None, None),
+        ("celular", True, False, 6, 10),
+        ("correo", False, True, None, None),
+        ("municipio_distrito", False, False, None, None),
+        ("zona", False, False, None, None),
+        ("departamento", False, False, None, None),
+        ("jornada", False, False, None, None),
+        ("modalidad", False, False, None, None),
+        ("codigo_tipo_trabajador", True, False, None, None),
+        ("tipo_trabajador", False, False, None, None),
+    ]
+    _, smmlv_value = _resolve_smmlv_value(form_fields)
+    total_structured_worker_rows = 0
+    total_worker_salary = 0
+    for sheet_name in sede_sheet_names:
+        sheet_center_rows = list(sede_center_rows.get(sheet_name) or [])
+        sheet_worker_rows = list(sede_worker_rows.get(sheet_name) or [])
+        sheet_center_codes = {
+            normalize_text(_center_cell_info(row_values, "codigo_centro_trabajo").get("value"))
+            for row_values in sheet_center_rows
+            if normalize_text(_center_cell_info(row_values, "codigo_centro_trabajo").get("value"))
+        }
+        expected_sheet_workers = sum(
+            _parse_amount(_center_cell_info(row_values, "cantidad_trabajadores_estudiantes").get("value"))
+            for row_values in sheet_center_rows
+        )
+        expected_sheet_salary = sum(
+            _parse_amount(_center_cell_info(row_values, "monto_total_cotizacion").get("value"))
+            for row_values in sheet_center_rows
+        )
+        sheet_salary = 0
+        total_structured_worker_rows += len(sheet_worker_rows)
+        for row_values in sheet_worker_rows:
+            for field, require_numeric, require_email, min_length, max_length in worker_required_fields:
+                _append_worker_cell_validation(
+                    blockers,
+                    sheet_name,
+                    row_values,
+                    field,
+                    require_numeric=require_numeric,
+                    require_email=require_email,
+                    min_length=min_length,
+                    max_length=max_length,
+                )
+            worker_center_info = _worker_cell_info(row_values, "codigo_centro_trabajo")
+            worker_center_code = normalize_text(worker_center_info.get("value"))
+            if worker_center_code and worker_center_code not in sheet_center_codes:
+                blockers.append(
+                    {
+                        "code": "XLSX_TRABAJADOR_CENTER_CODE_NOT_FOUND",
+                        "severity": "blocker",
+                        "field": "codigo_centro_trabajo",
+                        "sheet": sheet_name,
+                        "cell": worker_center_info.get("cell"),
+                        "row": worker_center_info.get("row"),
+                        "message": (
+                            f"{sheet_name}, fila {worker_center_info.get('row')}: el código del centro de trabajo "
+                            f"({worker_center_info.get('cell')}) debe coincidir con un centro registrado en la misma hoja. "
+                            f"Valor recibido: {worker_center_code or 'vacío'}."
+                        ),
+                    }
+                )
+            day_value = _worker_cell_info(row_values, "fecha_nacimiento_dia").get("value")
+            month_value = _worker_cell_info(row_values, "fecha_nacimiento_mes").get("value")
+            year_value = _worker_cell_info(row_values, "fecha_nacimiento_anio").get("value")
+            if normalize_text(day_value) and normalize_text(month_value) and normalize_text(year_value) and not _valid_date_parts(day_value, month_value, year_value):
+                blockers.append(
+                    {
+                        "code": "XLSX_TRABAJADOR_BIRTHDATE_INVALID",
+                        "severity": "blocker",
+                        "field": "fecha_nacimiento",
+                        "sheet": sheet_name,
+                        "cell": _worker_cell_info(row_values, "fecha_nacimiento_dia").get("cell"),
+                        "row": _worker_cell_info(row_values, "fecha_nacimiento_dia").get("row"),
+                        "message": (
+                            f"{sheet_name}, fila {_worker_cell_info(row_values, 'fecha_nacimiento_dia').get('row')}: "
+                            f"la fecha de nacimiento debe tener día, mes y año válidos. "
+                            f"Valor recibido: {day_value}/{month_value}/{year_value}."
+                        ),
+                    }
+                )
+            sex_info = _worker_cell_info(row_values, "sexo_identificacion")
+            sex_value = sex_info.get("value")
+            if normalize_text(sex_value) and not _is_allowed_worker_sex_value(sex_value):
+                blockers.append(
+                    {
+                        "code": "XLSX_TRABAJADOR_SEX_INVALID",
+                        "severity": "blocker",
+                        "field": "sexo_identificacion",
+                        "sheet": sheet_name,
+                        "cell": sex_info.get("cell"),
+                        "row": sex_info.get("row"),
+                        "message": (
+                            f"{sheet_name}, fila {sex_info.get('row')}: el sexo identificación ({sex_info.get('cell')}) "
+                            "debe ser Masculino, Femenino, Otro, No Binario o Transexual. "
+                            f"Valor recibido: {sex_value}."
+                        ),
+                    }
+                )
+            salary_info = _worker_cell_info(row_values, "salario")
+            salary = _parse_amount(salary_info.get("value"))
+            sheet_salary += salary
+            total_worker_salary += salary
+            if normalize_text(salary_info.get("value")) and salary < smmlv_value:
+                blockers.append(
+                    {
+                        "code": "XLSX_TRABAJADOR_SALARY_BELOW_SMMLV",
+                        "severity": "blocker",
+                        "field": "salario",
+                        "sheet": sheet_name,
+                        "cell": salary_info.get("cell"),
+                        "row": salary_info.get("row"),
+                        "message": (
+                            f"{sheet_name}, fila {salary_info.get('row')}: el salario ({salary_info.get('cell')}) "
+                            f"debe ser mayor o igual a {smmlv_value}. Valor recibido: {salary_info.get('value')}."
+                        ),
+                    }
+                )
+            salary_type_info = _worker_cell_info(row_values, "tipo_salario")
+            salary_type_value = salary_type_info.get("value")
+            if normalize_text(salary_type_value) and not _is_allowed_salary_type_value(salary_type_value):
+                blockers.append(
+                    {
+                        "code": "XLSX_TRABAJADOR_SALARY_TYPE_INVALID",
+                        "severity": "blocker",
+                        "field": "tipo_salario",
+                        "sheet": sheet_name,
+                        "cell": salary_type_info.get("cell"),
+                        "row": salary_type_info.get("row"),
+                        "message": (
+                            f"{sheet_name}, fila {salary_type_info.get('row')}: el tipo de salario "
+                            f"({salary_type_info.get('cell')}) debe ser 1-Fijo o 2-Variable. "
+                            f"Valor recibido: {salary_type_value}."
+                        ),
+                    }
+                )
+        if sheet_center_rows and len(sheet_worker_rows) != expected_sheet_workers:
+            blockers.append(
+                {
+                    "code": "XLSX_TRABAJADOR_SHEET_COUNT_MISMATCH",
+                    "severity": "blocker",
+                    "sheet": sheet_name,
+                    "message": (
+                        f"{sheet_name}: la cantidad de filas de trabajadores no coincide con la suma de AJ "
+                        f"de los centros de trabajo. Trabajadores detectados='{len(sheet_worker_rows)}' · Suma AJ='{expected_sheet_workers}'."
+                    ),
+                }
+            )
+        if sheet_center_rows and sheet_salary != expected_sheet_salary:
+            blockers.append(
+                {
+                    "code": "XLSX_TRABAJADOR_SHEET_SALARY_MISMATCH",
+                    "severity": "blocker",
+                    "sheet": sheet_name,
+                    "message": (
+                        f"{sheet_name}: la suma de salarios de trabajadores no coincide con la suma de AL "
+                        f"de los centros de trabajo. Salarios='{sheet_salary}' · Suma AL='{expected_sheet_salary}'."
+                    ),
+                }
+            )
+
+    if normalize_text(expected_workers_value) and _parse_amount(expected_workers_value) != total_structured_worker_rows:
+        blockers.append(
+            {
+                "code": "XLSX_TRABAJADOR_TOTAL_COUNT_MISMATCH",
+                "severity": "blocker",
+                "message": (
+                    "El total de trabajadores del formulario no coincide con las filas de trabajadores "
+                    f"leídas en sedes. Formulario='{expected_workers_value}' · Trabajadores detectados='{total_structured_worker_rows}'."
+                ),
+            }
+        )
+    if total_worker_salary and total_worker_salary != total_center_amount:
+        blockers.append(
+            {
+                "code": "XLSX_TRABAJADOR_TOTAL_SALARY_CENTER_MISMATCH",
+                "severity": "blocker",
+                "message": (
+                    "La suma total de salarios de trabajadores no coincide con la suma total de AL "
+                    f"en centros de trabajo. Salarios='{total_worker_salary}' · Suma AL='{total_center_amount}'."
+                ),
+            }
+        )
+    if normalize_text(expected_amount_value) and total_worker_salary and _parse_amount(expected_amount_value) != total_worker_salary:
+        blockers.append(
+            {
+                "code": "XLSX_TRABAJADOR_TOTAL_SALARY_FORM_MISMATCH",
+                "severity": "blocker",
+                "message": (
+                    "La suma total de salarios de trabajadores no coincide con el valor total de nómina/cotización "
+                    f"del formulario. Formulario='{expected_amount_value}' · Salarios='{total_worker_salary}'."
                 ),
             }
         )

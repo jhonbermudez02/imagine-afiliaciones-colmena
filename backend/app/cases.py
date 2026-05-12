@@ -4324,6 +4324,54 @@ def _extract_sede_center_rows_from_sheet(sheet: Any) -> List[Dict[str, Dict[str,
     return rows
 
 
+def _extract_sede_worker_rows_from_sheet(sheet: Any, center_count: int) -> List[Dict[str, Dict[str, Any]]]:
+    if sheet is None:
+        return []
+
+    worker_cells = {
+        "codigo_centro_trabajo": ("E", 5, "Código del centro de trabajo"),
+        "tipo_documento": ("F", 6, "Tipo de documento trabajador"),
+        "numero_identificacion": ("G", 7, "Número de identificación trabajador"),
+        "primer_apellido": ("H", 8, "Primer apellido trabajador"),
+        "primer_nombre": ("L", 12, "Primer nombre trabajador"),
+        "fecha_nacimiento_dia": ("N", 14, "Fecha nacimiento trabajador / Día"),
+        "fecha_nacimiento_mes": ("O", 15, "Fecha nacimiento trabajador / Mes"),
+        "fecha_nacimiento_anio": ("P", 16, "Fecha nacimiento trabajador / Año"),
+        "sexo_identificacion": ("Q", 17, "Sexo identificación trabajador"),
+        "cargo": ("R", 18, "Cargo trabajador"),
+        "salario": ("S", 19, "Salario trabajador"),
+        "tipo_salario": ("T", 20, "Tipo de salario trabajador"),
+        "eps": ("U", 21, "EPS trabajador"),
+        "pension": ("V", 22, "Pensión trabajador"),
+        "direccion": ("W", 23, "Dirección trabajador"),
+        "celular": ("Y", 25, "Celular trabajador"),
+        "correo": ("Z", 26, "Correo electrónico trabajador"),
+        "municipio_distrito": ("AA", 27, "Municipio/Distrito trabajador"),
+        "zona": ("AC", 29, "Zona trabajador"),
+        "departamento": ("AD", 30, "Departamento trabajador"),
+        "jornada": ("AE", 31, "Jornada trabajador"),
+        "modalidad": ("AF", 32, "Modalidad trabajador"),
+        "codigo_tipo_trabajador": ("AG", 33, "Código del tipo de trabajador"),
+        "tipo_trabajador": ("AH", 34, "Tipo de trabajador"),
+    }
+    start_row = 39 + max(0, int(center_count or 0) - 5)
+    rows: List[Dict[str, Dict[str, Any]]] = []
+    max_row = max(int(getattr(sheet, "max_row", 0) or 0), start_row)
+    for row_number in range(start_row, max_row + 1):
+        row_values: Dict[str, Dict[str, Any]] = {}
+        for field, (col_letter, col_index, label) in worker_cells.items():
+            row_values[field] = {
+                "cell": f"{col_letter}{row_number}",
+                "label": label,
+                "row": row_number,
+                "value": _sheet_value(sheet, row_number, col_index),
+            }
+        if all(not normalize_text(cell_info.get("value")) for cell_info in row_values.values()):
+            break
+        rows.append(row_values)
+    return rows
+
+
 def _read_xlsx(path: Path) -> Dict[str, Any]:
     workbook = load_workbook(path, data_only=True)
     sheets: List[Dict[str, Any]] = []
@@ -4333,6 +4381,7 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
     worker_sheet_salary_totals: Dict[str, int] = {}
     sede_sheet_values: Dict[str, Dict[str, Dict[str, Any]]] = {}
     sede_center_rows: Dict[str, List[Dict[str, Dict[str, Any]]]] = {}
+    sede_worker_rows: Dict[str, List[Dict[str, Dict[str, Any]]]] = {}
     form_fields: Dict[str, str] = {}
     form_cell_values: Dict[str, Dict[str, Any]] = {}
     activity_catalog_codes: List[str] = []
@@ -4354,7 +4403,9 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
             form_cell_values = _extract_form_cell_values_from_sheet(sheet)
         if "sede" in norm_sheet_name and "trabajador" in norm_sheet_name:
             sede_sheet_values[normalized_sheet_name] = _extract_sede_sheet_values_from_sheet(sheet)
-            sede_center_rows[normalized_sheet_name] = _extract_sede_center_rows_from_sheet(sheet)
+            center_rows = _extract_sede_center_rows_from_sheet(sheet)
+            sede_center_rows[normalized_sheet_name] = center_rows
+            sede_worker_rows[normalized_sheet_name] = _extract_sede_worker_rows_from_sheet(sheet, len(center_rows))
         for row in [[normalize_text(cell) for cell in raw_row[:12]] for raw_row in rows[:80]]:
             if len(row) >= 2 and row[0] and row[1]:
                 key = normalize_haystack(normalize_text(row[0])).replace(" ", "_")
@@ -4425,6 +4476,7 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
         "worker_sheet_salary_totals": worker_sheet_salary_totals,
         "sede_sheet_values": sede_sheet_values,
         "sede_center_rows": sede_center_rows,
+        "sede_worker_rows": sede_worker_rows,
         "activity_catalog_codes": activity_catalog_codes,
         "has_independientes_723": has_independientes_723,
         "source_filename": path.name,
