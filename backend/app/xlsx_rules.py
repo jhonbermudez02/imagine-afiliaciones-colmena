@@ -91,6 +91,34 @@ def _append_required_cell_validation(
         )
 
 
+def _append_cell_length_validation(
+    blockers: List[Dict[str, Any]],
+    form_cell_values: Dict[str, Any],
+    field: str,
+    *,
+    min_length: int,
+    max_length: int,
+    code_prefix: str,
+) -> None:
+    cell_info = form_cell_values.get(field) or {}
+    raw_value = cell_info.get("value")
+    if _is_blank_value(raw_value):
+        return
+    label = cell_info.get("label") or field
+    cell = cell_info.get("cell") or "celda requerida"
+    text = normalize_text(raw_value)
+    if not (min_length <= len(text) <= max_length):
+        blockers.append(
+            {
+                "code": f"{code_prefix}_INVALID_LENGTH",
+                "severity": "blocker",
+                "field": field,
+                "cell": cell,
+                "message": f"El campo '{label}' ({cell}) debe tener entre {min_length} y {max_length} caracteres. Valor recibido: {raw_value}.",
+            }
+        )
+
+
 def _sheet_cell_info(sheet_values: Dict[str, Any], field: str) -> Dict[str, Any]:
     return dict((sheet_values or {}).get(field) or {})
 
@@ -579,7 +607,7 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
     if "traslado" in tipo_tramite:
         direct_cell_fields = [
             ("b_arl_de_la_cual_se_traslada", False),
-            ("b_clase_riesgo", True),
+            ("b_clase_riesgo", False),
             ("b_codigo_actividad_economica_principal", True),
             ("b_numero_sedes", True),
             ("b_numero_centros_trabajo", True),
@@ -707,6 +735,22 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
             require_email=require_email,
             code_prefix="XLSX_COMMON_REQUIRED_CELL",
         )
+    _append_cell_length_validation(
+        blockers,
+        form_cell_values,
+        "empleador_numero_documento_nit",
+        min_length=6,
+        max_length=12,
+        code_prefix="XLSX_COMMON_REQUIRED_CELL",
+    )
+    _append_cell_length_validation(
+        blockers,
+        form_cell_values,
+        "rep_legal_numero_documento",
+        min_length=6,
+        max_length=12,
+        code_prefix="XLSX_COMMON_REQUIRED_CELL",
+    )
 
     for field in ["autorizacion_1", "autorizacion_2", "autorizacion_3"]:
         _append_required_cell_validation(
@@ -727,21 +771,25 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
         key=lambda name: (_sede_sheet_number(name) is None, _sede_sheet_number(name) or 0, name),
     )
     if expected_sedes > 0:
-        if len(sede_sheet_names) != expected_sedes:
+        numbered_sheet_names = [
+            name
+            for name in sede_sheet_names
+            if (_sede_sheet_number(name) or 0) <= expected_sedes
+        ]
+        if len(numbered_sheet_names) < expected_sedes:
             blockers.append(
                 {
-                    "code": "XLSX_SEDE_SHEET_COUNT_MISMATCH",
+                    "code": "XLSX_SEDE_SHEET_COUNT_MISSING",
                     "severity": "blocker",
                     "message": (
                         f"El formulario declara {expected_sedes} sede(s), pero el XLSX trae "
-                        f"{len(sede_sheet_names)} hoja(s) de sede: {', '.join(sede_sheet_names) or 'ninguna'}."
+                        f"{len(numbered_sheet_names)} hoja(s) de sede dentro de esa cantidad: {', '.join(numbered_sheet_names) or 'ninguna'}."
                     ),
                 }
             )
         actual_numbers = {number for number in (_sede_sheet_number(name) for name in sede_sheet_names) if number is not None}
         expected_numbers = set(range(1, expected_sedes + 1))
         missing_numbers = sorted(expected_numbers - actual_numbers)
-        extra_numbers = sorted(number for number in actual_numbers if number > expected_sedes)
         if missing_numbers:
             blockers.append(
                 {
@@ -752,16 +800,7 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                     + ".",
                 }
             )
-        if extra_numbers:
-            blockers.append(
-                {
-                    "code": "XLSX_SEDE_SHEET_SEQUENCE_EXTRA",
-                    "severity": "blocker",
-                    "message": "El XLSX trae hojas de sede por encima de la cantidad declarada: "
-                    + ", ".join(f"Sede {number:02d} - Trabajadores" for number in extra_numbers)
-                    + ".",
-                }
-            )
+        sede_sheet_names = numbered_sheet_names
 
     sede_required_fields = [
         ("numero_radicacion", False, False, False),
