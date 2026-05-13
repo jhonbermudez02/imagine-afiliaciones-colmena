@@ -2139,52 +2139,92 @@ def _rut_nit_core(value: Any) -> str:
     return digits
 
 
+def _rut_nit_candidates_from_text(text: str) -> List[str]:
+    normalized = normalize_text(text)
+    if not normalized:
+        return []
+    candidates: List[str] = []
+    seen: set[str] = set()
+    search_windows: List[str] = []
+    for match in re.finditer(r"identificaci[oó]n\s+tributaria\s*\(?\s*NIT\s*\)?", normalized, flags=re.IGNORECASE):
+        search_windows.append(normalized[match.end(): match.end() + 220])
+    search_windows.append(normalized)
+    for window in search_windows:
+        for raw in re.findall(r"\d[\d\s./|lI-]{7,}\d", window):
+            digits = only_digits(raw)
+            if len(digits) < 9:
+                continue
+            candidate = digits[:9]
+            if candidate and candidate not in seen:
+                candidates.append(candidate)
+                seen.add(candidate)
+    return candidates
+
+
+def _select_best_rut_nit_candidate(expected_nit: Any, candidates: List[Any]) -> str:
+    expected = _rut_nit_core(expected_nit)
+    normalized_candidates: List[str] = []
+    for candidate in candidates:
+        core = _rut_nit_core(candidate)
+        if len(core) == 9 and core not in normalized_candidates:
+            normalized_candidates.append(core)
+    if expected and expected in normalized_candidates:
+        return expected
+    return normalized_candidates[0] if normalized_candidates else ""
+
+
+def _company_matches_with_ocr_noise(expected: Any, candidate: Any) -> bool:
+    expected_official = _normalize_company_official(expected)
+    candidate_official = _normalize_company_official(candidate)
+    if expected_official and candidate_official and expected_official == candidate_official:
+        return True
+    expected_cmp = _normalize_company_compare(expected)
+    candidate_cmp = _normalize_company_compare(candidate)
+    return bool(expected_cmp and candidate_cmp and len(expected_cmp) >= 10 and expected_cmp in candidate_cmp)
+
+
 def _extract_rut_identity_from_text(text: str, fields: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     normalized = normalize_text(text)
     field_values = fields or {}
     identity: Dict[str, Any] = {
         "nit": "",
+        "nit_candidates": [],
         "razon_social": "",
+        "razon_social_candidates": [],
         "has_rut_header": "formulario del registro unico tributario" in _ascii_haystack(normalized),
     }
     if not normalized:
         return identity
 
-    nit_match = re.search(
-        r"(?:^|\b)5\s*\.?\s*n[uú]mero\s+de\s+identificaci[oó]n\s+tributaria\s*\(?\s*NIT\s*\)?[^0-9]{0,80}([\d .-]{9,18})",
-        normalized,
-        flags=re.IGNORECASE,
-    )
-    if not nit_match:
-        nit_match = re.search(
-            r"n[uú]mero\s+de\s+identificaci[oó]n\s+tributaria\s*\(?\s*NIT\s*\)?[^0-9]{0,80}([\d .-]{9,18})",
-            normalized,
-            flags=re.IGNORECASE,
-        )
-    if nit_match:
-        identity["nit"] = _rut_nit_core(nit_match.group(1))
-    if not identity["nit"]:
-        identity["nit"] = _rut_nit_core(field_values.get("nit") or field_values.get("document_number") or "")
+    nit_candidates = _rut_nit_candidates_from_text(normalized)
+    for candidate in [field_values.get("nit"), field_values.get("document_number")]:
+        core = _rut_nit_core(candidate)
+        if len(core) == 9 and core not in nit_candidates:
+            nit_candidates.append(core)
+    identity["nit_candidates"] = nit_candidates
+    identity["nit"] = nit_candidates[0] if nit_candidates else ""
 
     company_match = re.search(
-        r"(?:^|\b)35\s*\.?\s*raz[oó]n\s+social[^A-Za-zÁÉÍÓÚÜÑ0-9]{0,20}"
-        r"(?P<value>[A-ZÁÉÍÓÚÜÑ0-9 .,&'/-]{5,180}?)(?=\s+(?:36\b|37\b|38\b|nombre\s+comercial|sigla|ubicaci[oó]n|clasificaci[oó]n)|$)",
+        r"(?:^|\b)35\s*\.?\s*raz[oó]n\s+social\s*(?P<value>.{5,220}?)(?=\s+(?:36\b|37\b|38\b|nombre\s+comercial|sigla|ubicaci[oó]n|clasificaci[oó]n)|$)",
         normalized,
-        flags=re.IGNORECASE,
+        flags=re.IGNORECASE | re.DOTALL,
     )
     if not company_match:
         company_match = re.search(
-            r"raz[oó]n\s+social[^A-Za-zÁÉÍÓÚÜÑ0-9]{0,20}"
-            r"(?P<value>[A-ZÁÉÍÓÚÜÑ0-9 .,&'/-]{5,180}?)(?=\s+(?:36\b|37\b|38\b|nombre\s+comercial|sigla|ubicaci[oó]n|clasificaci[oó]n)|$)",
+            r"raz[oó]n\s+social\s*(?P<value>.{5,220}?)(?=\s+(?:36\b|37\b|38\b|nombre\s+comercial|sigla|ubicaci[oó]n|clasificaci[oó]n)|$)",
             normalized,
-            flags=re.IGNORECASE,
+            flags=re.IGNORECASE | re.DOTALL,
         )
     if company_match:
         candidate = _clean_company_name(company_match.group("value"))
         if _looks_like_company_name(candidate):
             identity["razon_social"] = candidate
+            identity["razon_social_candidates"].append(candidate)
     if not identity["razon_social"]:
-        identity["razon_social"] = _clean_company_name(field_values.get("company_name", ""))
+        fallback_company = _clean_company_name(field_values.get("company_name", ""))
+        identity["razon_social"] = fallback_company
+        if fallback_company:
+            identity["razon_social_candidates"].append(fallback_company)
     return identity
 
 
@@ -3779,23 +3819,41 @@ def format_reason_lines(message: str) -> List[str]:
 
 def _read_pdf(path: Path) -> Dict[str, Any]:
     text_parts: List[str] = []
+    supplemental_ocr_parts: List[str] = []
+    blank_pages: List[int] = []
     extracted_pages = 0
     try:
         reader = PdfReader(str(path))
-        for page in reader.pages[:5]:
+        max_pages = min(len(reader.pages), 12)
+        for page_number, page in enumerate(reader.pages[:max_pages], start=1):
             extracted = normalize_text(page.extract_text() or "")
             if extracted:
                 text_parts.append(extracted)
+            else:
+                blank_pages.append(page_number)
             extracted_pages += 1
     except Exception:
         text_parts = []
+        blank_pages = []
 
+    for page_number in blank_pages[:6]:
+        try:
+            images = convert_from_path(str(path), first_page=page_number, last_page=page_number, dpi=220)
+        except Exception:
+            images = []
+        for image in images:
+            ocr_text = normalize_text(_ocr_best_text_from_image(image))
+            if ocr_text:
+                supplemental_ocr_parts.append(ocr_text)
+
+    if supplemental_ocr_parts:
+        text_parts.extend(supplemental_ocr_parts)
     joined_text = "\n".join(text_parts)
-    if text_parts and not _text_quality_is_low(joined_text):
+    if text_parts and (not _text_quality_is_low(joined_text) or len(joined_text) >= 1000):
         return {
             "text": joined_text,
-            "used_ocr": False,
-            "pages_processed": max(min(extracted_pages, 5), len(text_parts)),
+            "used_ocr": bool(supplemental_ocr_parts),
+            "pages_processed": max(extracted_pages, len(text_parts)),
         }
 
     images = convert_from_path(str(path), first_page=1, last_page=2, dpi=200)
@@ -6026,11 +6084,19 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
             None,
         )
         rut_identity = _extract_rut_identity_from_doc(rut_doc) if rut_doc else {}
-        rut_nit = _rut_nit_core(rut_identity.get("nit", ""))
+        rut_nit_candidates = list(rut_identity.get("nit_candidates") or [])
+        rut_nit = _select_best_rut_nit_candidate(form_nit_core, rut_nit_candidates or [rut_identity.get("nit", "")])
         rut_company = normalize_text(rut_identity.get("razon_social", ""))
-        rut_company_official = _normalize_company_official(rut_company)
+        rut_company_candidates = [normalize_text(item) for item in (rut_identity.get("razon_social_candidates") or []) if normalize_text(item)]
+        if rut_company and rut_company not in rut_company_candidates:
+            rut_company_candidates.insert(0, rut_company)
+        rut_company_match = next((candidate for candidate in rut_company_candidates if _company_matches_with_ocr_noise(form_company_source, candidate)), "")
+        if rut_company_match:
+            expected_company_cmp = _normalize_company_compare(form_company_source)
+            matched_company_cmp = _normalize_company_compare(rut_company_match)
+            rut_company = normalize_text(form_company_source) if expected_company_cmp and expected_company_cmp in matched_company_cmp else rut_company_match
         rut_nit_ok = bool(len(rut_nit) == 9 and len(form_nit_core) == 9 and rut_nit == form_nit_core)
-        rut_company_ok = bool(rut_company_official and form_company_official and rut_company_official == form_company_official)
+        rut_company_ok = bool(form_company_official and rut_company and _company_matches_with_ocr_noise(form_company_source, rut_company))
         rut_legal_ok = bool(rut_doc and rut_nit_ok and rut_company_ok)
         if not rut_doc:
             rut_legal_message = (
@@ -6072,7 +6138,7 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
             rut_legal_message = "El RUT de persona jurídica coincide contra el formulario en NIT y razón social."
         validations.append(
             {
-                "code": "RUT_JURIDICA_MATCH_FORMULARIO",
+            "code": "RUT_JURIDICA_MATCH_FORMULARIO",
                 "status": "OK" if rut_legal_ok else "ALERTA",
                 "severity": "ok" if rut_legal_ok else "blocker",
                 "message": rut_legal_message,
@@ -6081,8 +6147,10 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         matches["rut_juridica"] = {
             "expected_nit_ag16": normalize_text(form_nit_source),
             "matched_nit_rut_5": rut_nit,
+            "rut_nit_candidates": rut_nit_candidates,
             "expected_razon_social_j16": normalize_text(form_company_source),
             "matched_razon_social_rut_35": rut_company,
+            "rut_razon_social_candidates": rut_company_candidates,
             "filename": (rut_doc or {}).get("filename", ""),
             "nit_ok": rut_nit_ok,
             "razon_social_ok": rut_company_ok,
