@@ -39,6 +39,10 @@ def _is_blank_value(value: Any) -> bool:
     return not normalize_text(value)
 
 
+def _is_x_marker(value: Any) -> bool:
+    return normalize_haystack(value) == "x"
+
+
 def _is_email_value(value: Any) -> bool:
     text = normalize_text(value)
     if not text:
@@ -283,6 +287,7 @@ def _append_worker_cell_validation(
     require_email: bool = False,
     min_length: int | None = None,
     max_length: int | None = None,
+    allow_zero_length: bool = False,
 ) -> None:
     cell_info = _worker_cell_info(row_values, field)
     raw_value = cell_info.get("value")
@@ -329,6 +334,8 @@ def _append_worker_cell_validation(
         )
     if min_length is not None and max_length is not None:
         text = normalize_text(raw_value)
+        if allow_zero_length and text == "0":
+            return
         if not (min_length <= len(text) <= max_length):
             blockers.append(
                 {
@@ -769,6 +776,34 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
             )
 
     tipo_tramite = normalize_haystack(form_fields.get("tipo_tramite", "") or profile.get("tipo_afiliado", ""))
+    afiliacion_marker = (form_cell_values.get("tipo_tramite_afiliacion_marker") or {}).get("value")
+    traslado_marker = (form_cell_values.get("tipo_tramite_traslado_marker") or {}).get("value")
+    afiliacion_marked = _is_x_marker(afiliacion_marker)
+    traslado_marked = _is_x_marker(traslado_marker)
+    if not afiliacion_marked and not traslado_marked:
+        blockers.append(
+            {
+                "code": "XLSX_TRAMITE_MARKER_MISSING",
+                "severity": "blocker",
+                "field": "tipo_tramite",
+                "cell": "I13/N13",
+                "message": "El formulario debe marcar con X el tipo de trámite en I13 (Afiliación) o N13 (Traslado).",
+            }
+        )
+    elif afiliacion_marked and traslado_marked:
+        blockers.append(
+            {
+                "code": "XLSX_TRAMITE_MARKER_DUPLICATE",
+                "severity": "blocker",
+                "field": "tipo_tramite",
+                "cell": "I13/N13",
+                "message": "El formulario no puede tener marcadas con X simultáneamente I13 (Afiliación) y N13 (Traslado).",
+            }
+        )
+    elif afiliacion_marked and "afili" not in tipo_tramite:
+        tipo_tramite = "afiliacion"
+    elif traslado_marked and "traslado" not in tipo_tramite:
+        tipo_tramite = "traslado"
     if tipo_tramite and tipo_tramite not in ALLOWED_TIPO_TRAMITE:
         blockers.append(
             {
@@ -894,6 +929,7 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                 )
 
     common_cell_fields = [
+        ("numero_radicacion", True, False),
         ("lugar_afiliacion", False, False),
         ("codigo_lugar", False, False),
         ("nombre_lugar", False, False),
@@ -916,7 +952,7 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
         ("sede_principal_telefono", True, False),
         ("sede_principal_correo", False, True),
         ("responsable_sede_tipo_documento", False, False),
-        ("responsable_sede_numero_documento", False, False),
+        ("responsable_sede_numero_documento", True, False),
         ("responsable_sede_correo", False, True),
     ]
     for field, require_numeric, require_email in common_cell_fields:
@@ -928,6 +964,14 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
             require_email=require_email,
             code_prefix="XLSX_COMMON_REQUIRED_CELL",
         )
+    _append_cell_length_validation(
+        blockers,
+        form_cell_values,
+        "numero_radicacion",
+        min_length=6,
+        max_length=40,
+        code_prefix="XLSX_COMMON_REQUIRED_CELL",
+    )
     _append_cell_length_validation(
         blockers,
         form_cell_values,
@@ -1305,6 +1349,7 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                     require_email=require_email,
                     min_length=min_length,
                     max_length=max_length,
+                    allow_zero_length=field == "celular",
                 )
             worker_center_info = _worker_cell_info(row_values, "codigo_centro_trabajo")
             worker_center_code = normalize_text(worker_center_info.get("value"))

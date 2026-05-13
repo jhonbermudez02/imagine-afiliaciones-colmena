@@ -4245,6 +4245,12 @@ def _extract_form_fields_from_sheet(sheet: Any) -> Dict[str, str]:
         return ""
 
     def detect_tipo_tramite() -> str:
+        afiliacion_marker = normalize_haystack(_sheet_value(sheet, 13, 9))
+        traslado_marker = normalize_haystack(_sheet_value(sheet, 13, 14))
+        if afiliacion_marker == "x" and traslado_marker != "x":
+            return "Afiliación"
+        if traslado_marker == "x" and afiliacion_marker != "x":
+            return "Traslado"
         row_values = {col: _sheet_value(sheet, 13, col) for col in range(4, 25)}
         option_cols: List[tuple[int, str]] = []
         for col, value in row_values.items():
@@ -4359,6 +4365,8 @@ def _extract_form_cell_values_from_sheet(sheet: Any) -> Dict[str, Dict[str, Any]
         "fecha_radicacion": ("G7", 7, 7, "Fecha de radicación"),
         "fecha_inicio_cobertura": ("L7", 7, 12, "Fecha inicio de cobertura"),
         "numero_radicacion": ("Y7", 7, 25, "Número radicación"),
+        "tipo_tramite_afiliacion_marker": ("I13", 13, 9, "Tipo de trámite / Afiliación"),
+        "tipo_tramite_traslado_marker": ("N13", 13, 14, "Tipo de trámite / Traslado"),
         "lugar_afiliacion": ("AP6", 6, 42, "Lugar de afiliación"),
         "codigo_lugar": ("AK7", 7, 37, "Código lugar"),
         "nombre_lugar": ("AR7", 7, 44, "Nombre lugar"),
@@ -4504,7 +4512,7 @@ def _extract_sede_worker_rows_from_sheet(sheet: Any, center_count: int) -> List[
         "eps": ("U", 21, "EPS trabajador"),
         "pension": ("V", 22, "Pensión trabajador"),
         "direccion": ("W", 23, "Dirección trabajador"),
-        "celular": ("Y", 25, "Celular trabajador"),
+        "celular": ("Y", 25, "Celular/Teléfono trabajador"),
         "correo": ("Z", 26, "Correo electrónico trabajador"),
         "municipio_distrito": ("AA", 27, "Municipio/Distrito trabajador"),
         "zona": ("AC", 29, "Zona trabajador"),
@@ -5995,12 +6003,7 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
 
         if phone and not phone_can_be_zero:
             if phone == "0":
-                row_errors.append({
-                    "row": row_excel,
-                    "code": "TELEFONO_FORMATO_INVALIDO",
-                    "message": f"El teléfono debe ir en 0 solo cuando el celular esté diligenciado en fila {row_excel}.",
-                    "documento": row_document,
-                })
+                pass
             elif phone.startswith("0"):
                 row_errors.append({
                     "row": row_excel,
@@ -6008,27 +6011,29 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
                     "message": f"El teléfono no puede iniciar en 0 en fila {row_excel} ({phone}).",
                     "documento": row_document,
                 })
-            elif len(phone) not in {7, 10}:
+            elif not (6 <= len(phone) <= 10):
                 row_errors.append({
                     "row": row_excel,
                     "code": "TELEFONO_FORMATO_INVALIDO",
-                    "message": f"El teléfono debe tener 7 dígitos o 10 si fue reportado como celular en fila {row_excel} ({phone}).",
+                    "message": f"El teléfono debe ser 0 o tener entre 6 y 10 dígitos en fila {row_excel} ({phone}).",
                     "documento": row_document,
                 })
 
         if effective_mobile:
-            if effective_mobile.startswith("0"):
+            if effective_mobile == "0":
+                pass
+            elif effective_mobile.startswith("0"):
                 row_errors.append({
                     "row": row_excel,
                     "code": "CELULAR_FORMATO_INVALIDO",
                     "message": f"El celular no puede iniciar en 0 en fila {row_excel} ({effective_mobile}).",
                     "documento": row_document,
                 })
-            elif len(effective_mobile) != 10:
+            elif not (6 <= len(effective_mobile) <= 10):
                 row_errors.append({
                     "row": row_excel,
                     "code": "CELULAR_FORMATO_INVALIDO",
-                    "message": f"El celular debe tener 10 dígitos en fila {row_excel} ({effective_mobile}).",
+                    "message": f"El celular debe ser 0 o tener entre 6 y 10 dígitos en fila {row_excel} ({effective_mobile}).",
                     "documento": row_document,
                 })
 
