@@ -2127,6 +2127,72 @@ def _extract_entrega_identity_from_doc(doc: Dict[str, Any]) -> Dict[str, str]:
     return identity
 
 
+def _ascii_haystack(value: Any) -> str:
+    text = normalize_haystack(value)
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+
+
+def _rut_nit_core(value: Any) -> str:
+    digits = only_digits(value)
+    if len(digits) >= 9:
+        return digits[:9]
+    return digits
+
+
+def _extract_rut_identity_from_text(text: str, fields: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    normalized = normalize_text(text)
+    field_values = fields or {}
+    identity: Dict[str, Any] = {
+        "nit": "",
+        "razon_social": "",
+        "has_rut_header": "formulario del registro unico tributario" in _ascii_haystack(normalized),
+    }
+    if not normalized:
+        return identity
+
+    nit_match = re.search(
+        r"(?:^|\b)5\s*\.?\s*n[uú]mero\s+de\s+identificaci[oó]n\s+tributaria\s*\(?\s*NIT\s*\)?[^0-9]{0,80}([\d .-]{9,18})",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if not nit_match:
+        nit_match = re.search(
+            r"n[uú]mero\s+de\s+identificaci[oó]n\s+tributaria\s*\(?\s*NIT\s*\)?[^0-9]{0,80}([\d .-]{9,18})",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    if nit_match:
+        identity["nit"] = _rut_nit_core(nit_match.group(1))
+    if not identity["nit"]:
+        identity["nit"] = _rut_nit_core(field_values.get("nit") or field_values.get("document_number") or "")
+
+    company_match = re.search(
+        r"(?:^|\b)35\s*\.?\s*raz[oó]n\s+social[^A-Za-zÁÉÍÓÚÜÑ0-9]{0,20}"
+        r"(?P<value>[A-ZÁÉÍÓÚÜÑ0-9 .,&'/-]{5,180}?)(?=\s+(?:36\b|37\b|38\b|nombre\s+comercial|sigla|ubicaci[oó]n|clasificaci[oó]n)|$)",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if not company_match:
+        company_match = re.search(
+            r"raz[oó]n\s+social[^A-Za-zÁÉÍÓÚÜÑ0-9]{0,20}"
+            r"(?P<value>[A-ZÁÉÍÓÚÜÑ0-9 .,&'/-]{5,180}?)(?=\s+(?:36\b|37\b|38\b|nombre\s+comercial|sigla|ubicaci[oó]n|clasificaci[oó]n)|$)",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    if company_match:
+        candidate = _clean_company_name(company_match.group("value"))
+        if _looks_like_company_name(candidate):
+            identity["razon_social"] = candidate
+    if not identity["razon_social"]:
+        identity["razon_social"] = _clean_company_name(field_values.get("company_name", ""))
+    return identity
+
+
+def _extract_rut_identity_from_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
+    fields = doc.get("fields") or {}
+    return _extract_rut_identity_from_text(doc.get("ocr_text") or doc.get("text_preview") or "", fields)
+
+
 def _looks_like_cedula_document(name_txt: str, haystack: str) -> bool:
     positive_markers = [
         "cedula de ciudadania",
@@ -5930,6 +5996,7 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     profile = xlsx_profile.get("profile", {})
     flat_pairs = xlsx_profile.get("flat_pairs", {}) or {}
     form_fields = dict((xlsx_profile or {}).get("form_fields") or {})
+    form_cell_values = dict((xlsx_profile or {}).get("form_cell_values") or {})
     xlsx_document = only_digits(profile.get("documento", ""))
     xlsx_nit = _normalize_company_nit(profile.get("documento_empleador") or profile.get("nit", ""), docs)
     validations: List[Dict[str, Any]] = []
@@ -5940,6 +6007,89 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         "tipo_persona": form_fields.get("tipo_persona") or profile.get("tipo_persona", ""),
         "empleador_tipo_documento": form_fields.get("empleador_tipo_documento") or profile.get("empleador_tipo_documento", ""),
     })
+    tipo_tramite_norm = _ascii_haystack(form_fields.get("tipo_tramite", "") or profile.get("tipo_tramite", ""))
+    tipo_persona_norm = _ascii_haystack(form_fields.get("tipo_persona", "") or profile.get("tipo_persona", ""))
+
+    def form_cell_raw(field: str) -> Any:
+        return (form_cell_values.get(field) or {}).get("value") or form_fields.get(field, "")
+
+    if "afili" in tipo_tramite_norm and "juridica" in tipo_persona_norm:
+        form_nit_source = form_cell_raw("empleador_numero_documento_nit") or profile.get("documento_empleador") or profile.get("nit", "")
+        form_company_source = form_cell_raw("empleador_razon_social") or profile.get("empresa", "")
+        form_nit_core = _rut_nit_core(form_nit_source)
+        form_company_official = _normalize_company_official(form_company_source)
+        rut_doc = next(
+            (
+                doc for doc in docs
+                if "formulario del registro unico tributario" in _ascii_haystack(doc.get("ocr_text") or doc.get("text_preview") or "")
+            ),
+            None,
+        )
+        rut_identity = _extract_rut_identity_from_doc(rut_doc) if rut_doc else {}
+        rut_nit = _rut_nit_core(rut_identity.get("nit", ""))
+        rut_company = normalize_text(rut_identity.get("razon_social", ""))
+        rut_company_official = _normalize_company_official(rut_company)
+        rut_nit_ok = bool(len(rut_nit) == 9 and len(form_nit_core) == 9 and rut_nit == form_nit_core)
+        rut_company_ok = bool(rut_company_official and form_company_official and rut_company_official == form_company_official)
+        rut_legal_ok = bool(rut_doc and rut_nit_ok and rut_company_ok)
+        if not rut_doc:
+            rut_legal_message = (
+                "Para afiliación de persona jurídica se requiere un RUT cuyo OCR contenga "
+                "'Formulario del Registro Único Tributario'. No se encontró ese documento."
+            )
+        elif not rut_nit:
+            rut_legal_message = (
+                f"No se pudo leer el campo 5. Número de Identificación Tributaria (NIT) en el RUT "
+                f"'{rut_doc.get('filename')}'."
+            )
+        elif len(rut_nit) != 9:
+            rut_legal_message = (
+                f"El campo 5. Número de Identificación Tributaria (NIT) del RUT debe tener 9 caracteres. "
+                f"RUT='{rut_identity.get('nit') or 'n/d'}' · archivo='{rut_doc.get('filename')}'."
+            )
+        elif not form_nit_core:
+            rut_legal_message = "No se pudo leer el NIT del formulario en AG16 para comparar contra el RUT."
+        elif not rut_nit_ok:
+            rut_legal_message = (
+                "El NIT del RUT no coincide con el formulario: "
+                f"RUT='{rut_nit or 'n/d'}' · Formulario AG16='{form_nit_source or 'n/d'}' "
+                f"· archivo='{rut_doc.get('filename')}'."
+            )
+        elif not rut_company:
+            rut_legal_message = (
+                f"No se pudo leer el campo 35. Razón social en el RUT '{rut_doc.get('filename')}' "
+                "para comparar contra el formulario."
+            )
+        elif not form_company_official:
+            rut_legal_message = "No se pudo leer la razón social del formulario en J16 para comparar contra el RUT."
+        elif not rut_company_ok:
+            rut_legal_message = (
+                "La razón social del RUT no coincide con el formulario: "
+                f"RUT='{rut_company or 'n/d'}' · Formulario J16='{form_company_source or 'n/d'}' "
+                f"· archivo='{rut_doc.get('filename')}'."
+            )
+        else:
+            rut_legal_message = "El RUT de persona jurídica coincide contra el formulario en NIT y razón social."
+        validations.append(
+            {
+                "code": "RUT_JURIDICA_MATCH_FORMULARIO",
+                "status": "OK" if rut_legal_ok else "ALERTA",
+                "severity": "ok" if rut_legal_ok else "blocker",
+                "message": rut_legal_message,
+            }
+        )
+        matches["rut_juridica"] = {
+            "expected_nit_ag16": normalize_text(form_nit_source),
+            "matched_nit_rut_5": rut_nit,
+            "expected_razon_social_j16": normalize_text(form_company_source),
+            "matched_razon_social_rut_35": rut_company,
+            "filename": (rut_doc or {}).get("filename", ""),
+            "nit_ok": rut_nit_ok,
+            "razon_social_ok": rut_company_ok,
+            "ok": rut_legal_ok,
+        }
+        if not rut_legal_ok:
+            alerts.append(validations[-1])
 
     cedula_docs = _doc_by_type(docs, "cedula")
     matched_cedula = None
