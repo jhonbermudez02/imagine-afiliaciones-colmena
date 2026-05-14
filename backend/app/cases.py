@@ -6112,7 +6112,30 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     def form_cell_raw(field: str) -> Any:
         return (form_cell_values.get(field) or {}).get("value") or form_fields.get(field, "")
 
-    if "afili" in tipo_tramite_norm and "juridica" in tipo_persona_norm:
+    activity_code_g26 = only_digits(form_cell_raw("a_codigo_actividad_economica_principal"))
+    rut_exempt_by_activity = bool("juridica" in tipo_persona_norm and activity_code_g26 == "1970001")
+
+    if "afili" in tipo_tramite_norm and "juridica" in tipo_persona_norm and rut_exempt_by_activity:
+        validations.append(
+            {
+                "code": "RUT_JURIDICA_EXENTO_ACTIVIDAD",
+                "status": "OK",
+                "severity": "ok",
+                "message": (
+                    "No se exige validación documental de RUT para persona jurídica cuando "
+                    "AU13 indica Jurídica y G26 tiene la actividad económica 1970001."
+                ),
+            }
+        )
+        matches["rut_juridica"] = {
+            "expected_tipo_persona_au13": normalize_text(form_cell_raw("tipo_persona")),
+            "activity_code_g26": activity_code_g26,
+            "match_mode": "rut_exempt_by_activity_g26",
+            "ok": True,
+            "exempt": True,
+        }
+
+    if "afili" in tipo_tramite_norm and "juridica" in tipo_persona_norm and not rut_exempt_by_activity:
         form_nit_source = form_cell_raw("empleador_numero_documento_nit") or profile.get("documento_empleador") or profile.get("nit", "")
         form_company_source = form_cell_raw("empleador_razon_social") or profile.get("empresa", "")
         form_nit_core = _rut_nit_core(form_nit_source)
@@ -6242,15 +6265,16 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         rut_ok = bool(matched_rut)
     else:
         rut_ok = bool(rut_docs)
-    validations.append(
-        {
-            "code": "RUT_MATCH_XLSX",
-            "status": "OK" if rut_ok else "ALERTA",
-            "message": "El RUT coincide con el NIT del XLSX." if rut_ok else "El RUT no entrega un NIT consistente con el XLSX.",
-        }
-    )
-    if not rut_ok:
-        alerts.append(validations[-1])
+    if not rut_exempt_by_activity:
+        validations.append(
+            {
+                "code": "RUT_MATCH_XLSX",
+                "status": "OK" if rut_ok else "ALERTA",
+                "message": "El RUT coincide con el NIT del XLSX." if rut_ok else "El RUT no entrega un NIT consistente con el XLSX.",
+            }
+        )
+        if not rut_ok:
+            alerts.append(validations[-1])
     if xlsx_nit:
         matches["rut_nit"] = {
             "expected": xlsx_nit,
@@ -6263,7 +6287,9 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
                 ],
             ),
             "filename": (matched_rut or {}).get("filename", ""),
-            "ok": bool(matched_rut),
+            "ok": bool(matched_rut) or rut_exempt_by_activity,
+            "exempt": rut_exempt_by_activity,
+            "activity_code_g26": activity_code_g26 if rut_exempt_by_activity else "",
         }
 
     formulario_docs = _doc_by_type(docs, "formulario_afiliacion")
