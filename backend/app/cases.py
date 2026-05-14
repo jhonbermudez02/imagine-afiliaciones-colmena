@@ -2203,9 +2203,11 @@ def _rut_first_marker_section(text: Any) -> str:
     ascii_text = _ascii_haystack(normalized)
     marker = "formulario del registro unico tributario"
     index = ascii_text.find(marker)
-    if index < 0:
-        return ""
-    return normalized[max(0, index - 3500): index + 7000]
+    if index >= 0:
+        return normalized[max(0, index - 3500): index + 7000]
+    if _looks_like_rut_document(ascii_text):
+        return normalized[:7000]
+    return ""
 
 
 def _rut_section_contains_nit(section: Any, expected_nit: Any) -> bool:
@@ -2216,7 +2218,38 @@ def _rut_section_contains_nit(section: Any, expected_nit: Any) -> bool:
 def _rut_section_contains_company(section: Any, expected_company: Any) -> bool:
     expected = _normalize_company_compare(expected_company)
     haystack = _normalize_company_full_text(section)
-    return bool(expected and len(expected) >= 5 and expected in haystack)
+    if expected and len(expected) >= 5 and expected in haystack:
+        return True
+    expected_tokens = [
+        token
+        for token in re.findall(r"[a-z0-9]+", _ascii_haystack(expected_company))
+        if len(token) > 1
+    ]
+    section_tokens = set(
+        token
+        for token in re.findall(r"[a-z0-9]+", _ascii_haystack(section))
+        if len(token) > 1
+    )
+    return bool(len(expected_tokens) >= 3 and set(expected_tokens).issubset(section_tokens))
+
+
+def _looks_like_rut_label_noise(value: Any) -> bool:
+    haystack = _ascii_haystack(value)
+    if "firma" in haystack or "departamento" in haystack:
+        return True
+    noisy_markers = [
+        "codigo",
+        "pais",
+        "tipo",
+        "cargo",
+        "forma",
+        "modo",
+        "anexos",
+        "folio",
+        "actividad",
+        "responsabilidades",
+    ]
+    return sum(1 for marker in noisy_markers if marker in haystack) >= 2
 
 
 def _extract_rut_identity_from_text(text: str, fields: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -2253,9 +2286,31 @@ def _extract_rut_identity_from_text(text: str, fields: Optional[Dict[str, Any]] 
         )
     if company_match:
         candidate = _clean_company_name(company_match.group("value"))
-        if _looks_like_company_name(candidate):
+        if _looks_like_company_name(candidate) and not _looks_like_rut_label_noise(candidate):
             identity["razon_social"] = candidate
             identity["razon_social_candidates"].append(candidate)
+    for name_match in list(re.finditer(
+        r"\b984\s*\.?\s*nombre\s*(?P<value>.{5,160}?)(?=\s+(?:985\b|firma|cargo\b)|$)",
+        normalized,
+        flags=re.IGNORECASE | re.DOTALL,
+    )) + list(re.finditer(
+        r"(?P<value>[A-ZÁÉÍÓÚÜÑ]{2,}(?:\s+[A-ZÁÉÍÓÚÜÑ]{2,}){2,5})\s+(?:CONTRIBUYENTE|REPRESENTANTE|SOLICITANTE)\b",
+        normalized,
+        flags=re.IGNORECASE,
+    )):
+        candidate = _normalize_person_name(_clean_company_name(name_match.group("value")))
+        candidate = re.sub(r"^(?:AM|PM)\s+", "", candidate, flags=re.IGNORECASE).strip()
+        if not _looks_like_person_name(candidate) or _looks_like_rut_label_noise(candidate):
+            continue
+        if candidate not in identity["razon_social_candidates"]:
+            identity["razon_social_candidates"].append(candidate)
+        tokens = candidate.split()
+        if len(tokens) >= 4:
+            reordered = _normalize_person_name(" ".join(tokens[2:] + tokens[:2]))
+            if reordered and reordered not in identity["razon_social_candidates"]:
+                identity["razon_social_candidates"].append(reordered)
+        if not identity["razon_social"]:
+            identity["razon_social"] = candidate
     if not identity["razon_social"]:
         fallback_company = _clean_company_name(field_values.get("company_name", ""))
         identity["razon_social"] = fallback_company
@@ -2518,6 +2573,22 @@ def _looks_like_rut_document(haystack: str) -> bool:
     ]
     hits = sum(1 for marker in positive_markers if marker in haystack)
     negative_hits = sum(1 for marker in negative_markers if marker in haystack)
+    has_dian_structure = (
+        "numero de identificacion tributaria" in haystack
+        and (
+            "direccion seccional" in haystack
+            or "direccion de impuestos" in haystack
+            or "impuestos de" in haystack
+        )
+        and (
+            "para uso exclusivo de la dian" in haystack
+            or "registro unico tributario" in haystack
+            or "buzon electronico" in haystack
+            or "matriz o controlante" in haystack
+        )
+    )
+    if has_dian_structure:
+        return True
     return hits >= 2 and negative_hits == 0
 
 
@@ -3062,10 +3133,10 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
     # 2. Fallback a clasificacion por reglas
     if _looks_like_beneficiario_final_document(haystack):
         return {"document_type": "beneficiario_final", "legacy_code": 27, "code_source": "ocr_beneficiario_precise"}
-    if _looks_like_cedula_document(name_txt, haystack):
-        return {"document_type": "cedula", "legacy_code": 6, "code_source": "ocr_cedula_precise"}
     if _looks_like_rut_document(haystack):
         return {"document_type": "rut", "legacy_code": 8, "code_source": "ocr_rut_precise"}
+    if _looks_like_cedula_document(name_txt, haystack):
+        return {"document_type": "cedula", "legacy_code": 6, "code_source": "ocr_cedula_precise"}
     if _looks_like_camara_document(haystack):
         return {"document_type": "camara_comercio", "legacy_code": 5, "code_source": "ocr_camara_precise"}
     if _looks_like_constancia_afiliacion(haystack):
@@ -3306,6 +3377,21 @@ def _extract_fields(text: str) -> Dict[str, Any]:
         match = re.search(r"(PALMAS\s+DE\s+PUERTO\s+GAITAN(?:\s+S\.\s*A\.\s*S\.?)?)", normalized, flags=re.IGNORECASE)
         if match:
             company_name = normalize_text(match.group(1))
+    if (
+        not company_name
+        and "camara de comercio" in lowered
+        and ("persona natural" in lowered or "nombres y apellidos" in lowered)
+    ):
+        match = re.search(
+            r"nombres?\s+y\s+apellidos\s*:?\s*(?P<value>[A-ZÁÉÍÓÚÜÑ ]{6,140}?)(?=\s+(?:identificaci[oó]n|nit|domicilio|direcci[oó]n|actividad|matr[ií]cula)|$)",
+            normalized,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if match:
+            candidate = _normalize_person_name(match.group("value"))
+            if _looks_like_person_name(candidate):
+                company_name = candidate
+                rep_name = rep_name or candidate
     entrega_identity = _extract_entrega_identity_from_text(normalized)
     entrega_contract_number = entrega_identity.get("numero_contrato", "")
     if entrega_identity.get("razon_social") and not company_name:
