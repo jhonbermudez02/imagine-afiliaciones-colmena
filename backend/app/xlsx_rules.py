@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 
+WORKER_DATA_START_REMINDER = "Recuerda que la información de los trabajadores debe comenzar en la línea 39."
+
+
 def normalize_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
@@ -1275,7 +1278,8 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                 "severity": "blocker",
                 "message": (
                     "El número de trabajadores/estudiantes del formulario no coincide con la suma de AJ "
-                    f"en centros de trabajo. Formulario='{expected_workers_value}' · Suma AJ='{total_center_workers}'."
+                    f"en centros de trabajo. Formulario='{expected_workers_value}' · Suma AJ='{total_center_workers}'. "
+                    f"{WORKER_DATA_START_REMINDER}"
                 ),
             }
         )
@@ -1286,7 +1290,8 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                 "severity": "blocker",
                 "message": (
                     "El valor total de nómina/cotización del formulario no coincide con la suma de AL "
-                    f"en centros de trabajo. Formulario='{expected_amount_value}' · Suma AL='{total_center_amount}'."
+                    f"en centros de trabajo. Formulario='{expected_amount_value}' · Suma AL='{total_center_amount}'. "
+                    f"{WORKER_DATA_START_REMINDER}"
                 ),
             }
         )
@@ -1463,7 +1468,8 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                     "sheet": sheet_name,
                     "message": (
                         f"{sheet_name}: la suma de salarios de trabajadores no coincide con la suma de AL "
-                        f"de los centros de trabajo. Salarios='{sheet_salary}' · Suma AL='{expected_sheet_salary}'."
+                        f"de los centros de trabajo. Salarios='{sheet_salary}' · Suma AL='{expected_sheet_salary}'. "
+                        f"{WORKER_DATA_START_REMINDER}"
                     ),
                 }
             )
@@ -1475,7 +1481,8 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                 "severity": "blocker",
                 "message": (
                     "El total de trabajadores del formulario no coincide con las filas de trabajadores "
-                    f"leídas en sedes. Formulario='{expected_workers_value}' · Trabajadores detectados='{total_structured_worker_rows}'."
+                    f"leídas en sedes. Formulario='{expected_workers_value}' · Trabajadores detectados='{total_structured_worker_rows}'. "
+                    f"{WORKER_DATA_START_REMINDER}"
                 ),
             }
         )
@@ -1486,7 +1493,8 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                 "severity": "blocker",
                 "message": (
                     "La suma total de salarios de trabajadores no coincide con la suma total de AL "
-                    f"en centros de trabajo. Salarios='{total_worker_salary}' · Suma AL='{total_center_amount}'."
+                    f"en centros de trabajo. Salarios='{total_worker_salary}' · Suma AL='{total_center_amount}'. "
+                    f"{WORKER_DATA_START_REMINDER}"
                 ),
             }
         )
@@ -1497,7 +1505,8 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                 "severity": "blocker",
                 "message": (
                     "La suma total de salarios de trabajadores no coincide con el valor total de nómina/cotización "
-                    f"del formulario. Formulario='{expected_amount_value}' · Salarios='{total_worker_salary}'."
+                    f"del formulario. Formulario='{expected_amount_value}' · Salarios='{total_worker_salary}'. "
+                    f"{WORKER_DATA_START_REMINDER}"
                 ),
             }
         )
@@ -1648,7 +1657,8 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
                     "code": "XLSX_SECONDARY_NOMINA_MISMATCH",
                     "severity": "blocker",
                     "message": (
-                        f"La nómina del formulario ({expected_nomina}) no coincide con la suma de salarios leídos ({actual_nomina})."
+                        f"La nómina del formulario ({expected_nomina}) no coincide con la suma de salarios leídos ({actual_nomina}). "
+                        f"{WORKER_DATA_START_REMINDER}"
                     ),
                 }
             )

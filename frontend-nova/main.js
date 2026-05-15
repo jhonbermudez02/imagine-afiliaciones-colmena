@@ -251,6 +251,21 @@ function blockerText(b) {
     return String(b);
 }
 
+function isXlsxOrFormularioBlocker(b) {
+    const code = String(b?.code || b?.raw?.code || '').toUpperCase();
+    const msg = normalizeText(b?.message || blockerText(b?.raw || b));
+    return code.startsWith('XLSX_') ||
+           msg.includes('xlsx') ||
+           msg.includes('formulario') ||
+           msg.includes('formulario de afiliacion');
+}
+
+function validationExceptionButtonHtml(b, index, style = '') {
+    if (isXlsxOrFormularioBlocker(b)) return '';
+    const styleAttr = style ? ` style="${style}"` : '';
+    return `<button class="btn-secondary validation-exception-btn" data-blocker-idx="${index}" type="button"${styleAttr}>Aceptar para este contrato</button>`;
+}
+
 function renderBlockers(blockers, cssClass = 'report-blocker') {
     if (!blockers?.length) return '';
     return blockers.map(b => `
@@ -1272,7 +1287,7 @@ function renderWorkflowResult(payload) {
                         <div class="result-blocker-item">
                             <span>✗</span>
                             <span style="flex:1">${escapeHtml(b.message)}</span>
-                            <button class="btn-secondary validation-exception-btn" data-blocker-idx="${i}" type="button">Aceptar para este contrato</button>
+                            ${validationExceptionButtonHtml(b, i)}
                         </div>
                     `).join('')}
                 </div>
@@ -1925,7 +1940,7 @@ function renderValidacionOCR(container, payload) {
                     <div class="ocr-field-label">${escapeHtml(b.code || 'Validación')}</div>
                     <div class="ocr-field-val">✗ Bloqueante</div>
                     <div style="font-size:11px;color:var(--c-text-2);margin-top:4px">${escapeHtml(b.message || '')}</div>
-                    <button class="btn-secondary validation-exception-btn" data-blocker-idx="${i}" type="button" style="margin-top:8px">Aceptar para este contrato</button>
+                    ${validationExceptionButtonHtml(b, i, 'margin-top:8px')}
                 </div>
             `;
         }
@@ -2368,7 +2383,7 @@ function renderReporte(container, payload) {
                                     </div>
                                     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                                         ${isClickable ? `<span class="report-blocker-action-hint">${escapeHtml(parsed.actionLabel)} →</span>` : ''}
-                                        <button class="btn-secondary validation-exception-btn" data-blocker-idx="${i}" type="button">Aceptar para este contrato</button>
+                                        ${validationExceptionButtonHtml(b, i)}
                                     </div>
                                 </div>
                             `;
