@@ -53,6 +53,44 @@ def _is_email_value(value: Any) -> bool:
     return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", text))
 
 
+def _is_letters_only_value(value: Any) -> bool:
+    text = normalize_text(value)
+    if not text:
+        return True
+    compact = re.sub(r"\s+", "", text)
+    return bool(compact) and all(unicodedata.category(char).startswith("L") for char in compact)
+
+
+def _append_letters_only_validation(
+    blockers: List[Dict[str, Any]],
+    cell_info: Dict[str, Any],
+    *,
+    code: str,
+    field: str,
+    message_prefix: str | None = None,
+    sheet: str | None = None,
+) -> None:
+    raw_value = cell_info.get("value")
+    if _is_blank_value(raw_value) or _is_letters_only_value(raw_value):
+        return
+    label = cell_info.get("label") or field
+    cell = cell_info.get("cell") or "celda requerida"
+    row_number = cell_info.get("row")
+    prefix = message_prefix or f"El campo '{label}' ({cell})"
+    payload: Dict[str, Any] = {
+        "code": code,
+        "severity": "blocker",
+        "field": field,
+        "cell": cell,
+        "message": f"{prefix} solo debe contener letras. Valor recibido: {raw_value}.",
+    }
+    if sheet:
+        payload["sheet"] = sheet
+    if row_number is not None:
+        payload["row"] = row_number
+    blockers.append(payload)
+
+
 def _append_required_cell_validation(
     blockers: List[Dict[str, Any]],
     form_cell_values: Dict[str, Any],
@@ -991,6 +1029,18 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
         max_length=12,
         code_prefix="XLSX_COMMON_REQUIRED_CELL",
     )
+    for field in [
+        "rep_legal_primer_apellido",
+        "rep_legal_primer_nombre",
+        "responsable_sede_primer_apellido",
+        "responsable_sede_primer_nombre",
+    ]:
+        _append_letters_only_validation(
+            blockers,
+            form_cell_values.get(field) or {},
+            code="XLSX_FORM_LETTERS_ONLY",
+            field=field,
+        )
 
     for field in ["autorizacion_1", "autorizacion_2", "autorizacion_3"]:
         _append_required_cell_validation(
@@ -1073,6 +1123,16 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                 require_numeric=require_numeric,
                 require_email=require_email,
                 require_date=require_date,
+            )
+        for field in ["responsable_primer_apellido", "responsable_primer_nombre"]:
+            cell_info = _sheet_cell_info(sheet_values, field)
+            _append_letters_only_validation(
+                blockers,
+                cell_info,
+                code="XLSX_SEDE_LETTERS_ONLY",
+                field=field,
+                sheet=sheet_name,
+                message_prefix=f"{sheet_name}: el campo '{cell_info.get('label') or field}' ({cell_info.get('cell') or 'celda requerida'})",
             )
         radicacion_value = _sheet_cell_info(sheet_values, "numero_radicacion").get("value")
         if normalize_text(expected_numero_radicacion) and normalize_text(radicacion_value) and normalize_text(radicacion_value) != normalize_text(expected_numero_radicacion):
@@ -1355,6 +1415,19 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                     min_length=min_length,
                     max_length=max_length,
                     allow_zero_length=field == "celular",
+                )
+            for field in ["primer_apellido", "primer_nombre"]:
+                cell_info = _worker_cell_info(row_values, field)
+                _append_letters_only_validation(
+                    blockers,
+                    cell_info,
+                    code="XLSX_TRABAJADOR_LETTERS_ONLY",
+                    field=field,
+                    sheet=sheet_name,
+                    message_prefix=(
+                        f"{sheet_name}, fila {cell_info.get('row')}: "
+                        f"el campo '{cell_info.get('label') or field}' ({cell_info.get('cell') or 'celda requerida'})"
+                    ),
                 )
             worker_center_info = _worker_cell_info(row_values, "codigo_centro_trabajo")
             worker_center_code = normalize_text(worker_center_info.get("value"))
