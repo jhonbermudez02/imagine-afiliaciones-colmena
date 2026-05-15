@@ -10,15 +10,6 @@ services:
     networks:
       - imagine_net
 
-  imagine_ollama:
-    image: ollama/ollama:latest
-    restart: unless-stopped
-    command: serve
-    volumes:
-      - ./data/ollama:/root/.ollama
-    networks:
-      - imagine_net
-
   imagine_db:
     image: postgres:15-alpine
     restart: unless-stopped
@@ -100,15 +91,15 @@ services:
     restart: unless-stopped
     depends_on:
       - imagine_qdrant
-      - imagine_ollama
       - imagine_db
       - imagine_compat_backend
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-afi_user}:${POSTGRES_PASSWORD:-afi_pass}@imagine_db:5432/${POSTGRES_DB:-afiliaciones}
       QDRANT_URL: http://imagine_qdrant:6333
-      OLLAMA_URL: http://imagine_ollama:11434
-      MODEL_NAME: ${MODEL_NAME:-llama3.2:1b}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      MODEL_NAME: ${MODEL_NAME:-local-deterministic}
+      USE_LOCAL_EMBED: "true"
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-local-hash-embedding-v1}
+      RERANKER_ENABLED: "false"
       KNOWLEDGE_DIR: /data/knowledge
       NOTIFICATION_ENABLED: ${NOTIFICATION_ENABLED:-true}
       NOTIFICATION_SENDER_EMAIL: ${NOTIFICATION_SENDER_EMAIL:-no-reply@example.com}
@@ -158,7 +149,6 @@ volumes:
   imagine_postgres_data:
   imagine_compat_postgres_data:
   imagine_qdrant_data:
-  imagine_ollama_data:
 
 networks:
   imagine_net:

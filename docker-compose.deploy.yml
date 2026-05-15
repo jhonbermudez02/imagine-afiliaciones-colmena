@@ -13,36 +13,6 @@ services:
     networks:
       - imagine_net
 
-  imagine_ollama:
-    image: ollama/ollama:latest
-    profiles: ["ollama"]
-    restart: unless-stopped
-    command: serve
-    ports:
-      - "${OLLAMA_PORT:-11434}:11434"
-    volumes:
-      - imagine_ollama_data:/root/.ollama
-    networks:
-      - imagine_net
-
-  imagine_ollama_init:
-    image: ollama/ollama:latest
-    profiles: ["ollama"]
-    restart: "no"
-    depends_on:
-      - imagine_ollama
-    entrypoint: >
-      sh -c "
-        sleep 5 &&
-        ollama pull llama3.2:1b &&
-        ollama pull nomic-embed-text &&
-        echo 'Modelos descargados OK'
-      "
-    environment:
-      OLLAMA_HOST: http://imagine_ollama:11434
-    networks:
-      - imagine_net
-
   imagine_db:
     image: postgres:15-alpine
     restart: unless-stopped
@@ -129,10 +99,9 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-afi_user}:${POSTGRES_PASSWORD:-afi_pass}@imagine_db:5432/${POSTGRES_DB:-afiliaciones}
       QDRANT_URL: http://imagine_qdrant:6333
-      OLLAMA_URL: http://imagine_ollama:11434
-      MODEL_NAME: ${MODEL_NAME:-llama3.2:1b}
+      MODEL_NAME: ${MODEL_NAME:-local-deterministic}
       USE_LOCAL_EMBED: "true"
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-paraphrase-multilingual-MiniLM-L12-v2}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-local-hash-embedding-v1}
       RERANKER_ENABLED: "false"
       KNOWLEDGE_DIR: /data/knowledge
       NOTIFICATION_ENABLED: ${NOTIFICATION_ENABLED:-false}
@@ -183,7 +152,6 @@ services:
 volumes:
   imagine_compat_postgres_data:
   imagine_qdrant_data:
-  imagine_ollama_data:
 
 networks:
   imagine_net:

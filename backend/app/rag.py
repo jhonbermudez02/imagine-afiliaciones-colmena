@@ -101,18 +101,18 @@ def load_knowledge_chunks() -> List[KnowledgeChunk]:
     return chunks
 
 
-async def ollama_embed(text: str) -> List[float]:
+async def local_embed(text: str) -> List[float]:
     vector = await asyncio.to_thread(embed_text, text)
     if not vector:
         raise ValueError(f"El motor de embeddings {get_engine_name()} no devolvio vector")
     return vector
 
 
-async def ollama_embed_many(texts: List[str], model: Optional[str] = None) -> List[List[float]]:
+async def local_embed_many(texts: List[str], model: Optional[str] = None) -> List[List[float]]:
     clean_texts = [str(text or "") for text in texts]
     if not clean_texts:
         return []
-    embeddings = [await ollama_embed(text) for text in clean_texts]
+    embeddings = [await local_embed(text) for text in clean_texts]
     if not embeddings:
         raise ValueError(f"El motor de embeddings {get_engine_name()} no devolvio vectores")
     return embeddings
@@ -144,7 +144,7 @@ async def reindex_knowledge() -> Dict[str, int]:
     if not chunks:
         return {"documents": 0, "chunks": 0}
 
-    sample_vector = await ollama_embed(chunks[0].text)
+    sample_vector = await local_embed(chunks[0].text)
     previous_collection = get_active_collection_name()
     target_collection = f"{settings.qdrant_collection}_rebuild_{uuid.uuid4().hex[:8]}"
     await ensure_collection(target_collection, len(sample_vector))
@@ -155,7 +155,7 @@ async def reindex_knowledge() -> Dict[str, int]:
     batch_size = 16
 
     for chunk in chunks:
-        vector = await ollama_embed(chunk.text)
+        vector = await local_embed(chunk.text)
         points_batch.append(
             models.PointStruct(
                 id=str(uuid.uuid4()),
@@ -438,8 +438,8 @@ async def apply_optional_reranker(query: str, matches: List[Dict[str, object]]) 
     primary = list(matches[:top_k])
     remainder = list(matches[top_k:])
     try:
-        query_embedding = await ollama_embed_many([query], model=settings.reranker_model)
-        doc_embeddings = await ollama_embed_many(
+        query_embedding = await local_embed_many([query], model=settings.reranker_model)
+        doc_embeddings = await local_embed_many(
             [str(item.get("contenido") or item.get("titulo") or "")[:2400] for item in primary],
             model=settings.reranker_model,
         )
@@ -464,7 +464,7 @@ async def search_knowledge(query: str, selected_topics: Optional[List[str]] = No
         return []
 
     filters = build_query_filter(query, selected_topics=selected_topics)
-    vector = await ollama_embed(query)
+    vector = await local_embed(query)
     client = get_qdrant_client()
     collection_name = get_active_collection_name()
     results = client.search(

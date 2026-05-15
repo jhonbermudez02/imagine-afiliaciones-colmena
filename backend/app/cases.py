@@ -6,6 +6,7 @@ import io
 import json
 import re
 import shutil
+import tempfile
 import time
 import unicodedata
 import uuid
@@ -18,7 +19,6 @@ from time import perf_counter
 from typing import Any, Dict, List, Optional
 
 import httpx
-import pytesseract
 from openpyxl import load_workbook
 from pdf2image import convert_from_path
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
@@ -103,6 +103,7 @@ DOCUMENT_CALIBRATION_PATH = Path(settings.cases_dir).parent / "evals" / "learnin
 DOCUMENT_SUPERVISION_PATH = Path(settings.cases_dir).parent / "evals" / "learning" / "document_supervision.jsonl"
 LEARNING_MANIFEST_PATH = Path(settings.cases_dir).parent / "evals" / "learning" / "manifest.json"
 _DOCUMENT_CALIBRATION_CACHE: Optional[Dict[str, Any]] = None
+_PADDLE_OCR_ENGINE = None
 
 OPERATION_LABELS = {
     "colima": "AFI Colima",
@@ -3414,6 +3415,14 @@ def _extract_fields(text: str) -> Dict[str, Any]:
     match = re.search(r"n[uú]mero de documento[^0-9]{0,20}([\d.,\-\s]{6,20})", normalized, flags=re.IGNORECASE)
     if match:
         rep_doc = only_digits(match.group(1))
+    match = re.search(
+        r"\bn[uú]mer[o0][^\d]{0,18}(\d{1,3}(?:[.\s]\d{3}){1,3})",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        rep_doc = only_digits(match.group(1))
+        doc_number = rep_doc or doc_number
     if (
         "cedula de ciudadania" in lowered
         or "cedula de" in lowered
@@ -3422,7 +3431,7 @@ def _extract_fields(text: str) -> Dict[str, Any]:
         or "nuip" in lowered
     ):
         cedula_number_match = re.search(
-            r"(?:nuip|c[eé]dula\s+de\s+ciudadan[ií]a)[^\d]{0,12}(\d{1,3}(?:[.\s]\d{3}){1,3})",
+            r"(?:n[uú]mer[o0]|nuip|c[eé]dula\s+de\s+ciudadan[ií]a)[^\d]{0,18}(\d{1,3}(?:[.\s]\d{3}){1,3})",
             normalized,
             flags=re.IGNORECASE,
         )
@@ -3796,14 +3805,52 @@ def _ocr_image(path: Path) -> Dict[str, Any]:
 
 
 def _prepare_ocr_variants(image: Image.Image) -> List[Image.Image]:
-    base = image.convert("L")
-    enlarged = base.resize((max(base.width * 2, 1), max(base.height * 2, 1)), Image.Resampling.LANCZOS)
+    base = ImageOps.autocontrast(image.convert("L"))
+    denoised = _denoise_ocr_image(base)
+    enlarged = denoised.resize((max(denoised.width * 2, 1), max(denoised.height * 2, 1)), Image.Resampling.LANCZOS)
     sharpened = enlarged.filter(ImageFilter.SHARPEN)
-    contrasted = ImageEnhance.Contrast(sharpened).enhance(2.6)
+    contrasted = ImageEnhance.Contrast(sharpened).enhance(2.2)
     autocontrasted = ImageOps.autocontrast(contrasted)
     thresholded = autocontrasted.point(lambda px: 255 if px > 165 else 0, mode="1").convert("L")
     soft_thresholded = autocontrasted.point(lambda px: 255 if px > 145 else 0, mode="1").convert("L")
-    return [enlarged, autocontrasted, thresholded, soft_thresholded]
+    adaptive = _adaptive_threshold_ocr_image(denoised)
+    adaptive_enlarged = adaptive.resize((max(adaptive.width * 2, 1), max(adaptive.height * 2, 1)), Image.Resampling.LANCZOS)
+    return [base, denoised, enlarged, autocontrasted, adaptive_enlarged, thresholded, soft_thresholded]
+
+
+def _denoise_ocr_image(image: Image.Image) -> Image.Image:
+    try:
+        import cv2
+        import numpy as np
+
+        arr = np.array(image.convert("L"))
+        arr = cv2.fastNlMeansDenoising(arr, None, h=12, templateWindowSize=7, searchWindowSize=21)
+        arr = cv2.medianBlur(arr, 3)
+        arr = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(arr)
+        return Image.fromarray(arr)
+    except Exception:
+        return ImageOps.autocontrast(image.convert("L").filter(ImageFilter.MedianFilter(size=3)))
+
+
+def _adaptive_threshold_ocr_image(image: Image.Image) -> Image.Image:
+    try:
+        import cv2
+        import numpy as np
+
+        arr = np.array(image.convert("L"))
+        binary = cv2.adaptiveThreshold(
+            arr,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            35,
+            11,
+        )
+        kernel = np.ones((2, 2), np.uint8)
+        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
+        return Image.fromarray(binary)
+    except Exception:
+        return ImageOps.autocontrast(image.convert("L")).point(lambda px: 255 if px > 155 else 0, mode="1").convert("L")
 
 
 def _score_ocr_candidate(text: str) -> int:
@@ -3858,6 +3905,72 @@ def _ocr_candidate_is_good(text: str, score: int) -> bool:
     return any(marker in haystack for marker in strong_markers) and len(text) >= 90
 
 
+def _get_paddle_ocr_engine():
+    global _PADDLE_OCR_ENGINE
+    if _PADDLE_OCR_ENGINE is None:
+        from paddleocr import PaddleOCR
+
+        try:
+            _PADDLE_OCR_ENGINE = PaddleOCR(
+                lang="es",
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_textline_orientation=False,
+            )
+        except TypeError:
+            _PADDLE_OCR_ENGINE = PaddleOCR(lang="es", use_angle_cls=False)
+    return _PADDLE_OCR_ENGINE
+
+
+def _flatten_paddle_texts(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        texts: List[str] = []
+        for key in ("rec_texts", "text", "texts"):
+            item = value.get(key)
+            if isinstance(item, list):
+                texts.extend(str(part) for part in item if str(part or "").strip())
+            elif isinstance(item, str) and item.strip():
+                texts.append(item)
+        if texts:
+            return texts
+        for item in value.values():
+            texts.extend(_flatten_paddle_texts(item))
+        return texts
+    if isinstance(value, (list, tuple)):
+        if len(value) >= 2 and isinstance(value[1], (list, tuple)) and value[1] and isinstance(value[1][0], str):
+            return [str(value[1][0])]
+        texts: List[str] = []
+        for item in value:
+            texts.extend(_flatten_paddle_texts(item))
+        return texts
+    if hasattr(value, "json"):
+        try:
+            return _flatten_paddle_texts(value.json)
+        except Exception:
+            pass
+    if hasattr(value, "res"):
+        try:
+            return _flatten_paddle_texts(value.res)
+        except Exception:
+            pass
+    return []
+
+
+def _ocr_text_from_image_with_paddle(image: Image.Image) -> str:
+    engine = _get_paddle_ocr_engine()
+    with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+        image.convert("RGB").save(tmp.name, format="PNG")
+        if hasattr(engine, "predict"):
+            result = engine.predict(tmp.name)
+        else:
+            result = engine.ocr(tmp.name, cls=False)
+    return normalize_text("\n".join(_flatten_paddle_texts(result)))
+
+
 def _ocr_best_text_from_image(image: Image.Image) -> str:
     variants = _prepare_ocr_variants(image)
     best_text = ""
@@ -3868,9 +3981,9 @@ def _ocr_best_text_from_image(image: Image.Image) -> str:
         (variants[1], "--psm 6"),
         (variants[2], "--psm 6"),
     ]
-    for variant, config in fast_candidates:
+    for variant, _config in fast_candidates:
         try:
-            text = normalize_text(pytesseract.image_to_string(variant, lang="spa+eng", config=config))
+            text = _ocr_text_from_image_with_paddle(variant)
         except Exception:
             continue
         if not text:
@@ -3885,9 +3998,9 @@ def _ocr_best_text_from_image(image: Image.Image) -> str:
     # Ruta exhaustiva solo para casos difíciles.
     configs = ["--psm 6", "--psm 11"]
     for variant in variants:
-        for config in configs:
+        for _config in configs:
             try:
-                text = normalize_text(pytesseract.image_to_string(variant, lang="spa+eng", config=config))
+                text = _ocr_text_from_image_with_paddle(variant)
             except Exception:
                 continue
             if not text:

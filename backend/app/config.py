@@ -5,11 +5,10 @@ class Settings(BaseSettings):
     app_name: str = "NOVA API - Sistema de Afiliaciones"
     app_version: str = "2.0"
     qdrant_url: str = "http://imagine_qdrant:6333"
-    ollama_url: str = "http://imagine_ollama:11434"
     database_url: str = "postgresql://afi_user:afi_pass@imagine_db:5432/afiliaciones"
     frontend_url: str = "http://localhost:8105"
-    model_name: str = "llama3.2:1b"
-    embedding_model: str = "nomic-embed-text"
+    model_name: str = "local-deterministic"
+    embedding_model: str = "local-hash-embedding-v1"
     reranker_model: str = "bbjson/bge-reranker-base"
     reranker_enabled: bool = True
     reranker_top_k: int = 6

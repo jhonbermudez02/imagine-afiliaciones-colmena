@@ -31,7 +31,6 @@ def main() -> None:
     copy_path(ROOT / "backend", EXPORT_DIR / "backend")
     copy_path(ROOT / "frontend-nova", EXPORT_DIR / "frontend-nova")
     copy_path(ROOT / "data" / "qdrant", EXPORT_DIR / "qdrant_data")
-    copy_path(ROOT / "data" / "ollama", EXPORT_DIR / "ollama_models")
     copy_path(ROOT / "data" / "knowledge", EXPORT_DIR / "knowledge")
     copy_path(ROOT / "data" / "raw", EXPORT_DIR / "raw_snapshots")
     if (ROOT / "data" / "evals").exists():

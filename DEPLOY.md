@@ -16,7 +16,6 @@ Este compose deja aislados los servicios del sistema:
 - `imagine_db`
 - `imagine_compat_db`
 - `imagine_qdrant`
-- `imagine_ollama`
 
 ## Compatibilidad
 
@@ -141,7 +140,6 @@ Los datos persistentes quedan en volúmenes Docker:
 - `imagine_postgres_data`
 - `imagine_compat_postgres_data`
 - `imagine_qdrant_data`
-- `imagine_ollama_data`
 
 Además, el proyecto usa la carpeta:
 

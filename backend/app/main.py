@@ -40,7 +40,7 @@ from .cases import (
     store_case_files,
 )
 from .config import settings
-from .embeddings import get_embed_dims, get_engine_name, is_local_embed_enabled
+from .embeddings import get_embed_dims, get_engine_name
 from .notifications import send_case_notification, send_tester_activity_summary
 from .rag import generate_grounded_answer, infer_operational_decision, reindex_knowledge, search_knowledge
 from .services import get_eval_summary, get_feed_summary, get_system_health, get_system_status
@@ -3563,24 +3563,20 @@ async def case_package(case_id: str):
 
 @app.get("/api/modelos")
 async def listar_modelos():
-    if is_local_embed_enabled():
-        return {
-            "mode": "local-python",
-            "ollama": "disabled",
-            "models": [
-                {
-                    "name": get_engine_name(),
-                    "type": "embeddings",
-                    "dimensions": get_embed_dims(),
-                    "provider": "sentence-transformers",
-                }
-            ],
-        }
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.ollama_url}/api/tags", timeout=5.0)
-            if response.status_code == 200:
-                return response.json()
-            return {"error": "No se pudo conectar con Ollama"}
-    except Exception as exc:
-        return {"error": str(exc)}
+    return {
+        "mode": "local-python",
+        "remote_model_runtime": "disabled",
+        "models": [
+            {
+                "name": get_engine_name(),
+                "type": "embeddings",
+                "dimensions": get_embed_dims(),
+                "provider": "backend",
+            },
+            {
+                "name": "PaddleOCR",
+                "type": "ocr",
+                "provider": "paddleocr",
+            },
+        ],
+    }
