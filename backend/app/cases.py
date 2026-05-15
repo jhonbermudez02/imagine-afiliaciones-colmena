@@ -6,6 +6,7 @@ import io
 import json
 import re
 import shutil
+import tempfile
 import time
 import unicodedata
 import uuid
@@ -18,7 +19,6 @@ from time import perf_counter
 from typing import Any, Dict, List, Optional
 
 import httpx
-import pytesseract
 from openpyxl import load_workbook
 from pdf2image import convert_from_path
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
@@ -45,7 +45,7 @@ LEGACY_CODE_TO_TYPE = {
     14: "afp",
     15: "paz_y_salvo",
     16: "eps_afp",
-    17: "detectar",
+    17: "inspector",
     19: "identificacion_peligros",
     20: "examen_preocupacional",
     21: "autorizacion_terceros",
@@ -79,6 +79,7 @@ DOC_TYPE_LABELS = {
     "beneficiario_final": "Beneficiario final",
     "autorizacion": "Autorización",
     "sat": "SAT",
+    "inspector": "Inspector",
 }
 
 DOC_TYPE_TO_PRIMARY_CODE: Dict[str, int] = {}
@@ -103,6 +104,7 @@ DOCUMENT_CALIBRATION_PATH = Path(settings.cases_dir).parent / "evals" / "learnin
 DOCUMENT_SUPERVISION_PATH = Path(settings.cases_dir).parent / "evals" / "learning" / "document_supervision.jsonl"
 LEARNING_MANIFEST_PATH = Path(settings.cases_dir).parent / "evals" / "learning" / "manifest.json"
 _DOCUMENT_CALIBRATION_CACHE: Optional[Dict[str, Any]] = None
+_PADDLE_OCR_ENGINE = None
 
 OPERATION_LABELS = {
     "colima": "AFI Colima",
@@ -2132,6 +2134,20 @@ def _ascii_haystack(value: Any) -> str:
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
 
 
+def _is_valid_cedula_number(value: Any) -> bool:
+    digits = only_digits(value)
+    return bool(5 <= len(digits) <= 10 and not digits.startswith("0"))
+
+
+def _cedula_number_candidates(values: List[Any]) -> List[str]:
+    candidates: List[str] = []
+    for raw in values:
+        digits = only_digits(raw)
+        if _is_valid_cedula_number(digits) and digits not in candidates:
+            candidates.append(digits)
+    return candidates
+
+
 def _rut_nit_core(value: Any) -> str:
     digits = only_digits(value)
     if len(digits) >= 9:
@@ -2325,8 +2341,35 @@ def _extract_rut_identity_from_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _looks_like_cedula_document(name_txt: str, haystack: str) -> bool:
+    ascii_text = _ascii_haystack(haystack)
+    country_patterns = [
+        r"\brepublica\s+de\s+colombia\b",
+        r"\brepublica\s+de\s+colonbia\b",
+        r"\brep\w{0,6}\s+de\s+colo?mbia\b",
+        r"\brep\w{0,6}\s+de\s+colon?bia\b",
+    ]
+    cedula_patterns = [
+        r"\bcedula\s+de\s+ciudadania\b",
+        r"\bcedula\s+de\s+cidadania\b",
+        r"\bedula\s+de\s+ciudadania\b",
+        r"\bedula\s+de\s+cidadania\b",
+        r"\bcedula\s+de\s+ciudadan\w*\b",
+        r"\bcedula\s+de\s+cidadan\w*\b",
+        r"\bedula\s+de\s+ciudadan\w*\b",
+        r"\bedula\s+de\s+cidadan\w*\b",
+        r"\bce?dula\s+de\s+ciu?dadani?a\b",
+    ]
+    has_country_marker = any(re.search(pattern, ascii_text) for pattern in country_patterns)
+    has_cedula_marker = any(re.search(pattern, ascii_text) for pattern in cedula_patterns)
+    if not (has_country_marker and has_cedula_marker):
+        return False
+
     positive_markers = [
         "cedula de ciudadania",
+        "cedula de cidadania",
+        "edula de ciudadania",
+        "republica de colombia",
+        "republica de colonbia",
         "identificacion personal",
         "registraduria nacional",
         "apellidos",
@@ -2374,15 +2417,13 @@ def _looks_like_cedula_document(name_txt: str, haystack: str) -> bool:
     ]
     negative_hits = sum(1 for marker in negative_markers if marker in haystack)
     positive_hits += sum(1 for pattern in fuzzy_positive_patterns if re.search(pattern, haystack))
-    if any(token in name_txt for token in ["cedula", "cc_"]):
-        positive_hits += 2
     if "cedula de ciudadania" in haystack or "identificacion personal" in haystack:
         positive_hits += 2
     if "fecha y lug" in haystack and "expedicion" in haystack:
         positive_hits += 2
     if "lugar de nac" in haystack:
         positive_hits += 2
-    if re.search(r"\b\d{7,10}\b", haystack):
+    if any(_is_valid_cedula_number(item) for item in re.findall(r"\b\d{5,10}\b", haystack)):
         positive_hits += 1
     if negative_hits >= 2 and positive_hits < 5:
         return False
@@ -2425,6 +2466,27 @@ def _looks_like_entrega_documentos(haystack: str) -> bool:
         "nro. de contrato",
     ]
     return sum(1 for marker in positive_markers if marker in haystack) >= 2
+
+
+def _looks_like_inspector_document(haystack: str) -> bool:
+    return "risk consulting global group" in _ascii_haystack(haystack)
+
+
+def _entrega_front_linea_efectiva_marked(entrega_text: Any) -> bool:
+    text = _ascii_haystack(entrega_text)
+    match = re.search(r"front\s*[-–—]?\s*linea\s+efectiva(?P<section>.{0,3})", text, flags=re.DOTALL)
+    if not match:
+        return False
+    return "x" in match.group("section")
+
+
+def _inspector_exempt_by_entrega(docs: List[Dict[str, Any]]) -> bool:
+    for doc in docs:
+        if str(doc.get("document_type") or "") != "entrega_documentos":
+            continue
+        if _entrega_front_linea_efectiva_marked(doc.get("ocr_text") or doc.get("text_preview") or ""):
+            return True
+    return False
 
 
 def _looks_like_anexo_sedes_document(haystack: str) -> bool:
@@ -2692,37 +2754,13 @@ def _apply_document_learning_calibration(docs: List[Dict[str, Any]]) -> None:
 
 
 def _looks_like_autorizacion_document(haystack: str) -> bool:
-    positive_markers = [
-        "autorizacion de tratamiento de datos",
-        "autorización de tratamiento de datos",
-        "tratamiento de los datos personales",
-        "tratamiento de datos personales",
-        "acuerdo de transmision de datos personales",
-        "acuerdo de transmisión de datos personales",
-        "finalidades que han sido autorizadas",
-        "responsable sobre la informacion",
-        "responsable sobre la información",
-        "encargado",
-        "clausula sexta",
-        "cláusula sexta",
-        "clausula septima",
-        "cláusula séptima",
-        "remitir a traves de los canales",
-        "remitir a través de los canales",
-        "declaro que he sido informado que",
-        "recopilar, analizar, consultar, validar y procesar",
-        "fundacion grupo social",
-        "fundación grupo social",
-        "formato solicitud de autorizacion comercial para cambio de vigencias",
-        "formato solicitud de autorización comercial para cambio de vigencias",
-        "autorizacion comercial para cambio de vigencias de trabajadores",
-        "autorización comercial para cambio de vigencias de trabajadores",
-        "cargue retroactivo",
-        "novedades retroactivas",
-        "fecha aprobacion",
-        "fecha aprobación",
-    ]
-    return sum(1 for marker in positive_markers if marker in haystack) >= 2
+    text = _ascii_haystack(haystack)
+    has_cps_code = bool(
+        re.search(r"\bcps\s*-?\s*f\s*-?\s*\d+\b", text)
+        or re.search(r"\bcpsf\d+\b", re.sub(r"[^a-z0-9]+", "", text))
+    )
+    has_riesgos_laborales = bool(re.search(r"\briesg\w*\s+labor\w*\b", text))
+    return has_cps_code and has_riesgos_laborales
 
 
 def _looks_like_comision_document(haystack: str) -> bool:
@@ -3124,6 +3162,8 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
         return {"document_type": "anexo_sedes", "legacy_code": 1, "code_source": "ocr_sedes_precise"}
     if _looks_like_entrega_documentos(haystack):
         return {"document_type": "entrega_documentos", "legacy_code": 10, "code_source": "ocr_entrega_precise"}
+    if _looks_like_inspector_document(haystack):
+        return {"document_type": "inspector", "legacy_code": 17, "code_source": "ocr_inspector_precise"}
 
     # 1. Intentar clasificar con RAG despues de reglas deterministicas fuertes.
     if text and len(text.strip()) > 50:
@@ -3209,7 +3249,7 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
         (27, "beneficiario_final", ["beneficiario final"], "ocr_beneficiario"),
         (27, "beneficiario_final", ["participacion directa o indirecta mayor al 5", "participación directa o indirecta mayor al 5", "informacion de la compania", "información de la compañía"], "ocr_beneficiario_company"),
         (28, "sat", ["sistema de afiliacion transaccional", "canal sat"], "ocr_sat"),
-        (98, "autorizacion", ["autorizacion clientes, proveedores y terceros", "autorizacion tratamiento de datos", "autorización de tratamiento de datos", "tratamiento de datos personales"], "ocr_autorizacion"),
+        (17, "inspector", ["risk consulting global group"], "ocr_inspector"),
     ]
     for code, doc_type, keys, label in strong_rules:
         if any(key in haystack for key in keys):
@@ -3219,7 +3259,6 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
         return {"document_type": "soporte_ingresos", "legacy_code": 11, "code_source": "ocr_ingresos"}
 
     name_rules: List[tuple[int, str, List[str], str]] = [
-        (6, "cedula", ["cedula", "cc_"], "name_cedula"),
         (5, "camara_comercio", ["camara", "comercio"], "name_camara"),
         (8, "rut", ["rut"], "name_rut"),
         (1, "anexo_sedes", ["sedes", "anexo_sedes"], "name_sedes"),
@@ -3227,7 +3266,6 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
         (10, "entrega_documentos", ["entrega", "anexos"], "name_entrega"),
         (11, "soporte_pagos", ["pagos", "recibo"], "name_pagos"),
         (12, "contrato", ["contrato"], "name_contrato"),
-        (98, "autorizacion", ["autorizacion"], "name_autorizacion"),
     ]
     for code, doc_type, keys, label in name_rules:
         if any(key in name_txt for key in keys):
@@ -3255,30 +3293,30 @@ def _infer_required_document_satisfaction(
     for required in required_docs:
         direct = required in grouped_types
         evidence: Dict[str, Any] = {"satisfied": direct, "direct": direct, "filename": "", "matched": "", "reason": ""}
-        if direct:
-            doc = next((item for item in docs if item.get("document_type") == required), None)
-            evidence["filename"] = (doc or {}).get("filename", "")
-            evidence["reason"] = "direct_type"
-            results[required] = evidence
-            continue
-
         if required == "cedula":
+            evidence.update({"satisfied": False, "direct": direct})
             for doc in docs:
                 fields = doc.get("fields") or {}
                 preview = normalize_haystack(doc.get("text_preview", ""))
                 doc_type = str(doc.get("document_type") or "")
-                candidates = [fields.get("representative_document", ""), fields.get("document_number", "")] + list(fields.get("all_numbers") or [])
-                candidate = _best_numeric_candidate(xlsx_document, candidates) if xlsx_document else ""
+                candidates = _cedula_number_candidates(
+                    [fields.get("representative_document", ""), fields.get("document_number", "")]
+                    + list(fields.get("all_numbers") or [])
+                )
+                candidate = _best_document_candidate(xlsx_document, candidates) if xlsx_document else ""
                 if candidate and (
-                    doc_type not in {"carta", "rut", "camara_comercio", "soporte_ingresos", "entrega_documentos"}
-                    and (
-                        _looks_like_cedula_document(normalize_haystack(doc.get("filename", "")), preview)
-                        or "numero de cedula" in preview
-                        or "numero de identificacion cc" in preview
-                        or "tipo de documento numero de identificacion cc" in preview
-                        or "tipo de documento cc" in preview
-                        or "identificacion personal" in preview
-                        or ("lugar de nac" in preview and "expedicion" in preview)
+                    doc_type == "cedula"
+                    or (
+                        doc_type not in {"carta", "rut", "camara_comercio", "soporte_ingresos", "entrega_documentos"}
+                        and (
+                            _looks_like_cedula_document(normalize_haystack(doc.get("filename", "")), preview)
+                            or "numero de cedula" in preview
+                            or "numero de identificacion cc" in preview
+                            or "tipo de documento numero de identificacion cc" in preview
+                            or "tipo de documento cc" in preview
+                            or "identificacion personal" in preview
+                            or ("lugar de nac" in preview and "expedicion" in preview)
+                        )
                     )
                 ):
                     evidence.update(
@@ -3286,11 +3324,21 @@ def _infer_required_document_satisfaction(
                             "satisfied": True,
                             "filename": doc.get("filename", ""),
                             "matched": candidate,
-                            "reason": "inferred_identity_match",
+                            "reason": "identity_number_match",
                         }
                     )
                     break
-        elif required == "rut":
+            results[required] = evidence
+            continue
+
+        if direct:
+            doc = next((item for item in docs if item.get("document_type") == required), None)
+            evidence["filename"] = (doc or {}).get("filename", "")
+            evidence["reason"] = "direct_type"
+            results[required] = evidence
+            continue
+
+        if required == "rut":
             for doc in docs:
                 fields = doc.get("fields") or {}
                 preview = normalize_haystack(doc.get("text_preview", ""))
@@ -3414,6 +3462,19 @@ def _extract_fields(text: str) -> Dict[str, Any]:
     match = re.search(r"n[uú]mero de documento[^0-9]{0,20}([\d.,\-\s]{6,20})", normalized, flags=re.IGNORECASE)
     if match:
         rep_doc = only_digits(match.group(1))
+        if not _is_valid_cedula_number(rep_doc):
+            rep_doc = ""
+    match = re.search(
+        r"\bn[uú]mer[o0][^\d]{0,18}(\d{1,3}(?:[.\s]\d{3}){1,3})",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        rep_doc = only_digits(match.group(1))
+        if _is_valid_cedula_number(rep_doc):
+            doc_number = rep_doc or doc_number
+        else:
+            rep_doc = ""
     if (
         "cedula de ciudadania" in lowered
         or "cedula de" in lowered
@@ -3422,7 +3483,7 @@ def _extract_fields(text: str) -> Dict[str, Any]:
         or "nuip" in lowered
     ):
         cedula_number_match = re.search(
-            r"(?:nuip|c[eé]dula\s+de\s+ciudadan[ií]a)[^\d]{0,12}(\d{1,3}(?:[.\s]\d{3}){1,3})",
+            r"(?:n[uú]mer[o0]|nuip|c[eé]dula\s+de\s+ciudadan[ií]a)[^\d]{0,18}(\d{1,3}(?:[.\s]\d{3}){1,3}|\d{5,10})",
             normalized,
             flags=re.IGNORECASE,
         )
@@ -3433,12 +3494,14 @@ def _extract_fields(text: str) -> Dict[str, Any]:
                 flags=re.IGNORECASE,
             )
         if cedula_number_match:
-            rep_doc = only_digits(cedula_number_match.group(1))
+            candidate_doc = only_digits(cedula_number_match.group(1))
+            if _is_valid_cedula_number(candidate_doc):
+                rep_doc = candidate_doc
         cedula_name = _extract_name_from_cedula_text(normalized)
         cedula_name = _normalize_person_name(cedula_name)
         if _looks_like_person_name(cedula_name):
             rep_name = cedula_name
-        cedula_numbers = [only_digits(item) for item in digits if 6 <= len(only_digits(item)) <= 15]
+        cedula_numbers = _cedula_number_candidates(digits)
         if cedula_numbers:
             rep_doc = rep_doc or cedula_numbers[0]
             doc_number = rep_doc or doc_number
@@ -3796,14 +3859,52 @@ def _ocr_image(path: Path) -> Dict[str, Any]:
 
 
 def _prepare_ocr_variants(image: Image.Image) -> List[Image.Image]:
-    base = image.convert("L")
-    enlarged = base.resize((max(base.width * 2, 1), max(base.height * 2, 1)), Image.Resampling.LANCZOS)
+    base = ImageOps.autocontrast(image.convert("L"))
+    denoised = _denoise_ocr_image(base)
+    enlarged = denoised.resize((max(denoised.width * 2, 1), max(denoised.height * 2, 1)), Image.Resampling.LANCZOS)
     sharpened = enlarged.filter(ImageFilter.SHARPEN)
-    contrasted = ImageEnhance.Contrast(sharpened).enhance(2.6)
+    contrasted = ImageEnhance.Contrast(sharpened).enhance(2.2)
     autocontrasted = ImageOps.autocontrast(contrasted)
     thresholded = autocontrasted.point(lambda px: 255 if px > 165 else 0, mode="1").convert("L")
     soft_thresholded = autocontrasted.point(lambda px: 255 if px > 145 else 0, mode="1").convert("L")
-    return [enlarged, autocontrasted, thresholded, soft_thresholded]
+    adaptive = _adaptive_threshold_ocr_image(denoised)
+    adaptive_enlarged = adaptive.resize((max(adaptive.width * 2, 1), max(adaptive.height * 2, 1)), Image.Resampling.LANCZOS)
+    return [base, denoised, enlarged, autocontrasted, adaptive_enlarged, thresholded, soft_thresholded]
+
+
+def _denoise_ocr_image(image: Image.Image) -> Image.Image:
+    try:
+        import cv2
+        import numpy as np
+
+        arr = np.array(image.convert("L"))
+        arr = cv2.fastNlMeansDenoising(arr, None, h=12, templateWindowSize=7, searchWindowSize=21)
+        arr = cv2.medianBlur(arr, 3)
+        arr = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(arr)
+        return Image.fromarray(arr)
+    except Exception:
+        return ImageOps.autocontrast(image.convert("L").filter(ImageFilter.MedianFilter(size=3)))
+
+
+def _adaptive_threshold_ocr_image(image: Image.Image) -> Image.Image:
+    try:
+        import cv2
+        import numpy as np
+
+        arr = np.array(image.convert("L"))
+        binary = cv2.adaptiveThreshold(
+            arr,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            35,
+            11,
+        )
+        kernel = np.ones((2, 2), np.uint8)
+        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
+        return Image.fromarray(binary)
+    except Exception:
+        return ImageOps.autocontrast(image.convert("L")).point(lambda px: 255 if px > 155 else 0, mode="1").convert("L")
 
 
 def _score_ocr_candidate(text: str) -> int:
@@ -3858,6 +3959,72 @@ def _ocr_candidate_is_good(text: str, score: int) -> bool:
     return any(marker in haystack for marker in strong_markers) and len(text) >= 90
 
 
+def _get_paddle_ocr_engine():
+    global _PADDLE_OCR_ENGINE
+    if _PADDLE_OCR_ENGINE is None:
+        from paddleocr import PaddleOCR
+
+        try:
+            _PADDLE_OCR_ENGINE = PaddleOCR(
+                lang="es",
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_textline_orientation=False,
+            )
+        except TypeError:
+            _PADDLE_OCR_ENGINE = PaddleOCR(lang="es", use_angle_cls=False)
+    return _PADDLE_OCR_ENGINE
+
+
+def _flatten_paddle_texts(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        texts: List[str] = []
+        for key in ("rec_texts", "text", "texts"):
+            item = value.get(key)
+            if isinstance(item, list):
+                texts.extend(str(part) for part in item if str(part or "").strip())
+            elif isinstance(item, str) and item.strip():
+                texts.append(item)
+        if texts:
+            return texts
+        for item in value.values():
+            texts.extend(_flatten_paddle_texts(item))
+        return texts
+    if isinstance(value, (list, tuple)):
+        if len(value) >= 2 and isinstance(value[1], (list, tuple)) and value[1] and isinstance(value[1][0], str):
+            return [str(value[1][0])]
+        texts: List[str] = []
+        for item in value:
+            texts.extend(_flatten_paddle_texts(item))
+        return texts
+    if hasattr(value, "json"):
+        try:
+            return _flatten_paddle_texts(value.json)
+        except Exception:
+            pass
+    if hasattr(value, "res"):
+        try:
+            return _flatten_paddle_texts(value.res)
+        except Exception:
+            pass
+    return []
+
+
+def _ocr_text_from_image_with_paddle(image: Image.Image) -> str:
+    engine = _get_paddle_ocr_engine()
+    with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+        image.convert("RGB").save(tmp.name, format="PNG")
+        if hasattr(engine, "predict"):
+            result = engine.predict(tmp.name)
+        else:
+            result = engine.ocr(tmp.name, cls=False)
+    return normalize_text("\n".join(_flatten_paddle_texts(result)))
+
+
 def _ocr_best_text_from_image(image: Image.Image) -> str:
     variants = _prepare_ocr_variants(image)
     best_text = ""
@@ -3868,9 +4035,9 @@ def _ocr_best_text_from_image(image: Image.Image) -> str:
         (variants[1], "--psm 6"),
         (variants[2], "--psm 6"),
     ]
-    for variant, config in fast_candidates:
+    for variant, _config in fast_candidates:
         try:
-            text = normalize_text(pytesseract.image_to_string(variant, lang="spa+eng", config=config))
+            text = _ocr_text_from_image_with_paddle(variant)
         except Exception:
             continue
         if not text:
@@ -3885,9 +4052,9 @@ def _ocr_best_text_from_image(image: Image.Image) -> str:
     # Ruta exhaustiva solo para casos difíciles.
     configs = ["--psm 6", "--psm 11"]
     for variant in variants:
-        for config in configs:
+        for _config in configs:
             try:
-                text = normalize_text(pytesseract.image_to_string(variant, lang="spa+eng", config=config))
+                text = _ocr_text_from_image_with_paddle(variant)
             except Exception:
                 continue
             if not text:
@@ -4379,7 +4546,8 @@ def _extract_form_fields_from_sheet(sheet: Any) -> Dict[str, str]:
     is_afiliacion = tipo_tramite == "Afiliación" or ("afili" in row25_label and tipo_tramite != "Traslado")
     is_traslado = tipo_tramite == "Traslado" or ("traslado" in row28_label and tipo_tramite != "Afiliación")
     empleador_tipo_documento = _sheet_value(sheet, 16, 22)
-    tipo_persona = "Jurídica" if normalize_haystack(empleador_tipo_documento) == "ni" else "Natural"
+    tipo_persona_au13 = cleaned_sheet_value(13, 47)
+    tipo_persona = tipo_persona_au13 or ("Jurídica" if normalize_haystack(empleador_tipo_documento) == "ni" else "Natural")
 
     return {
         "fecha_radicacion": _sheet_value(sheet, 7, 7),
@@ -4474,6 +4642,8 @@ def _extract_form_cell_values_from_sheet(sheet: Any) -> Dict[str, Dict[str, Any]
         "sede_principal_direccion": ("U20", 20, 21, "Dirección de la sede principal"),
         "sede_principal_telefono": ("AN20", 20, 40, "Teléfono fijo/celular sede"),
         "sede_principal_correo": ("AN21", 21, 40, "Correo electrónico sede"),
+        "responsable_sede_primer_apellido": ("K23", 23, 11, "Responsable sede / Primer apellido"),
+        "responsable_sede_primer_nombre": ("AH23", 23, 34, "Responsable sede / Primer nombre"),
         "responsable_sede_tipo_documento": ("H24", 24, 8, "Responsable sede / Tipo de documento"),
         "responsable_sede_numero_documento": ("P24", 24, 16, "Responsable sede / Número de documento"),
         "responsable_sede_correo": ("AA24", 24, 27, "Responsable sede / Correo electrónico"),
@@ -5298,27 +5468,61 @@ def _finalize_profile_from_docs(xlsx_profile: Dict[str, Any], docs: List[Dict[st
 
 
 def _build_required_documents(xlsx_profile: Dict[str, Any]) -> List[str]:
-    form_fields = dict((xlsx_profile or {}).get("form_fields") or {})
-    profile = dict((xlsx_profile or {}).get("profile") or {})
+    source = dict(xlsx_profile or {})
+    is_full_profile = any(key in source for key in ("profile", "form_fields", "form_cell_values"))
+    form_fields = dict(source.get("form_fields") or {}) if is_full_profile else {}
+    form_cell_values = dict(source.get("form_cell_values") or {}) if is_full_profile else {}
+    profile = dict(source.get("profile") or {}) if is_full_profile else source
     afiliado = normalize_text(
-        xlsx_profile.get("tipo_afiliado", "")
+        source.get("tipo_afiliado", "")
         or profile.get("tipo_afiliado", "")
     ).lower()
+
+    def form_cell_raw(field: str) -> Any:
+        return (form_cell_values.get(field) or {}).get("value") or form_fields.get(field, "")
+
     tipo_tramite = normalize_text(
-        form_fields.get("tipo_tramite", "")
+        form_cell_raw("tipo_tramite")
         or profile.get("tipo_tramite", "")
     ).lower()
+    if not tipo_tramite:
+        afiliacion_marker = normalize_haystack(form_cell_raw("tipo_tramite_afiliacion_marker"))
+        traslado_marker = normalize_haystack(form_cell_raw("tipo_tramite_traslado_marker"))
+        if afiliacion_marker == "x" and traslado_marker != "x":
+            tipo_tramite = "afiliacion"
+        elif traslado_marker == "x" and afiliacion_marker != "x":
+            tipo_tramite = "traslado"
+    tipo_persona_norm = _ascii_haystack(
+        form_cell_raw("tipo_persona")
+        or form_fields.get("tipo_persona", "")
+        or profile.get("tipo_persona", "")
+    )
+    activity_code_g26 = only_digits(form_cell_raw("a_codigo_actividad_economica_principal"))
 
     # El formulario debe mandar sobre etiquetas heredadas o históricas.
     explicit_afiliacion = "afili" in tipo_tramite
     explicit_traslado = "traslado" in tipo_tramite and not explicit_afiliacion
 
-    required = ["cedula", "rut"]
+    required = ["cedula", "autorizacion"]
+    if explicit_afiliacion:
+        if "natural" not in tipo_persona_norm:
+            required.append("camara_comercio")
+        if activity_code_g26 != "1970001":
+            required.append("rut")
+    else:
+        required.append("rut")
     if explicit_traslado or (not explicit_afiliacion and "traslado" in afiliado):
         required.append("soporte_ingresos")
     if any(token in afiliado for token in ["independ", "contratista"]):
         required.append("contrato")
-    return required
+    return _unique_preserve(required)
+
+
+def _apply_conditional_required_documents(required_docs: List[str], docs: List[Dict[str, Any]]) -> List[str]:
+    required = list(required_docs)
+    if not _inspector_exempt_by_entrega(docs):
+        required.append("inspector")
+    return _unique_preserve(required)
 
 
 def _is_natural_person_with_cedula(profile: Dict[str, Any]) -> bool:
@@ -6182,12 +6386,33 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     flat_pairs = xlsx_profile.get("flat_pairs", {}) or {}
     form_fields = dict((xlsx_profile or {}).get("form_fields") or {})
     form_cell_values = dict((xlsx_profile or {}).get("form_cell_values") or {})
-    xlsx_document = only_digits(profile.get("documento", ""))
-    xlsx_nit = _normalize_company_nit(profile.get("documento_empleador") or profile.get("nit", ""), docs)
     validations: List[Dict[str, Any]] = []
     alerts: List[Dict[str, Any]] = []
     matches: Dict[str, Any] = {}
-    required_evidence = _infer_required_document_satisfaction(_build_required_documents(profile), docs, profile)
+
+    def form_cell_raw(field: str) -> Any:
+        return (form_cell_values.get(field) or {}).get("value") or form_fields.get(field, "")
+
+    def comparison_detail(expected: Any, found: Any) -> str:
+        expected_text = normalize_text(expected) or "no identificado"
+        found_text = normalize_text(found) or "no identificado"
+        return f" Esperado: {expected_text}. Encontrado: {found_text}."
+
+    employer_document_source = (
+        form_cell_raw("empleador_numero_documento_nit")
+        or profile.get("documento_empleador")
+        or profile.get("nit")
+        or ""
+    )
+    representative_document_source = (
+        form_cell_raw("rep_legal_numero_documento")
+        or profile.get("documento")
+        or ""
+    )
+    xlsx_document = only_digits(representative_document_source)
+    xlsx_nit = _normalize_company_nit(employer_document_source, docs)
+    validation_required_docs = _apply_conditional_required_documents(_build_required_documents(xlsx_profile), docs)
+    required_evidence = _infer_required_document_satisfaction(validation_required_docs, docs, {**profile, "documento": xlsx_document, "nit": xlsx_nit})
     natural_person_with_cedula = _is_natural_person_with_cedula({
         "tipo_persona": form_fields.get("tipo_persona") or profile.get("tipo_persona", ""),
         "empleador_tipo_documento": form_fields.get("empleador_tipo_documento") or profile.get("empleador_tipo_documento", ""),
@@ -6195,25 +6420,23 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     tipo_tramite_norm = _ascii_haystack(form_fields.get("tipo_tramite", "") or profile.get("tipo_tramite", ""))
     tipo_persona_norm = _ascii_haystack(form_fields.get("tipo_persona", "") or profile.get("tipo_persona", ""))
 
-    def form_cell_raw(field: str) -> Any:
-        return (form_cell_values.get(field) or {}).get("value") or form_fields.get(field, "")
-
     activity_code_g26 = only_digits(form_cell_raw("a_codigo_actividad_economica_principal"))
-    rut_exempt_by_activity = bool("juridica" in tipo_persona_norm and activity_code_g26 == "1970001")
+    is_afiliacion_i13 = "afili" in tipo_tramite_norm
+    is_natural_au13 = "natural" in tipo_persona_norm
+    rut_exempt_by_activity = bool(is_afiliacion_i13 and activity_code_g26 == "1970001")
 
-    if "afili" in tipo_tramite_norm and "juridica" in tipo_persona_norm and rut_exempt_by_activity:
+    if rut_exempt_by_activity:
         validations.append(
             {
-                "code": "RUT_JURIDICA_EXENTO_ACTIVIDAD",
+                "code": "RUT_EXENTO_ACTIVIDAD_G26",
                 "status": "OK",
                 "severity": "ok",
                 "message": (
-                    "No se exige validación documental de RUT para persona jurídica cuando "
-                    "AU13 indica Jurídica y G26 tiene la actividad económica 1970001."
+                    "No se exige RUT para esta afiliación por la actividad económica informada."
                 ),
             }
         )
-        matches["rut_juridica"] = {
+        matches["rut_afiliacion"] = {
             "expected_tipo_persona_au13": normalize_text(form_cell_raw("tipo_persona")),
             "activity_code_g26": activity_code_g26,
             "match_mode": "rut_exempt_by_activity_g26",
@@ -6221,8 +6444,8 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
             "exempt": True,
         }
 
-    if "afili" in tipo_tramite_norm and "juridica" in tipo_persona_norm and not rut_exempt_by_activity:
-        form_nit_source = form_cell_raw("empleador_numero_documento_nit") or profile.get("documento_empleador") or profile.get("nit", "")
+    if is_afiliacion_i13 and not rut_exempt_by_activity:
+        form_nit_source = employer_document_source
         form_company_source = form_cell_raw("empleador_razon_social") or profile.get("empresa", "")
         form_nit_core = _rut_nit_core(form_nit_source)
         form_company_official = _normalize_company_official(form_company_source)
@@ -6245,37 +6468,34 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         rut_legal_ok = bool(rut_doc and rut_nit_ok and rut_company_ok)
         if not rut_doc:
             rut_legal_message = (
-                "Para afiliación de persona jurídica se requiere un RUT cuyo OCR contenga "
-                "'Formulario del Registro Único Tributario'. No se encontró ese documento."
+                "Para esta afiliación se requiere adjuntar el RUT y no fue detectado."
             )
         elif not form_nit_core:
-            rut_legal_message = "No se pudo leer el NIT del formulario en AG16 para comparar contra el RUT."
+            rut_legal_message = "No se pudo leer el número de documento o NIT del formulario para compararlo contra el RUT."
         elif not form_company_official:
-            rut_legal_message = "No se pudo leer la razón social del formulario en J16 para comparar contra el RUT."
+            rut_legal_message = "No se pudo leer la razón social del formulario para compararla contra el RUT."
         elif not rut_nit_ok:
             rut_legal_message = (
-                "No se encontró el NIT del formulario (AG16) dentro de la primera sección del RUT: "
-                f"Formulario AG16='{form_nit_source or 'n/d'}' "
-                f"· archivo='{rut_doc.get('filename')}'."
+                "El número de documento o NIT del RUT no coincide con el informado en el formulario de afiliación."
+                + comparison_detail(form_nit_source, rut_nit)
             )
         elif not rut_company_ok:
             rut_legal_message = (
-                "No se encontró la razón social del formulario (J16) dentro de la primera sección del RUT: "
-                f"Formulario J16='{form_company_source or 'n/d'}' "
-                f"· archivo='{rut_doc.get('filename')}'."
+                "La razón social del RUT no coincide con la informada en el formulario de afiliación."
+                + comparison_detail(form_company_source, rut_company)
             )
         else:
-            rut_legal_message = "El RUT de persona jurídica contiene el NIT de AG16 y la razón social de J16 en su primera sección."
+            rut_legal_message = "El RUT coincide con el número de documento o NIT y la razón social del formulario de afiliación."
         validations.append(
             {
-            "code": "RUT_JURIDICA_MATCH_FORMULARIO",
+                "code": "RUT_MATCH_FORMULARIO_I13A",
                 "status": "OK" if rut_legal_ok else "ALERTA",
                 "severity": "ok" if rut_legal_ok else "blocker",
                 "message": rut_legal_message,
             }
         )
-        matches["rut_juridica"] = {
-            "expected_nit_ag16": normalize_text(form_nit_source),
+        matches["rut_afiliacion"] = {
+            "expected_documento_nit_ag16": normalize_text(form_nit_source),
             "matched_nit_rut_5": rut_nit,
             "rut_nit_candidates": rut_nit_candidates,
             "expected_razon_social_j16": normalize_text(form_company_source),
@@ -6286,9 +6506,31 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
             "nit_ok": rut_nit_ok,
             "razon_social_ok": rut_company_ok,
             "ok": rut_legal_ok,
+            "exempt": False,
         }
         if not rut_legal_ok:
             alerts.append(validations[-1])
+
+    autorizacion_docs = _doc_by_type(docs, "autorizacion")
+    autorizacion_ok = bool(autorizacion_docs)
+    validations.append(
+        {
+            "code": "AUTORIZACION_TRATAMIENTO_DATOS_REQUIRED",
+            "status": "OK" if autorizacion_ok else "ALERTA",
+            "severity": "ok" if autorizacion_ok else "blocker",
+            "message": (
+                "Se adjuntó el documento de autorización requerido."
+                if autorizacion_ok
+                else "Faltan documentos de autorización de tratamiento de datos."
+            ),
+        }
+    )
+    matches["autorizacion"] = {
+        "filename": autorizacion_docs[0].get("filename", "") if autorizacion_docs else "",
+        "ok": autorizacion_ok,
+    }
+    if not autorizacion_ok:
+        alerts.append(validations[-1])
 
     cedula_docs = _doc_by_type(docs, "cedula")
     matched_cedula = None
@@ -6297,25 +6539,52 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     if xlsx_document:
         for doc in cedula_docs:
             fields = doc.get("fields") or {}
-            candidate = _best_document_candidate(xlsx_document, [fields.get("document_number", "")] + list(fields.get("all_numbers") or []))
+            candidate = _best_document_candidate(
+                xlsx_document,
+                _cedula_number_candidates(
+                    [
+                        fields.get("representative_document", ""),
+                        fields.get("document_number", ""),
+                        *list(fields.get("all_numbers") or []),
+                    ]
+                ),
+            )
             if candidate:
                 matched_cedula = doc
                 matched_cedula_candidate = candidate
                 break
-        if not matched_cedula and len(cedula_docs) == 1:
-            matched_cedula = cedula_docs[0]
-            matched_cedula_candidate = xlsx_document
-            cedula_inferred = True
     inferred_cedula = required_evidence.get("cedula") or {}
     if not matched_cedula and inferred_cedula.get("satisfied") and inferred_cedula.get("filename"):
         matched_cedula = next((doc for doc in docs if doc.get("filename") == inferred_cedula.get("filename")), None)
         matched_cedula_candidate = inferred_cedula.get("matched", "")
     cedula_ok = bool(matched_cedula_candidate) if xlsx_document else bool(cedula_docs or inferred_cedula.get("satisfied"))
+    if cedula_ok:
+        cedula_message = "La cédula coincide con el número de documento informado en el formulario de afiliación."
+    elif not cedula_docs:
+        cedula_message = "No se detectó la cédula entre los documentos adjuntos."
+    else:
+        cedula_found_values = _unique_preserve(
+            [
+                value
+                for doc in cedula_docs
+                for value in [
+                    only_digits((doc.get("fields") or {}).get("representative_document", "")),
+                    only_digits((doc.get("fields") or {}).get("document_number", "")),
+                    *[only_digits(item) for item in ((doc.get("fields") or {}).get("all_numbers") or [])],
+                ]
+                if _is_valid_cedula_number(value)
+            ]
+        )
+        cedula_message = (
+            "La cédula adjunta no coincide con el número de documento informado en el formulario de afiliación."
+            + comparison_detail(xlsx_document, ", ".join(cedula_found_values[:5]))
+        )
     validations.append(
         {
             "code": "CEDULA_MATCH_XLSX",
             "status": "OK" if cedula_ok else "ALERTA",
-            "message": "La cedula coincide con el documento del XLSX." if cedula_ok else "La cedula OCR no coincide con el documento del XLSX.",
+            "severity": "ok" if cedula_ok else "blocker",
+            "message": cedula_message,
         }
     )
     if not cedula_ok:
@@ -6352,11 +6621,27 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     else:
         rut_ok = bool(rut_docs)
     if not rut_exempt_by_activity:
+        rut_found = _best_numeric_candidate(
+            xlsx_nit,
+            [
+                ((matched_rut or {}).get("fields", {}) or {}).get("nit", ""),
+                ((matched_rut or {}).get("fields", {}) or {}).get("document_number", ""),
+                *list((((matched_rut or {}).get("fields", {}) or {}).get("all_numbers") or [])),
+            ],
+        )
         validations.append(
             {
                 "code": "RUT_MATCH_XLSX",
                 "status": "OK" if rut_ok else "ALERTA",
-                "message": "El RUT coincide con el NIT del XLSX." if rut_ok else "El RUT no entrega un NIT consistente con el XLSX.",
+                "severity": "ok" if rut_ok else "blocker",
+                "message": (
+                    "El RUT coincide con el número de documento o NIT informado en el formulario de afiliación."
+                    if rut_ok
+                    else (
+                        "El RUT no coincide con el número de documento o NIT informado en el formulario de afiliación."
+                        + comparison_detail(xlsx_nit, rut_found)
+                    )
+                ),
             }
         )
         if not rut_ok:
@@ -6395,7 +6680,13 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     if form_doc:
         for doc in cedula_docs:
             fields = doc.get("fields") or {}
-            candidate = _best_document_candidate(form_doc, [fields.get("document_number", "")] + list(fields.get("all_numbers") or []))
+            candidate = _best_document_candidate(
+                form_doc,
+                _cedula_number_candidates(
+                    [fields.get("representative_document", ""), fields.get("document_number", "")]
+                    + list(fields.get("all_numbers") or [])
+                ),
+            )
             if candidate:
                 representative_cedula = doc
                 ced_doc = candidate
@@ -6414,16 +6705,18 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         ced_doc = form_doc
         rep_doc_inferred = True
     rep_doc_ok = bool(form_doc and ced_doc and _numeric_document_match(form_doc, ced_doc))
-    if representative_form or representative_cedula:
+    if representative_form and representative_cedula:
         if rep_doc_ok and rep_doc_inferred:
             rep_message = (
-                f"La cédula del representante coincide por inferencia documental: formulario={form_doc or 'n/d'} "
-                f"· cédula referenciada={ced_doc or 'n/d'}."
+                "La cédula del representante coincide con el formulario de afiliación."
             )
         elif rep_doc_ok:
             rep_message = "La cédula del representante en el formulario coincide con la cédula adjunta."
         else:
-            rep_message = f"La cédula del representante no coincide: formulario={form_doc or 'n/d'} · cédula adjunta={ced_doc or 'n/d'}."
+            rep_message = (
+                "La cédula del representante no coincide con el formulario de afiliación."
+                + comparison_detail(form_doc, ced_doc)
+            )
         validations.append(
             {
                 "code": "REPRESENTANTE_DOC_MATCH",
@@ -6460,7 +6753,61 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     camara_company_official = _normalize_company_official(camara_company_source)
     form_company_official = _normalize_company_official(form_company_source)
     company_ok = False
-    if not natural_person_with_cedula and camara_primary and (formulario_primary or profile.get("empresa")):
+    if is_afiliacion_i13 and is_natural_au13:
+        validations.append(
+            {
+                "code": "CAMARA_COMERCIO_EXENTA_PERSONA_NATURAL",
+                "status": "OK",
+                "severity": "ok",
+                "message": "No se exige cámara de comercio porque el tipo de persona informado es Natural.",
+            }
+        )
+        matches["camara_comercio"] = {
+            "expected_tipo_persona_au13": normalize_text(form_cell_raw("tipo_persona")),
+            "match_mode": "exempt_by_au13_natural",
+            "ok": True,
+            "exempt": True,
+        }
+
+    if is_afiliacion_i13 and not is_natural_au13:
+        camara_document_candidate = ""
+        if camara_primary and xlsx_document:
+            camara_fields = camara_primary.get("fields") or {}
+            camara_document_candidate = _best_numeric_candidate(
+                xlsx_document,
+                [
+                    camara_fields.get("nit", ""),
+                    camara_fields.get("document_number", ""),
+                    *list(camara_fields.get("all_numbers") or []),
+                ],
+            )
+        camara_document_ok = bool(camara_primary and (not xlsx_document or camara_document_candidate))
+        validations.append(
+            {
+                "code": "CAMARA_DOCUMENTO_MATCH_XLSX",
+                "status": "OK" if camara_document_ok else "ALERTA",
+                "severity": "ok" if camara_document_ok else "blocker",
+                "message": (
+                    "La cámara de comercio coincide con el número de documento o NIT informado en el formulario de afiliación."
+                    if camara_document_ok
+                    else (
+                        "La cámara de comercio no coincide con el número de documento o NIT informado en el formulario de afiliación, o no fue detectada."
+                        + comparison_detail(xlsx_document, camara_document_candidate)
+                    )
+                ),
+            }
+        )
+        matches["camara_documento"] = {
+            "expected": xlsx_document,
+            "matched": camara_document_candidate,
+            "filename": (camara_primary or {}).get("filename", ""),
+            "ok": camara_document_ok,
+            "exempt": False,
+        }
+        if not camara_document_ok:
+            alerts.append(validations[-1])
+
+    if not is_natural_au13 and camara_primary and (formulario_primary or profile.get("empresa")):
         form_or_xlsx_company = normalize_haystack(form_company_source)
         form_or_xlsx_company_cmp = _normalize_company_compare(form_company_source)
         form_or_xlsx_company_strict = _normalize_company_strict(form_company_source)
@@ -6473,23 +6820,22 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         company_identity_ok = bool(camara_has_company and expected_company_cmp and camara_company_cmp == expected_company_cmp)
         company_formal_ok = bool(company_identity_ok and camara_company_official and expected_company_official and camara_company_official == expected_company_official)
         company_ok = company_formal_ok
-        company_message = "La razón social coincide entre cámara de comercio y formulario/XLSX."
+        company_message = "La razón social coincide entre cámara de comercio y formulario de afiliación."
         if not camara_has_company:
             company_message = (
-                "No se pudo leer la razón social en cámara de comercio para comparar contra el Excel/Formulario."
+                "No se pudo leer la razón social en cámara de comercio para compararla contra el formulario de afiliación."
             )
         elif not expected_company_cmp:
-            company_message = "No se encontró razón social en Excel/Formulario para comparar contra cámara de comercio."
+            company_message = "No se encontró razón social en el formulario de afiliación para compararla contra cámara de comercio."
         elif not company_identity_ok:
             company_message = (
-                "La razón social no coincide entre cámara de comercio y Excel/Formulario: "
-                f"cámara='{camara_company_source or 'n/d'}' · Excel/Formulario='{expected_company_label or 'n/d'}'."
+                "La razón social de la cámara de comercio no coincide con la informada en el formulario de afiliación."
+                + comparison_detail(expected_company_label, camara_company_source)
             )
         elif not company_formal_ok:
             company_message = (
-                "La razón social tiene diferencia formal entre cámara de comercio y Excel/Formulario: "
-                f"cámara='{camara_company_source or 'n/d'}' · Excel/Formulario='{expected_company_label or 'n/d'}'. "
-                "La forma escrita debe coincidir exactamente, incluyendo puntos y siglas societarias."
+                "La razón social de la cámara de comercio presenta diferencias de escritura frente al formulario de afiliación."
+                + comparison_detail(expected_company_label, camara_company_source)
             )
         validations.append(
             {
@@ -6694,7 +7040,7 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
             }
         )
 
-    if camara_docs and not natural_person_with_cedula:
+    if camara_docs and not is_natural_au13:
         recent_date = None
         recent_source = None
         for doc in camara_docs:
@@ -6833,7 +7179,7 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
                     alerts.append(v)
         break
 
-    precheck = _build_precheck_summary(xlsx_profile, docs, _build_required_documents(profile), missing_docs)
+    precheck = _build_precheck_summary(xlsx_profile, docs, validation_required_docs, missing_docs)
     alerts.extend(item for item in precheck.get("alerts", []) if item not in alerts)
     precheck_reasons = list(precheck.get("motivos_de_rechazo", []))
     existing_reason_keys = {
@@ -8268,9 +8614,30 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
     clean_duration_ms = int((perf_counter() - clean_started) * 1000)
 
     validation_started = perf_counter()
-    required_docs = _build_required_documents(xlsx_profile.get("profile", {}))
+    required_docs = _apply_conditional_required_documents(_build_required_documents(xlsx_profile), docs)
     received_types = {item["document_type"] for item in docs}
-    required_evidence = _infer_required_document_satisfaction(required_docs, docs, xlsx_profile.get("profile", {}))
+    required_profile = dict(xlsx_profile.get("profile", {}) or {})
+    required_form_fields = dict(xlsx_profile.get("form_fields", {}) or {})
+    required_form_cells = dict(xlsx_profile.get("form_cell_values", {}) or {})
+    required_representative_document = (
+        (required_form_cells.get("rep_legal_numero_documento") or {}).get("value")
+        or required_form_fields.get("rep_legal_numero_documento")
+        or required_profile.get("documento")
+        or ""
+    )
+    required_employer_document = (
+        (required_form_cells.get("empleador_numero_documento_nit") or {}).get("value")
+        or required_form_fields.get("empleador_numero_documento_nit")
+        or required_profile.get("documento_empleador")
+        or required_profile.get("nit")
+        or required_profile.get("documento")
+        or ""
+    )
+    if required_representative_document:
+        required_profile["documento"] = only_digits(required_representative_document)
+    if required_employer_document:
+        required_profile["nit"] = _normalize_company_nit(required_employer_document, docs)
+    required_evidence = _infer_required_document_satisfaction(required_docs, docs, required_profile)
     missing_docs = [doc for doc in required_docs if not (required_evidence.get(doc) or {}).get("satisfied")]
     matched_docs = _unique_preserve(
         str(item.get("filename") or "")

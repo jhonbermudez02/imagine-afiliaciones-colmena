@@ -6,7 +6,7 @@ Sistema de afiliaciones ARL con:
 - backend principal
 - base de datos principal
 - Qdrant para conocimiento/busqueda
-- Ollama para respuestas locales
+- OCR local con PaddleOCR y embeddings locales livianos
 - backend de compatibilidad para flujo `926`
 - base de datos de compatibilidad
 
@@ -18,7 +18,6 @@ Al levantar el stack completo se crean estos servicios:
 - `imagine_backend`
 - `imagine_db`
 - `imagine_qdrant`
-- `imagine_ollama`
 - `imagine_compat_backend`
 - `imagine_compat_db`
 
@@ -82,7 +81,7 @@ curl http://localhost:8000/health
 Debe responder algo como:
 
 ```json
-{"api":"healthy","version":"2.0","qdrant":"ok","ollama":"ok","postgres":"ok"}
+{"api":"healthy","version":"2.0","qdrant":"ok","ocr":"paddleocr","postgres":"ok"}
 ```
 
 5. Abre la aplicacion:
@@ -100,7 +99,7 @@ La primera vez tarda mas porque:
 - construye imagenes
 - inicializa Postgres principal
 - inicializa la base de compatibilidad
-- instala el modelo/configuracion local de Ollama si aplica
+- descarga/cachea los modelos de PaddleOCR en el primer uso OCR
 
 ## Datos que no se suben
 
@@ -108,7 +107,6 @@ Este repo esta preparado para no subir:
 
 - expedientes procesados
 - volumenes de Qdrant
-- volumenes de Ollama
 - descargas locales
 
 Los casos procesados quedan en `data/cases/` al correr localmente, pero esa carpeta esta ignorada por Git.

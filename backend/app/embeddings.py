@@ -1,82 +1,43 @@
-"""
-Capa de abstracción de embeddings.
-Soporta dos motores:
-  - Ollama (nomic-embed-text, 768 dims) — motor actual
-  - sentence-transformers (paraphrase-multilingual-MiniLM-L12-v2, 384 dims) — motor local
-
-Se controla con la variable de entorno USE_LOCAL_EMBED=true/false
-"""
-import os
+"""Embeddings locales determinísticos sin depender de Ollama ni Torch."""
+import hashlib
 import logging
-from typing import List, Optional
+import math
+from typing import List
 
 logger = logging.getLogger("afi.embeddings")
 
-# Variable de entorno para controlar el motor
-USE_LOCAL_EMBED = os.getenv("USE_LOCAL_EMBED", "false").lower() == "true"
-LOCAL_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
-OLLAMA_MODEL_NAME = "nomic-embed-text"
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://imagine_ollama:11434")
+LOCAL_MODEL_NAME = "local-hash-embedding-v1"
+EMBED_DIMS = 384
 
-# Dimensiones por motor
-EMBED_DIMS_OLLAMA = 768
-EMBED_DIMS_LOCAL = 384
-EMBED_DIMS = EMBED_DIMS_LOCAL if USE_LOCAL_EMBED else EMBED_DIMS_OLLAMA
-
-# Modelo local (se carga una sola vez)
-_local_model = None
-
-def _get_local_model():
-    global _local_model
-    if _local_model is None:
-        logger.info("Cargando modelo local %s...", LOCAL_MODEL_NAME)
-        from sentence_transformers import SentenceTransformer
-        _local_model = SentenceTransformer(LOCAL_MODEL_NAME)
-        logger.info("Modelo local cargado. Dims: %d", _local_model.get_sentence_embedding_dimension())
-    return _local_model
 
 def embed_text(text: str) -> List[float]:
-    """Genera embedding para un texto. Usa el motor configurado."""
+    """Genera un vector local liviano para busqueda aproximada en Qdrant."""
     if not text or not text.strip():
         return []
     text = str(text).strip()[:2000]
-    if USE_LOCAL_EMBED:
-        return _embed_local(text)
-    else:
-        return _embed_ollama(text)
-
-def _embed_local(text: str) -> List[float]:
-    """Embedding con sentence-transformers (local, sin servidor)."""
-    try:
-        model = _get_local_model()
-        vector = model.encode(text, normalize_embeddings=True, show_progress_bar=False)
-        return vector.tolist()
-    except Exception as e:
-        logger.error("Error en embedding local: %s", e)
+    vector = [0.0] * EMBED_DIMS
+    tokens = [tok for tok in text.lower().split() if tok]
+    for token in tokens:
+        digest = hashlib.blake2b(token.encode("utf-8", errors="ignore"), digest_size=8).digest()
+        bucket = int.from_bytes(digest[:4], "big") % EMBED_DIMS
+        sign = 1.0 if digest[4] % 2 == 0 else -1.0
+        vector[bucket] += sign
+    norm = math.sqrt(sum(value * value for value in vector))
+    if not norm:
         return []
+    return [value / norm for value in vector]
 
-def _embed_ollama(text: str) -> List[float]:
-    """Embedding con Ollama (servidor externo)."""
-    try:
-        import httpx
-        r = httpx.post(
-            f"{OLLAMA_URL}/api/embeddings",
-            json={"model": OLLAMA_MODEL_NAME, "prompt": text},
-            timeout=30,
-        )
-        return r.json().get("embedding", [])
-    except Exception as e:
-        logger.error("Error en embedding Ollama: %s", e)
-        return []
 
 def get_embed_dims() -> int:
     """Retorna las dimensiones del modelo activo."""
     return EMBED_DIMS
 
+
 def get_engine_name() -> str:
     """Retorna el nombre del motor activo."""
-    return LOCAL_MODEL_NAME if USE_LOCAL_EMBED else OLLAMA_MODEL_NAME
+    return LOCAL_MODEL_NAME
+
 
 def is_local_embed_enabled() -> bool:
-    """Indica si los embeddings se generan dentro de Python."""
-    return USE_LOCAL_EMBED
+    """Indica si los embeddings se generan dentro del backend."""
+    return True

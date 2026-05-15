@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -12,9 +13,9 @@ try:
     import httpx
     from bs4 import BeautifulSoup
     from pdf2image import convert_from_path
-    from PIL import Image, ImageOps
+    from PIL import Image, ImageFilter, ImageOps
     from pypdf import PdfReader
-    import pytesseract
+    from paddleocr import PaddleOCR
 except ModuleNotFoundError as exc:
     missing = getattr(exc, "name", "dependencia")
     raise SystemExit(
@@ -34,7 +35,8 @@ FEED_REPORT_PATH = DATA_DIR / "feed_report.json"
 
 MIN_DIRECT_PDF_TEXT = 500
 OCR_PAGE_LIMIT = 8
-OCR_LANG = "spa+eng"
+OCR_LANG = "es"
+_PADDLE_OCR_ENGINE = None
 
 
 @dataclass
@@ -117,17 +119,56 @@ def html_to_markdown(html: str, source_url: str) -> str:
 
 def preprocess_variants_for_ocr(image: Image.Image) -> list[tuple[str, Image.Image, str]]:
     base = ImageOps.autocontrast(image.convert("L"))
-    resized = base.resize((max(base.width * 2, 1), max(base.height * 2, 1)))
+    denoised = denoise_ocr_image(base)
+    resized = denoised.resize((max(denoised.width * 2, 1), max(denoised.height * 2, 1)))
+    adaptive = adaptive_threshold_ocr_image(denoised)
+    adaptive_resized = adaptive.resize((max(adaptive.width * 2, 1), max(adaptive.height * 2, 1)))
     binary = resized.point(lambda pixel: 255 if pixel > 180 else 0)
     binary_soft = resized.point(lambda pixel: 255 if pixel > 150 else 0)
     inverted = ImageOps.invert(binary)
     return [
-        ("gray_psm6", resized, "--oem 3 --psm 6"),
-        ("gray_psm4", resized, "--oem 3 --psm 4"),
-        ("binary_psm6", binary, "--oem 3 --psm 6"),
-        ("binary_psm11", binary_soft, "--oem 3 --psm 11"),
-        ("inverted_psm6", inverted, "--oem 3 --psm 6"),
+        ("gray", base, ""),
+        ("denoised", resized, ""),
+        ("adaptive", adaptive_resized, ""),
+        ("binary", binary, ""),
+        ("binary_soft", binary_soft, ""),
+        ("inverted", inverted, ""),
     ]
+
+
+def denoise_ocr_image(image: Image.Image) -> Image.Image:
+    try:
+        import cv2
+        import numpy as np
+
+        arr = np.array(image.convert("L"))
+        arr = cv2.fastNlMeansDenoising(arr, None, h=12, templateWindowSize=7, searchWindowSize=21)
+        arr = cv2.medianBlur(arr, 3)
+        arr = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(arr)
+        return Image.fromarray(arr)
+    except Exception:
+        return ImageOps.autocontrast(image.convert("L").filter(ImageFilter.MedianFilter(size=3)))
+
+
+def adaptive_threshold_ocr_image(image: Image.Image) -> Image.Image:
+    try:
+        import cv2
+        import numpy as np
+
+        arr = np.array(image.convert("L"))
+        binary = cv2.adaptiveThreshold(
+            arr,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            35,
+            11,
+        )
+        kernel = np.ones((2, 2), np.uint8)
+        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
+        return Image.fromarray(binary)
+    except Exception:
+        return ImageOps.autocontrast(image.convert("L")).point(lambda pixel: 255 if pixel > 155 else 0).convert("L")
 
 
 def pick_best_ocr_result(results: list[tuple[str, str]]) -> tuple[str, str]:
@@ -148,11 +189,75 @@ def pick_best_ocr_result(results: list[tuple[str, str]]) -> tuple[str, str]:
     return best_strategy, best_text
 
 
+def get_paddle_ocr_engine():
+    global _PADDLE_OCR_ENGINE
+    if _PADDLE_OCR_ENGINE is None:
+        try:
+            _PADDLE_OCR_ENGINE = PaddleOCR(
+                lang=OCR_LANG,
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_textline_orientation=False,
+            )
+        except TypeError:
+            _PADDLE_OCR_ENGINE = PaddleOCR(lang=OCR_LANG, use_angle_cls=False)
+    return _PADDLE_OCR_ENGINE
+
+
+def flatten_paddle_texts(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        texts: list[str] = []
+        for key in ("rec_texts", "text", "texts"):
+            item = value.get(key)
+            if isinstance(item, list):
+                texts.extend(str(part) for part in item if str(part or "").strip())
+            elif isinstance(item, str) and item.strip():
+                texts.append(item)
+        if texts:
+            return texts
+        for item in value.values():
+            texts.extend(flatten_paddle_texts(item))
+        return texts
+    if isinstance(value, (list, tuple)):
+        if len(value) >= 2 and isinstance(value[1], (list, tuple)) and value[1] and isinstance(value[1][0], str):
+            return [str(value[1][0])]
+        texts: list[str] = []
+        for item in value:
+            texts.extend(flatten_paddle_texts(item))
+        return texts
+    if hasattr(value, "json"):
+        try:
+            return flatten_paddle_texts(value.json)
+        except Exception:
+            pass
+    if hasattr(value, "res"):
+        try:
+            return flatten_paddle_texts(value.res)
+        except Exception:
+            pass
+    return []
+
+
+def paddle_ocr_text(image: Image.Image) -> str:
+    engine = get_paddle_ocr_engine()
+    with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+        image.convert("RGB").save(tmp.name, format="PNG")
+        if hasattr(engine, "predict"):
+            result = engine.predict(tmp.name)
+        else:
+            result = engine.ocr(tmp.name, cls=False)
+    return sanitize_text("\n".join(flatten_paddle_texts(result)))
+
+
 def run_ocr_on_image(image: Image.Image) -> tuple[str, str]:
     attempts: list[tuple[str, str]] = []
-    for strategy, prepared, config in preprocess_variants_for_ocr(image):
-        text = pytesseract.image_to_string(prepared, lang=OCR_LANG, config=config)
-        attempts.append((strategy, sanitize_text(text)))
+    for strategy, prepared, _config in preprocess_variants_for_ocr(image):
+        text = paddle_ocr_text(prepared)
+        attempts.append((strategy, text))
     return pick_best_ocr_result(attempts)
 
 

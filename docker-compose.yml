@@ -28,19 +28,6 @@ services:
     networks:                 # ← AGREGAR
       - afi_network           # ← AGREGAR
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: afi_ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ./data/ollama:/root/.ollama
-    restart: unless-stopped
-    command: serve
-    platform: linux/arm64
-    networks:                 # ← AGREGAR
-      - afi_network           # ← AGREGAR
-
   postgres:
     image: postgres:15-alpine
     container_name: afi_postgres
@@ -63,14 +50,13 @@ services:
     container_name: afi_backend
     depends_on:
       - qdrant
-      - ollama
       - postgres
     environment:
       - DATABASE_URL=postgresql://afi_user:afi_pass@postgres:5432/afiliaciones
       - QDRANT_URL=http://qdrant:6333
-      - OLLAMA_URL=http://ollama:11434
-      - MODEL_NAME=llama3.2:1b
-      - EMBEDDING_MODEL=nomic-embed-text
+      - MODEL_NAME=local-deterministic
+      - EMBEDDING_MODEL=local-hash-embedding-v1
+      - USE_LOCAL_EMBED=true
       - RERANKER_ENABLED=false
       - KNOWLEDGE_DIR=/data/knowledge
       - NOTIFICATION_ENABLED=${NOTIFICATION_ENABLED:-true}

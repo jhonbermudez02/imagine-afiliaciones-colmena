@@ -8,7 +8,7 @@ import asyncpg
 import httpx
 
 from .config import settings
-from .embeddings import get_engine_name, is_local_embed_enabled
+from .embeddings import get_engine_name
 from .rag import get_active_collection_name, get_collection_stats, list_knowledge_files, load_catalog
 
 logger = logging.getLogger(__name__)
@@ -41,12 +41,11 @@ async def check_postgres() -> str:
 
 async def get_system_health() -> Dict[str, object]:
     from app.main import build_runtime_resources
-    ollama_status = "disabled" if is_local_embed_enabled() else await check_http_service(settings.ollama_url, "/api/tags")
     return {
         "api": "healthy",
         "version": settings.app_version,
         "qdrant": await check_http_service(settings.qdrant_url, "/healthz"),
-        "ollama": ollama_status,
+        "ocr": "paddleocr",
         "postgres": await check_postgres(),
         "resources": build_runtime_resources(),
     }
@@ -192,14 +191,6 @@ def build_recommended_actions(health: Dict[str, object]) -> List[Dict[str, str]]
                 "description": "Confirmar que la memoria vectorial esta disponible antes de habilitar RAG real.",
             }
         )
-    if health["ollama"] not in {"ok", "disabled"}:
-        actions.append(
-            {
-                "id": "check-ollama",
-                "title": "Revisar Ollama",
-                "description": "Comprobar que los modelos locales esten descargados y listos para responder.",
-            }
-        )
     if collection_stats["points"] == 0:
         actions.append(
             {
@@ -280,11 +271,11 @@ async def get_system_status() -> Dict[str, object]:
                 "target": settings.qdrant_url,
             },
             {
-                "id": "ollama",
-                "name": "Ollama",
-                "role": "Modelo conversacional opcional; embeddings activos en Python cuando esta deshabilitado",
-                "status": health["ollama"],
-                "target": settings.ollama_url,
+                "id": "ocr",
+                "name": "PaddleOCR",
+                "role": "Extraccion OCR local de documentos de identidad y soportes",
+                "status": health["ocr"],
+                "target": "backend",
             },
         ],
         "recommended_actions": build_recommended_actions(health),
