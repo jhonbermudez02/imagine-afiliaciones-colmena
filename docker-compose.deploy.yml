@@ -103,6 +103,8 @@ services:
       USE_LOCAL_EMBED: "true"
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-local-hash-embedding-v1}
       RERANKER_ENABLED: "false"
+      OCR_ENGINE: ${OCR_ENGINE:-tesseract}
+      OCR_LANGUAGES: ${OCR_LANGUAGES:-spa+eng}
       KNOWLEDGE_DIR: /data/knowledge
       NOTIFICATION_ENABLED: ${NOTIFICATION_ENABLED:-false}
       NOTIFICATION_SENDER_EMAIL: ${NOTIFICATION_SENDER_EMAIL:-no-reply@example.com}

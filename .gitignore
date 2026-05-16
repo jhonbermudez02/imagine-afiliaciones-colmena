@@ -29,6 +29,7 @@ data/raw/**
 !data/raw/.gitkeep
 data/feed_report.json
 data/evals/notification_log*.jsonl
+data/evals/qdrant_repair_backups/**
 data/evals/learning/**
 data/.DS_Store
 

@@ -641,8 +641,11 @@ def _rag_validate_eps_afp(value: str, tipo: str) -> bool:
     try:
         from qdrant_client import QdrantClient
         from app.embeddings import embed_text
+        from app.qdrant_guard import collection_matches_current_embeddings
         qdrant = QdrantClient(host="imagine_qdrant", port=6333)
         col = "afi_eps_catalog" if tipo == "eps" else "afi_afp_catalog"
+        if not collection_matches_current_embeddings(qdrant, col):
+            return True
         vector = embed_text(f"{'EPS entidad de salud' if tipo=='eps' else 'AFP fondo de pensiones'}: {value}")
         if not vector:
             return True  # Si falla RAG, no bloquear

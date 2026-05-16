@@ -84,6 +84,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+APP_STARTED_AT = datetime.now(timezone.utc)
+
 
 @app.on_event("startup")
 async def startup_repair_workflow_queue() -> None:
@@ -106,7 +108,7 @@ async def startup_repair_workflow_queue() -> None:
                 payload = load_case(case_dir.name)
                 wf = (payload.get("analysis") or {}).get("workflow_run") or {}
                 wf_status = str(wf.get("status") or "").strip()
-                if wf_status in ("", "none", "failed", "queued"):
+                if wf_status in ("", "none", "queued"):
                     enqueue_case_workflow(case_dir.name)
                     recovered += 1
             except Exception:
@@ -368,8 +370,29 @@ def _repair_stale_workflow_queue_state() -> Dict[str, Any]:
                 started_at = datetime.fromisoformat(started_at_raw.replace("Z", "+00:00"))
                 active_age_seconds = max(0.0, (datetime.now(timezone.utc) - started_at).total_seconds())
             except Exception:
+                started_at = None
                 active_age_seconds = 0.0
+        else:
+            started_at = None
         if payload_status == "processing" or queue_state == "processing" or workflow_state == "processing":
+            if started_at and started_at < APP_STARTED_AT:
+                logger.error("Workflow activo %s quedo huerfano por reinicio del backend. Liberando cola.", case_id)
+                try:
+                    payload = load_case(case_id)
+                    analysis = payload.setdefault("analysis", {}) or {}
+                    wf = analysis.setdefault("workflow_run", {}) or {}
+                    wf["status"] = "failed"
+                    wf["stop_reason"] = "Workflow interrumpido por reinicio del backend. Se puede ejecutar nuevamente."
+                    payload["status"] = "failed"
+                    analysis["workflow_run"] = wf
+                    analysis.pop("queue_status", None)
+                    payload["analysis"] = analysis
+                    save_case(payload)
+                except Exception as e:
+                    logger.error("Error al liberar workflow huerfano del caso %s: %s", case_id, e)
+                state["active"] = None
+                _save_workflow_queue_state(state)
+                return state
             WORKFLOW_TIMEOUT_SECONDS = 900
             if active_age_seconds > WORKFLOW_TIMEOUT_SECONDS:
                 logger.error("Timeout de workflow para contrato %s - lleva %.0f minutos. Cancelando.", case_id, active_age_seconds / 60)
@@ -3574,9 +3597,9 @@ async def listar_modelos():
                 "provider": "backend",
             },
             {
-                "name": "PaddleOCR",
+                "name": settings.ocr_engine,
                 "type": "ocr",
-                "provider": "paddleocr",
+                "provider": settings.ocr_engine,
             },
         ],
     }

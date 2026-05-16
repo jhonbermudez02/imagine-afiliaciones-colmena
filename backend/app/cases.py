@@ -6,6 +6,7 @@ import io
 import json
 import re
 import shutil
+import subprocess
 import tempfile
 import time
 import unicodedata
@@ -26,6 +27,7 @@ from pypdf import PdfReader, PdfWriter
 
 from .config import settings
 from .legacy_bridge import generate_legacy_flatfile_926, generate_legacy_flatfile_926_http
+from .qdrant_guard import collection_matches_current_embeddings, ensure_current_vector_collection
 from .xlsx_rules import _format_date_value, _parse_date_value, _resolve_smmlv_value, run_xlsx_primary_validations, run_xlsx_secondary_validations
 
 LEGACY_CODE_TO_TYPE = {
@@ -897,6 +899,8 @@ def _rag_classify_document(ocr_text: str, min_score: float = 0.82) -> Optional[D
         qdrant = _get_rag_client()
         if not qdrant:
             return None
+        if not collection_matches_current_embeddings(qdrant, "afi_doc_clasificaciones"):
+            return None
         from app.embeddings import embed_text as _embed_text
         vector = _embed_text(ocr_text[:1500])
         if not vector:
@@ -936,6 +940,8 @@ def _rag_index_document(case_id: str, filename: str, ocr_text: str, document_typ
     try:
         qdrant = _get_rag_client()
         if not qdrant:
+            return False
+        if not ensure_current_vector_collection(qdrant, "afi_doc_clasificaciones"):
             return False
         import uuid as _uuid
         from qdrant_client.models import PointStruct
@@ -4025,6 +4031,43 @@ def _ocr_text_from_image_with_paddle(image: Image.Image) -> str:
     return normalize_text("\n".join(_flatten_paddle_texts(result)))
 
 
+def _ocr_text_from_image_with_tesseract(image: Image.Image, config: str = "--psm 6") -> str:
+    languages = str(getattr(settings, "ocr_languages", "spa+eng") or "spa+eng").strip()
+    timeout = int(getattr(settings, "ocr_timeout_seconds", 45) or 45)
+    with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+        image.convert("RGB").save(tmp.name, format="PNG")
+        language_attempts = [languages]
+        if "eng" not in languages:
+            language_attempts.append("eng")
+        language_attempts.append("")
+        for lang in language_attempts:
+            cmd = ["tesseract", tmp.name, "stdout"]
+            if lang:
+                cmd.extend(["-l", lang])
+            if config:
+                cmd.extend(str(config).split())
+            try:
+                result = subprocess.run(
+                    cmd,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                )
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                return ""
+            if result.returncode == 0 and result.stdout.strip():
+                return normalize_text(result.stdout)
+    return ""
+
+
+def _ocr_text_from_image(image: Image.Image, config: str = "--psm 6") -> str:
+    engine = normalize_haystack(getattr(settings, "ocr_engine", "tesseract") or "tesseract")
+    if engine == "paddleocr":
+        return _ocr_text_from_image_with_paddle(image)
+    return _ocr_text_from_image_with_tesseract(image, config=config)
+
+
 def _ocr_best_text_from_image(image: Image.Image) -> str:
     variants = _prepare_ocr_variants(image)
     best_text = ""
@@ -4035,9 +4078,9 @@ def _ocr_best_text_from_image(image: Image.Image) -> str:
         (variants[1], "--psm 6"),
         (variants[2], "--psm 6"),
     ]
-    for variant, _config in fast_candidates:
+    for variant, config in fast_candidates:
         try:
-            text = _ocr_text_from_image_with_paddle(variant)
+            text = _ocr_text_from_image(variant, config=config)
         except Exception:
             continue
         if not text:
@@ -4052,9 +4095,9 @@ def _ocr_best_text_from_image(image: Image.Image) -> str:
     # Ruta exhaustiva solo para casos difíciles.
     configs = ["--psm 6", "--psm 11"]
     for variant in variants:
-        for _config in configs:
+        for config in configs:
             try:
-                text = _ocr_text_from_image_with_paddle(variant)
+                text = _ocr_text_from_image(variant, config=config)
             except Exception:
                 continue
             if not text:

@@ -45,7 +45,7 @@ async def get_system_health() -> Dict[str, object]:
         "api": "healthy",
         "version": settings.app_version,
         "qdrant": await check_http_service(settings.qdrant_url, "/healthz"),
-        "ocr": "paddleocr",
+        "ocr": settings.ocr_engine,
         "postgres": await check_postgres(),
         "resources": build_runtime_resources(),
     }

@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     reranker_model: str = "bbjson/bge-reranker-base"
     reranker_enabled: bool = True
     reranker_top_k: int = 6
+    ocr_engine: str = "tesseract"
+    ocr_languages: str = "spa+eng"
+    ocr_timeout_seconds: int = 45
     knowledge_dir: str = "/data/knowledge"
     qdrant_collection: str = "nova_knowledge"
     qdrant_state_path: str = "/data/qdrant/active_collection.txt"
