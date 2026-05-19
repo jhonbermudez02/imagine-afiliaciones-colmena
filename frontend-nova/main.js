@@ -36,6 +36,7 @@ const REVIEW_TYPE_OPTIONS = [
     ['carta',                 'Carta',              '04'],
     ['camara_comercio',       'Cámara de comercio', '05'],
     ['cedula',                'Cédula',             '06'],
+    ['inspector',             'Inspector',          '17'],
     ['constancia_afiliacion', 'Verificación',       '07'],
     ['rut',                   'RUT / DIAN',         '08'],
     ['entrega_documentos',    'Entrega Doc',        '10'],
@@ -52,6 +53,21 @@ const REVIEW_TYPE_OPTIONS = [
     ['sat',                   'SAT',                '99'],
     ['pdf',                   'PDF / Imagen',       '99'],
 ];
+
+const DOCUMENT_DISPLAY_PRIORITY = [
+    'formulario_afiliacion',
+    'anexo_sedes',
+    'camara_comercio',
+    'rut',
+    'cedula',
+    'inspector',
+    'autorizacion',
+    'entrega_documentos',
+    'comision',
+    'beneficiario_final',
+    'constancia_afiliacion',
+];
+const DOCUMENT_DISPLAY_PRIORITY_MAP = new Map(DOCUMENT_DISPLAY_PRIORITY.map((type, index) => [type, index]));
 
 // ── Estado global ────────────────────────────────────────────
 let activeCaseId = null;
@@ -149,6 +165,51 @@ function getReviewTypeLabelWithCode(type, legacyCode) {
     if (String(type||'').startsWith('anexo_sedes')) return label;
     const code = legacyCode != null ? String(legacyCode).padStart(2,'0') : getReviewTypeCode(type);
     return code ? `${label} ·${code}` : label;
+}
+
+function canonicalDocumentType(type = '') {
+    const key = String(type || '').trim();
+    if (key.startsWith('anexo_sedes')) return 'anexo_sedes';
+    return key;
+}
+
+function documentDisplayRank(item) {
+    if (item?.kind === 'xlsx' || canonicalDocumentType(item?.type) === 'xlsx') return 10_000;
+    const rank = DOCUMENT_DISPLAY_PRIORITY_MAP.get(canonicalDocumentType(item?.type));
+    return rank ?? 1_000;
+}
+
+function sortDocItemsByDisplayPriority(items) {
+    return [...items].sort((a, b) => {
+        const rankDiff = documentDisplayRank(a) - documentDisplayRank(b);
+        if (rankDiff !== 0) return rankDiff;
+        return (a._sourceIndex ?? 0) - (b._sourceIndex ?? 0);
+    }).map(({ _sourceIndex, ...item }) => item);
+}
+
+function applyWorkspaceDocumentOrder(items, workspaceOrder = []) {
+    if (!Array.isArray(workspaceOrder) || !workspaceOrder.length) return items;
+    const byFile = Object.fromEntries(items.map(item => [item.file, item]));
+    const ordered = [];
+    for (const filename of workspaceOrder) {
+        if (byFile[filename]) {
+            ordered.push(byFile[filename]);
+            delete byFile[filename];
+        }
+    }
+    for (const item of Object.values(byFile)) ordered.push(item);
+    return ordered;
+}
+
+function sortDocumentGroupsByDisplayPriority(groups) {
+    return [...(groups || [])].sort((a, b) => {
+        const aType = a?.document_type || a?.type || a?.label || '';
+        const bType = b?.document_type || b?.type || b?.label || '';
+        const aRank = DOCUMENT_DISPLAY_PRIORITY_MAP.get(canonicalDocumentType(aType)) ?? 1_000;
+        const bRank = DOCUMENT_DISPLAY_PRIORITY_MAP.get(canonicalDocumentType(bType)) ?? 1_000;
+        if (aRank !== bRank) return aRank - bRank;
+        return canonicalDocumentType(aType).localeCompare(canonicalDocumentType(bType));
+    });
 }
 
 
@@ -1376,20 +1437,21 @@ function onClassifCaseChange(caseId) { loadClassifForCase(caseId); }
 function buildDocItems(payload) {
     if (!payload) return [];
     const items = [];
+    let sourceIndex = 0;
     const a = payload.analysis || {};
     const manualReview = a.manual_review || {};
     const docMeta = buildDocMetaMap(payload);
     const received = Array.isArray(a.checklist?.received_summary) ? a.checklist.received_summary : [];
+    const workspace = a.document_workspace || {};
+    const workspaceOrder = workspace.manual_order === true && Array.isArray(workspace.order) ? workspace.order : [];
     const seen = new Set();
-    // Orden del workspace
-    const workspaceOrder = Array.isArray(a.document_workspace?.order) ? a.document_workspace.order : [];
 
-    // XLSX primero
+    // XLSX al final, segun prioridad documental.
     const xlsxFiles = collectXlsxFiles(payload);
     for (const f of xlsxFiles) {
         if (!f || seen.has(f)) continue;
         seen.add(f);
-        items.push({ file: f, kind: 'xlsx', type: 'xlsx', label: 'Archivo base XLSX', displayName: f });
+        items.push({ file: f, kind: 'xlsx', type: 'xlsx', label: 'Archivo base XLSX', displayName: f, _sourceIndex: sourceIndex++ });
     }
     // PDFs desde received_summary (ya clasificados)
     for (const group of received) {
@@ -1403,7 +1465,7 @@ function buildDocItems(payload) {
                 : (meta.document_type || group.label || 'pdf');
             const isCorrected = reviewEntry?.verdict === 'no';
             const legacyCode = isCorrected ? null : (meta.legacy_code ?? null);
-            items.push({ file: f, kind: 'document', type: effectiveType, label: getReviewTypeLabelWithCode(effectiveType, legacyCode), displayName: meta.display_name || f, corrected: isCorrected, codeSource: meta.code_source || '' });
+            items.push({ file: f, kind: 'document', type: effectiveType, label: getReviewTypeLabelWithCode(effectiveType, legacyCode), displayName: meta.display_name || f, corrected: isCorrected, codeSource: meta.code_source || '', _sourceIndex: sourceIndex++ });
         }
     }
     // Agregar documentos del análisis que no aparecieron en received_summary
@@ -1414,7 +1476,7 @@ function buildDocItems(payload) {
         const effectiveType = reviewEntry?.verdict === 'no' && reviewEntry.expected_type
             ? reviewEntry.expected_type
             : (meta.document_type || 'pdf');
-        items.push({ file: f, kind: 'document', type: effectiveType, label: getReviewTypeLabel(effectiveType), displayName: meta.display_name || f, corrected: reviewEntry?.verdict === 'no' });
+        items.push({ file: f, kind: 'document', type: effectiveType, label: getReviewTypeLabel(effectiveType), displayName: meta.display_name || f, corrected: reviewEntry?.verdict === 'no', _sourceIndex: sourceIndex++ });
     }
     // Agregar archivos físicos del caso que no aparecieron en ningún análisis
     const physicalFiles = (payload.files || []).map(f => f.filename || f.file || '').filter(Boolean);
@@ -1423,20 +1485,9 @@ function buildDocItems(payload) {
         const lower = f.toLowerCase();
         if (lower.endsWith('.xlsx') || lower.endsWith('.xls') || lower.endsWith('.xlsm')) continue;
         seen.add(f);
-        items.push({ file: f, kind: 'document', type: 'pdf', label: f.replace(/\.[^.]+$/, ''), displayName: f, corrected: false });
+        items.push({ file: f, kind: 'document', type: 'pdf', label: f.replace(/\.[^.]+$/, ''), displayName: f, corrected: false, _sourceIndex: sourceIndex++ });
     }
-    // Aplicar orden del workspace si existe
-    if (workspaceOrder.length) {
-        const byFile = Object.fromEntries(items.map(it => [it.file, it]));
-        const ordered = [];
-        for (const f of workspaceOrder) {
-            if (byFile[f]) { ordered.push(byFile[f]); delete byFile[f]; }
-        }
-        // Agregar los que no están en el orden al final
-        for (const it of Object.values(byFile)) ordered.push(it);
-        return ordered;
-    }
-    return items;
+    return applyWorkspaceDocumentOrder(sortDocItemsByDisplayPriority(items), workspaceOrder);
 }
 
 function collectXlsxFiles(payload) {
@@ -1488,15 +1539,6 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
         return;
     }
 
-    // Ordenar según columna seleccionada
-    if (sortBy === 'tipo') {
-        items = [...items].sort((a,b) => sortDir * (a.type||'').localeCompare(b.type||''));
-    } else if (sortBy === 'nombre') {
-        items = [...items].sort((a,b) => sortDir * (a.label||'').localeCompare(b.label||''));
-    } else if (sortBy === 'estado') {
-        items = [...items].sort((a,b) => sortDir * (Number(b.corrected||0) - Number(a.corrected||0)));
-    }
-
     // Header con conteo y botones de ordenamiento
     const headerEl = el.previousElementSibling;
     if (headerEl && headerEl.classList.contains('classif-doc-header')) {
@@ -1505,17 +1547,13 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
     const header = document.createElement('div');
     header.className = 'classif-doc-header';
     header.style.cssText = 'padding:6px 8px 2px;font-size:11px;color:var(--c-text-2);border-bottom:1px solid var(--c-border);margin-bottom:2px';
-    const dirs = (col) => sortBy === col ? (sortDir === 1 ? ' ↑' : ' ↓') : '';
     header.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
             <span>${items.length} documentos</span><span style="font-size:10px;opacity:0.7">↕ scroll</span>
         </div>
         <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
-            <span style="font-size:10px;opacity:0.6;margin-right:2px">Ordenar:</span>
-            <button class="classif-sort-btn ${sortBy==='default'?'active':''}" data-sort="default" type="button">Original</button>
-            <button class="classif-sort-btn ${sortBy==='tipo'?'active':''}" data-sort="tipo" type="button">Tipo${dirs('tipo')}</button>
-            <button class="classif-sort-btn ${sortBy==='nombre'?'active':''}" data-sort="nombre" type="button">Nombre${dirs('nombre')}</button>
-            <button class="classif-sort-btn ${sortBy==='estado'?'active':''}" data-sort="estado" type="button">Estado${dirs('estado')}</button>
+            <span style="font-size:10px;opacity:0.6;margin-right:2px">Orden:</span>
+            <span class="classif-sort-btn active" style="cursor:default">Prioridad documental</span>
             <button class="classif-sort-btn" id="btnGalleryMode" type="button" style="margin-left:auto;color:var(--c-blue)">🖼 Galería</button>
         </div>
     `;
@@ -1526,26 +1564,12 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
         openGallery(items, payload, 0);
     });
 
-    // Listeners de ordenamiento
-    header.querySelectorAll('.classif-sort-btn[data-sort]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const col = btn.dataset.sort;
-            if (col === 'gallery') return;
-            const newDir = (sortBy === col) ? -sortDir : 1;
-            renderClassifDocList(payload, col, newDir);
-        });
-    });
-
     el.innerHTML = items.map((item, i) => {
-        const orderNum = i + 1;
-        const orderOptions = items.map((_, j) => 
-            `<option value="${j+1}" ${j+1===orderNum?'selected':''}>${j+1}</option>`
-        ).join('');
         const isRag = item.codeSource === 'rag_classification';
         return `
         <div class="doc-item" data-index="${i}" data-file="${escapeHtml(item.file)}">
             <span class="doc-item-order">
-                <select class="doc-order-select" data-file="${escapeHtml(item.file)}" title="Cambiar orden">${orderOptions}</select>
+                <input class="doc-order-input" data-file="${escapeHtml(item.file)}" type="number" min="1" max="${items.length}" value="${i + 1}" title="Cambiar orden" aria-label="Orden del documento">
             </span>
             <span class="doc-item-type ${item.kind==='xlsx'?'ok':''}">
                 ${item.kind==='xlsx'?'XLSX':escapeHtml(item.type?.toUpperCase().slice(0,6)||'DOC')}
@@ -1562,7 +1586,7 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
     `}).join('');
     el.querySelectorAll('.doc-item').forEach(el => {
         el.addEventListener('click', async (e) => {
-            if (e.target.classList.contains('doc-order-select')) return;
+            if (e.target.classList.contains('doc-order-input')) return;
             if (e.target.classList.contains('doc-action-btn')) return; // manejar por separado
             el.closest('.doc-list')?.querySelectorAll('.doc-item').forEach(d => d.classList.remove('active'));
             el.classList.add('active');
@@ -1586,10 +1610,14 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
             if (!filename || !payload?.id) return;
             if (!confirm(`¿Eliminar "${filename}"?\n\nEste archivo se eliminará permanentemente del expediente.`)) return;
             try {
-                const r = await fetch(caseApiUrl(payload.id, `/files/${encodeURIComponent(filename)}`), { method: 'DELETE' });
+                const r = await fetchWithRetry(caseApiUrl(payload.id, `/files/${encodeURIComponent(filename)}`), { method: 'DELETE' });
                 if (r.ok) {
-                    btn.closest('.doc-item')?.remove();
                     showToast(`Archivo eliminado: ${filename}`, 'ok');
+                    if (preview) preview.innerHTML = '<div class="empty-state">Selecciona un documento</div>';
+                    if (previewTitle) previewTitle.textContent = 'Vista previa';
+                    const actions = document.getElementById('classifPreviewActions');
+                    if (actions) actions.innerHTML = '';
+                    await loadClassifForCase(payload.id);
                 } else {
                     showToast('No se pudo eliminar el archivo', 'err');
                 }
@@ -1606,11 +1634,11 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
             const filename = btn.dataset.file;
             if (!filename || !payload?.id) return;
             try {
-                const r = await fetch(caseApiUrl(payload.id, `/files/${encodeURIComponent(filename)}/duplicate`), { method: 'POST' });
+                const r = await fetchWithRetry(caseApiUrl(payload.id, `/files/${encodeURIComponent(filename)}/duplicate`), { method: 'POST' });
                 if (r.ok) {
                     const data = await r.json();
                     showToast(`Duplicado creado: ${data.filename || filename}`, 'ok');
-                    setTimeout(() => loadClassifForCase(payload.id), 500);
+                    await loadClassifForCase(payload.id);
                 } else {
                     showToast('No se pudo duplicar el archivo', 'err');
                 }
@@ -1620,32 +1648,41 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
         });
     });
 
-    // Listeners de reordenamiento
-    el.querySelectorAll('.doc-order-select').forEach(sel => {
-        sel.addEventListener('change', async () => {
-            const file = sel.dataset.file;
-            const newPos = parseInt(sel.value) - 1;
-            // Reordenar items
+    // Orden manual por número. El orden por prioridad queda como base cuando no hay ajuste guardado.
+    el.querySelectorAll('.doc-order-input').forEach(input => {
+        input.addEventListener('change', async () => {
+            const file = input.dataset.file;
             const currentIdx = items.findIndex(it => it.file === file);
+            if (currentIdx < 0 || !payload?.id) return;
+            const requested = Number.parseInt(input.value, 10);
+            const newPos = Math.min(Math.max(Number.isFinite(requested) ? requested : currentIdx + 1, 1), items.length) - 1;
+            input.value = String(newPos + 1);
             if (currentIdx === newPos) return;
+
             const newItems = [...items];
             const [moved] = newItems.splice(currentIdx, 1);
             newItems.splice(newPos, 0, moved);
             const newOrder = newItems.map(it => it.file);
+            input.disabled = true;
             try {
                 await fetchWithRetry(caseApiUrl(payload.id, '/document-workspace'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ action: 'set_order', order: newOrder }),
                 });
-                // Recargar la lista con el nuevo orden
                 payload.analysis = payload.analysis || {};
                 payload.analysis.document_workspace = payload.analysis.document_workspace || {};
                 payload.analysis.document_workspace.order = newOrder;
                 renderClassifDocList(payload, sortBy, sortDir);
-            } catch(e) { console.warn('Error reordenando:', e); }
+            } catch(e) {
+                console.warn('Error reordenando:', e);
+                input.disabled = false;
+                input.value = String(currentIdx + 1);
+                showToast('No se pudo guardar el orden del documento', 'err');
+            }
         });
     });
+
 }
 
 async function renderDocPreview(container, caseId, item) {
@@ -1906,8 +1943,10 @@ function renderValidacionOCR(container, payload) {
     const checklist = a.checklist || {};
     const validaciones = Array.isArray(a.validacion_resumen) ? a.validacion_resumen :
                          Array.isArray(checklist.validations) ? checklist.validations : [];
-    const docs = Array.isArray(checklist.received_summary) ? checklist.received_summary :
-                 Array.isArray(a.documents_summary) ? a.documents_summary : [];
+    const docs = sortDocumentGroupsByDisplayPriority(
+        Array.isArray(checklist.received_summary) ? checklist.received_summary :
+        Array.isArray(a.documents_summary) ? a.documents_summary : []
+    );
     const profile = (a.xlsx_profile || {}).profile || {};
     const empresa = profile.empresa || payload.label || 'n/d';
     const nit = profile.nit || 'n/d';
@@ -1969,8 +2008,9 @@ function renderValidacionOCR(container, payload) {
         html += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:20px">`;
         for (const group of docs) {
             const count = (group.files||[]).length;
-            const label = getReviewTypeLabel(group.type || group.label) || group.label || 'Documento';
-            const code = getReviewTypeCode(group.type || group.label);
+            const groupType = group.document_type || group.type || group.label;
+            const label = getReviewTypeLabel(groupType) || group.label || 'Documento';
+            const code = getReviewTypeCode(groupType);
             html += `<span class="pill pill-neutral">${escapeHtml(label)}${code?` ·${code}`:''} (${count})</span>`;
         }
         html += `</div>`;
@@ -2051,6 +2091,7 @@ function renderValidacionOCR(container, payload) {
             catch(e) { showToast('No pude guardar la excepción: ' + e.message, 'err', 6000); btn.disabled = false; }
         });
     });
+
 }
 
 // ── VISOR DOCUMENTAL ─────────────────────────────────────────
