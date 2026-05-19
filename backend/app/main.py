@@ -3484,7 +3484,41 @@ async def delete_case_file(case_id: str, filename: str):
         raise HTTPException(status_code=404, detail="Archivo no encontrado.")
     try:
         path.unlink()
-        return {"ok": True, "deleted": filename}
+        payload = load_case(case_id)
+        target_name = path.name
+        payload["files"] = [
+            item for item in (payload.get("files") or [])
+            if str(item.get("filename") or item.get("file") or "") != target_name
+        ]
+        analysis = payload.setdefault("analysis", {})
+        if isinstance(analysis, dict):
+            documents = analysis.get("documents")
+            if isinstance(documents, list):
+                analysis["documents"] = [
+                    item for item in documents
+                    if str(item.get("filename") or "") != target_name
+                ]
+            checklist = analysis.get("checklist")
+            if isinstance(checklist, dict):
+                summary = []
+                for group in checklist.get("received_summary") or []:
+                    if not isinstance(group, dict):
+                        continue
+                    group = dict(group)
+                    files = [item for item in (group.get("files") or []) if str(item or "") != target_name]
+                    if not files:
+                        continue
+                    group["files"] = files
+                    group["count"] = len(files)
+                    summary.append(group)
+                checklist["received_summary"] = summary
+            workspace = analysis.get("document_workspace")
+            if isinstance(workspace, dict):
+                workspace["order"] = [item for item in (workspace.get("order") or []) if str(item or "") != target_name]
+                workspace["removed_files"] = [item for item in (workspace.get("removed_files") or []) if str(item or "") != target_name]
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+        save_case(payload)
+        return {"ok": True, "deleted": target_name, "case": payload}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -3492,21 +3526,21 @@ async def delete_case_file(case_id: str, filename: str):
 @app.post("/api/cases/{case_id}/files/{filename:path}/duplicate")
 async def duplicate_case_file(case_id: str, filename: str):
     try:
-        src = get_case_file_path(case_id, filename)
+        payload = save_document_workspace(case_id=case_id, action="duplicate", filename=filename)
+        workspace_order = ((payload.get("analysis") or {}).get("document_workspace") or {}).get("order") or []
+        original_name = Path(filename).name
+        new_name = ""
+        if original_name in workspace_order:
+            idx = workspace_order.index(original_name)
+            new_name = str(workspace_order[idx + 1] or "") if idx + 1 < len(workspace_order) else ""
+        if not new_name:
+            files = payload.get("files") or []
+            new_name = str((files[-1] or {}).get("filename") or "") if files else ""
+        return {"ok": True, "filename": new_name, "case": payload}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Archivo no encontrado.")
-    import shutil as _shutil
-    stem = src.stem
-    suffix = src.suffix
-    counter = 1
-    while True:
-        new_name = f"{stem}_copia{counter}{suffix}"
-        dst = src.parent / new_name
-        if not dst.exists():
-            break
-        counter += 1
-    _shutil.copy2(src, dst)
-    return {"ok": True, "filename": new_name}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/cases/{case_id}/package")

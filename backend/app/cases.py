@@ -84,6 +84,23 @@ DOC_TYPE_LABELS = {
     "inspector": "Inspector",
 }
 
+DOCUMENT_DISPLAY_PRIORITY = [
+    "formulario_afiliacion",
+    "anexo_sedes",
+    "camara_comercio",
+    "rut",
+    "cedula",
+    "inspector",
+    "autorizacion",
+    "entrega_documentos",
+    "comision",
+    "beneficiario_final",
+    "constancia_afiliacion",
+]
+DOCUMENT_DISPLAY_PRIORITY_MAP = {
+    document_type: index for index, document_type in enumerate(DOCUMENT_DISPLAY_PRIORITY)
+}
+
 DOC_TYPE_TO_PRIMARY_CODE: Dict[str, int] = {}
 for _legacy_code, _doc_type in LEGACY_CODE_TO_TYPE.items():
     DOC_TYPE_TO_PRIMARY_CODE.setdefault(_doc_type, _legacy_code)
@@ -1003,7 +1020,7 @@ def load_case(case_id: str) -> Dict[str, Any]:
     metadata_path = get_case_metadata_path(case_id)
     if not metadata_path.exists():
         raise FileNotFoundError(case_id)
-    return json.loads(metadata_path.read_text(encoding="utf-8"))
+    return _normalize_case_payload(json.loads(metadata_path.read_text(encoding="utf-8")))
 
 
 def _normalize_case_payload(case_payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1016,6 +1033,8 @@ def _normalize_case_payload(case_payload: Dict[str, Any]) -> Dict[str, Any]:
         analysis.setdefault("operation", operation)
         analysis.setdefault("operation_label", operation_label(operation))
         analysis.setdefault("validation_profile", operation)
+        if "_apply_authorization_phrase_overrides" in globals():
+            _apply_authorization_phrase_overrides(analysis)
     workflow = analysis.get("workflow_run") or {}
     steps = workflow.get("steps")
     if isinstance(steps, list):
@@ -1233,6 +1252,7 @@ def _ensure_document_workspace(payload: Dict[str, Any]) -> Dict[str, Any]:
     workspace = analysis.setdefault("document_workspace", {})
     workspace.setdefault("order", [])
     workspace.setdefault("removed_files", [])
+    workspace.setdefault("manual_order", False)
     return workspace
 
 
@@ -1260,6 +1280,8 @@ def _sync_document_workspace(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def save_document_workspace(case_id: str, action: str, filename: str = "", order: Optional[List[str]] = None) -> Dict[str, Any]:
     payload = load_case(case_id)
+    existing_workspace = ((payload.get("analysis") or {}).get("document_workspace") or {})
+    had_manual_order = bool(existing_workspace.get("manual_order"))
     workspace = _sync_document_workspace(payload)
     files = payload.setdefault("files", [])
     action_key = normalize_haystack(action).replace(" ", "_")
@@ -1276,6 +1298,7 @@ def save_document_workspace(case_id: str, action: str, filename: str = "", order
             cleaned.append(name)
             seen.add(name)
         workspace["order"] = cleaned
+        workspace["manual_order"] = True
     elif action_key == "remove":
         if filename and filename not in workspace["removed_files"]:
             workspace["removed_files"].append(filename)
@@ -1311,20 +1334,30 @@ def save_document_workspace(case_id: str, action: str, filename: str = "", order
                 continue
             copied = json.loads(json.dumps(item, ensure_ascii=False))
             copied["filename"] = target.name
+            copied["document_type"] = "pdf"
+            copied["legacy_code"] = 99
+            copied["legacy_label"] = LEGACY_CODE_TO_TYPE.get(99, "")
+            copied["code_source"] = "manual_duplicate_pdf"
+            copied["display_name"] = target.name
+            copied["display_filename"] = target.name
+            copied["download_filename"] = target.name
             documents.append(copied)
             break
         checklist = analysis.get("checklist") or {}
-        for group in checklist.get("received_summary") or []:
-            files_group = group.get("files") or []
-            if filename in files_group and target.name not in files_group:
-                files_group.append(target.name)
-                group["count"] = len(files_group)
-                break
+        if isinstance(checklist, dict) and "_summarize_received_documents" in globals():
+            checklist["received_summary"] = _summarize_received_documents(documents)
+            checklist["received"] = sorted({str(item.get("document_type") or "") for item in documents if item.get("document_type")})
         current_order = workspace.get("order") or []
-        if filename in current_order:
-            insert_at = current_order.index(filename) + 1
-            current_order.insert(insert_at, target.name)
-            workspace["order"] = current_order
+        if not had_manual_order and documents and "_document_display_sort_key" in globals():
+            current_order = [
+                str(item.get("filename") or "")
+                for item in sorted(documents, key=lambda item: _document_display_sort_key(item.get("document_type")))
+                if str(item.get("filename") or "") and str(item.get("filename") or "") != target.name
+            ]
+        current_order = [item for item in current_order if item != target.name]
+        current_order.append(target.name)
+        workspace["order"] = current_order
+        workspace["manual_order"] = True
     else:
         raise ValueError(f"Acción documental no soportada: {action}")
 
@@ -1332,6 +1365,93 @@ def save_document_workspace(case_id: str, action: str, filename: str = "", order
     payload["updated_at"] = utc_now()
     save_case(payload)
     return payload
+
+
+def _unique_duplicate_path(files_dir: Path, stem: str, suffix: str, marker: str) -> Path:
+    counter = 1
+    target = files_dir / f"{stem}__{marker}{suffix}"
+    while target.exists():
+        counter += 1
+        target = files_dir / f"{stem}__{marker}{counter}{suffix}"
+    return target
+
+
+def _ensure_entrega_comision_duplicate(case_id: str, payload: Dict[str, Any], docs: List[Dict[str, Any]]) -> None:
+    entrega_docs = [
+        doc for doc in docs
+        if str(doc.get("document_type") or "") == "entrega_documentos"
+        and not str(doc.get("code_source") or "").startswith("auto_duplicate_")
+    ]
+    if not entrega_docs:
+        return
+
+    files = payload.setdefault("files", [])
+    analysis = payload.setdefault("analysis", {})
+    workspace = _ensure_document_workspace(payload)
+    changed = False
+
+    for source_doc in entrega_docs:
+        source_name = str(source_doc.get("filename") or "")
+        if not source_name:
+            continue
+        existing = next(
+            (
+                doc for doc in docs
+                if str(doc.get("source_filename") or "") == source_name
+                and str(doc.get("document_type") or "") == "comision"
+                and str(doc.get("code_source") or "") == "auto_duplicate_entrega_comision"
+            ),
+            None,
+        )
+        if existing:
+            continue
+
+        try:
+            source_path = get_case_file_path(case_id, source_name)
+        except FileNotFoundError:
+            continue
+
+        target = _unique_duplicate_path(source_path.parent, source_path.stem, source_path.suffix, "comision")
+        shutil.copy2(source_path, target)
+
+        source_meta = next((item for item in files if str(item.get("filename") or "") == source_name), None) or {}
+        files.append(
+            {
+                **source_meta,
+                "filename": target.name,
+                "stored_path": str(target),
+                "size_bytes": target.stat().st_size,
+                "source_filename": source_name,
+                "generated_role": "comision",
+            }
+        )
+
+        copied_doc = json.loads(json.dumps(source_doc, ensure_ascii=False))
+        copied_doc.update(
+            {
+                "filename": target.name,
+                "source_filename": source_name,
+                "document_type": "comision",
+                "legacy_code": 3,
+                "legacy_label": LEGACY_CODE_TO_TYPE.get(3, ""),
+                "code_source": "auto_duplicate_entrega_comision",
+                "display_name": "Comisión",
+                "display_filename": target.name,
+                "download_filename": target.name,
+            }
+        )
+        docs.append(copied_doc)
+
+        order = [item for item in (workspace.get("order") or []) if item != target.name]
+        if source_name in order:
+            order.insert(order.index(source_name) + 1, target.name)
+        else:
+            order.append(target.name)
+        workspace["order"] = order
+        changed = True
+
+    if changed and isinstance(analysis, dict):
+        analysis["documents"] = docs
 
 
 def export_manual_review_dataset() -> Dict[str, Any]:
@@ -2140,6 +2260,10 @@ def _ascii_haystack(value: Any) -> str:
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
 
 
+def _compact_ascii_haystack(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", _ascii_haystack(value))
+
+
 def _is_valid_cedula_number(value: Any) -> bool:
     digits = only_digits(value)
     return bool(5 <= len(digits) <= 10 and not digits.startswith("0"))
@@ -2761,12 +2885,87 @@ def _apply_document_learning_calibration(docs: List[Dict[str, Any]]) -> None:
 
 def _looks_like_autorizacion_document(haystack: str) -> bool:
     text = _ascii_haystack(haystack)
+    compact_text = _compact_ascii_haystack(haystack)
+    strong_phrase_markers = [
+        "canales y datos de contacto personal que he autorizado",
+        "acceso a historia clinica",
+        "teniendo en cuenta que las soluciones digitales del responsable",
+    ]
+    for marker in strong_phrase_markers:
+        marker_text = _ascii_haystack(marker)
+        marker_compact = _compact_ascii_haystack(marker)
+        if marker_text in text or marker_compact in compact_text:
+            return True
+
+    negative_markers = [
+        "comprobante entrega de documentos",
+        "reporte consulta no",
+        "risk consulting global group",
+        "lista ofac",
+        "listas asociadas",
+        "camara de comercio",
+        "certificado de existencia",
+        "formulario de afiliacion",
+        "planilla resumen",
+        "resumen general de pago",
+    ]
+    negative_hits = sum(1 for marker in negative_markers if marker in text)
     has_cps_code = bool(
         re.search(r"\bcps\s*-?\s*f\s*-?\s*\d+\b", text)
         or re.search(r"\bcpsf\d+\b", re.sub(r"[^a-z0-9]+", "", text))
     )
     has_riesgos_laborales = bool(re.search(r"\briesg\w*\s+labor\w*\b", text))
-    return has_cps_code and has_riesgos_laborales
+    if has_cps_code and has_riesgos_laborales and negative_hits == 0:
+        return True
+
+    positive_markers = [
+        "autorizacion de tratamiento de datos personales",
+        "datos personales afiliados",
+        "autorizo de manera previa",
+        "responsable del tratamiento",
+        "politica de proteccion de datos personales",
+        "datos sensibles",
+        "historia clinica",
+    ]
+    positive_hits = sum(1 for marker in positive_markers if marker in text)
+    return has_riesgos_laborales and positive_hits >= 3 and negative_hits == 0
+
+
+def _apply_authorization_phrase_overrides(analysis: Dict[str, Any]) -> None:
+    docs = analysis.get("documents")
+    if not isinstance(docs, list):
+        return
+    manual_docs = ((analysis.get("manual_review") or {}).get("documents") or {})
+    changed = False
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        filename = str(doc.get("filename") or "")
+        manual_override = manual_docs.get(filename)
+        if manual_override and str(manual_override.get("verdict") or "") == "no":
+            continue
+        text = " ".join(
+            str(value or "")
+            for value in [
+                doc.get("filename"),
+                doc.get("ocr_text"),
+                doc.get("text_preview"),
+            ]
+        )
+        if not _looks_like_autorizacion_document(text):
+            continue
+        if doc.get("document_type") == "autorizacion" and doc.get("legacy_code") == 98:
+            continue
+        doc["document_type"] = "autorizacion"
+        doc["legacy_code"] = 98
+        doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(98, "")
+        doc["code_source"] = "ocr_autorizacion_phrase_override"
+        changed = True
+    if changed and "_summarize_received_documents" in globals():
+        checklist = analysis.setdefault("checklist", {})
+        if isinstance(checklist, dict):
+            checklist["received"] = sorted({str(item.get("document_type") or "") for item in docs if isinstance(item, dict) and item.get("document_type")})
+            checklist["received_summary"] = _summarize_received_documents(docs)
 
 
 def _looks_like_comision_document(haystack: str) -> bool:
@@ -3166,6 +3365,8 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
         return {"document_type": "formulario_afiliacion", "legacy_code": 0, "code_source": "ocr_formulario_precise"}
     if _looks_like_anexo_sedes_document(haystack):
         return {"document_type": "anexo_sedes", "legacy_code": 1, "code_source": "ocr_sedes_precise"}
+    if _looks_like_autorizacion_document(haystack):
+        return {"document_type": "autorizacion", "legacy_code": 98, "code_source": "ocr_autorizacion_precise"}
     if _looks_like_entrega_documentos(haystack):
         return {"document_type": "entrega_documentos", "legacy_code": 10, "code_source": "ocr_entrega_precise"}
     if _looks_like_inspector_document(haystack):
@@ -3187,8 +3388,6 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
         return {"document_type": "camara_comercio", "legacy_code": 5, "code_source": "ocr_camara_precise"}
     if _looks_like_constancia_afiliacion(haystack):
         return {"document_type": "constancia_afiliacion", "legacy_code": 7, "code_source": "ocr_constancia"}
-    if _looks_like_autorizacion_document(haystack):
-        return {"document_type": "autorizacion", "legacy_code": 98, "code_source": "ocr_autorizacion_precise"}
     if _looks_like_comision_document(haystack):
         return {"document_type": "comision", "legacy_code": 3, "code_source": "ocr_comision_precise"}
     if _looks_like_carta_document(haystack):
@@ -5578,6 +5777,23 @@ def _doc_by_type(docs: List[Dict[str, Any]], document_type: str) -> List[Dict[st
     return [item for item in docs if item.get("document_type") == document_type]
 
 
+def _canonical_document_display_type(document_type: Any) -> str:
+    value = str(document_type or "").strip()
+    if value.startswith("anexo_sedes"):
+        return "anexo_sedes"
+    return value
+
+
+def _document_display_sort_key(document_type: Any) -> tuple[int, str]:
+    canonical = _canonical_document_display_type(document_type)
+    rank = DOCUMENT_DISPLAY_PRIORITY_MAP.get(canonical)
+    if rank is not None:
+        return rank, canonical
+    if canonical == "xlsx":
+        return 10_000, canonical
+    return 1_000, canonical
+
+
 def _unique_preserve(values: List[str]) -> List[str]:
     seen = set()
     output: List[str] = []
@@ -5634,7 +5850,7 @@ def _summarize_received_documents(docs: List[Dict[str, Any]]) -> List[Dict[str, 
     for bucket in summary.values():
         bucket["legacy_codes"] = sorted(bucket["legacy_codes"])
         rows.append(bucket)
-    rows.sort(key=lambda item: item["document_type"])
+    rows.sort(key=lambda item: _document_display_sort_key(item.get("document_type")))
     return rows
 
 
@@ -8615,6 +8831,8 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
                 doc["legacy_code"] = override.get("expected_code") or DOC_TYPE_TO_PRIMARY_CODE.get(str(override["expected_type"]), 99)
                 doc["code_source"] = "manual_review_override"
 
+    _ensure_entrega_comision_duplicate(case_id, payload, docs)
+
     for doc in docs:
         fields = doc.get("fields") or {}
         doc["key_fields"] = _document_key_fields(str(doc.get("document_type") or ""), fields)
@@ -8751,6 +8969,7 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
         "draft_926": output_926.get("draft"),
         "output_926": output_926,
         "manual_review": previous_manual_review,
+        "document_workspace": (payload.get("analysis") or {}).get("document_workspace") or previous_analysis.get("document_workspace") or {},
         "timings": {
             "documents_duration_ms": documents_duration_ms,
             "clean_duration_ms": clean_duration_ms,
