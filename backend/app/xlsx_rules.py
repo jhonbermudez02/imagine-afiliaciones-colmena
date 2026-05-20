@@ -164,6 +164,37 @@ def _append_cell_length_validation(
         )
 
 
+def _append_digits_length_validation(
+    blockers: List[Dict[str, Any]],
+    form_cell_values: Dict[str, Any],
+    field: str,
+    *,
+    min_length: int,
+    max_length: int,
+    code_prefix: str,
+) -> None:
+    cell_info = form_cell_values.get(field) or {}
+    raw_value = cell_info.get("value")
+    if _is_blank_value(raw_value):
+        return
+    label = cell_info.get("label") or field
+    cell = cell_info.get("cell") or "celda requerida"
+    text = normalize_text(raw_value)
+    if not re.fullmatch(r"\d+", text) or not (min_length <= len(text) <= max_length):
+        blockers.append(
+            {
+                "code": f"{code_prefix}_INVALID_DIGITS_LENGTH",
+                "severity": "blocker",
+                "field": field,
+                "cell": cell,
+                "message": (
+                    f"El campo '{label}' ({cell}) solo debe contener números y tener entre "
+                    f"{min_length} y {max_length} caracteres. Valor recibido: {raw_value}."
+                ),
+            }
+        )
+
+
 def _sheet_cell_info(sheet_values: Dict[str, Any], field: str) -> Dict[str, Any]:
     return dict((sheet_values or {}).get(field) or {})
 
@@ -975,7 +1006,7 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
     common_cell_fields = [
         ("numero_radicacion", True, False),
         ("lugar_afiliacion", False, False),
-        ("codigo_lugar", False, False),
+        ("codigo_lugar", True, False),
         ("nombre_lugar", False, False),
         ("naturaleza_juridica_codigo_tramite", True, False),
         ("naturaleza_juridica_nombre", False, False),
@@ -1024,12 +1055,12 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
         max_length=12,
         code_prefix="XLSX_COMMON_REQUIRED_CELL",
     )
-    _append_cell_length_validation(
+    _append_digits_length_validation(
         blockers,
         form_cell_values,
         "rep_legal_numero_documento",
         min_length=6,
-        max_length=12,
+        max_length=10,
         code_prefix="XLSX_COMMON_REQUIRED_CELL",
     )
     for field in [
