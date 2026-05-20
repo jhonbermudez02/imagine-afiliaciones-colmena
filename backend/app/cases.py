@@ -1066,6 +1066,7 @@ def save_case(case_payload: Dict[str, Any]) -> Dict[str, Any]:
         json.dumps(case_payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    clear_cases_cache()
     return case_payload
 
 
@@ -9033,7 +9034,7 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
             "analysis_total_ms": int((perf_counter() - analyze_started) * 1000),
         },
     }
-    payload["status"] = "analyzed"
+    payload["status"] = "completed" if decision_status == "aprobable" else "analyzed"
     payload["updated_at"] = utc_now()
     payload["analysis"] = analysis
     save_case(payload)

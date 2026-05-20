@@ -318,10 +318,23 @@ function blockerText(b) {
 function isXlsxOrFormularioBlocker(b) {
     const code = String(b?.code || b?.raw?.code || '').toUpperCase();
     const msg = normalizeText(b?.message || blockerText(b?.raw || b));
+    const documentValidationCodes = [
+        'CEDULA_MATCH',
+        'RUT_MATCH',
+        'CAMARA_',
+        'EMPRESA_MATCH',
+        'CONTRATO_MATCH',
+        'AUTORIZACION_',
+        'MISSING_REQUIRED_DOCUMENTS',
+        'DOCUMENTS_',
+        'ENTREGA_',
+        'COMISION_',
+        'ASESOR_',
+    ];
+    if (documentValidationCodes.some(prefix => code.startsWith(prefix))) return false;
     return code.startsWith('XLSX_') ||
-           msg.includes('xlsx') ||
-           msg.includes('formulario') ||
-           msg.includes('formulario de afiliacion');
+           msg.startsWith('el xlsx ') ||
+           msg.startsWith('el campo ');
 }
 
 function validationExceptionButtonHtml(b, index, style = '') {
@@ -403,6 +416,20 @@ async function acceptValidationException(caseId, blocker) {
     if (resultCard && resultCard.style.display !== 'none') renderWorkflowResult(payload);
     loadBandeja().catch(() => {});
     showToast('Contrato reprocesado con la excepción aplicada.', 'ok', 4500);
+}
+
+function setValidationExceptionButtonsLoading(root, activeButton, loading = true) {
+    const buttons = Array.from((root || document).querySelectorAll('.validation-exception-btn'));
+    buttons.forEach(btn => {
+        if (loading) {
+            if (!btn.dataset.originalText) btn.dataset.originalText = btn.textContent || 'Aceptar para este contrato';
+            btn.disabled = true;
+            btn.textContent = btn === activeButton ? 'Guardando y reprocesando...' : 'Esperando reproceso...';
+        } else {
+            btn.disabled = false;
+            btn.textContent = btn.dataset.originalText || 'Aceptar para este contrato';
+        }
+    });
 }
 
 function resolveContractNumber(analysis, item = {}) {
@@ -1286,8 +1313,12 @@ async function runWorkflow() {
 
     } catch(e) {
         console.error('runWorkflow:', e);
-        if (progressMsg) progressMsg.textContent = 'Error: ' + e.message;
+        renderStep(0, 'error');
+        if (progressMsg) {
+            progressMsg.innerHTML = `<span style="color:var(--c-err);font-weight:700">Error:</span> <span style="color:var(--c-err)">${escapeHtml(e.message)}</span>`;
+        }
         if (statusPill) { statusPill.className = 'status-pill err'; statusPill.textContent = 'Error'; }
+        showToast(e.message, 'err', 8000);
         if (btn) { btn.disabled = false; btn.textContent = 'Ejecutar prevalidación'; }
     }
 }
@@ -1313,9 +1344,6 @@ function renderWorkflowResult(payload) {
     const trabajadores = resumen.numero_trabajadores ?? profile.numero_trabajadores ?? 'n/d';
     const sedes = resumen.numero_sedes ?? profile.numero_sedes ?? 'n/d';
     const nomina = profile.nomina_total ? formatCurrency(profile.nomina_total) : 'n/d';
-    const nroAfiliacion = resolveContractNumber(a, payload);
-    const isAprobable = normalizeText(estado).includes('aprob') || normalizeText(wf.status||'') === 'completed';
-    const isNoAprobado = normalizeText(wf.status||'') === 'stopped_prevalidacion';
     const decision = a.decision || {};
     const blockers = Array.isArray(decision.blockers) ? decision.blockers :
                      Array.isArray(report.bloqueantes) ? report.bloqueantes : [];
@@ -1323,6 +1351,11 @@ function renderWorkflowResult(payload) {
     const acceptedExceptions = getAcceptedValidationExceptions(payload);
     const has926 = Boolean((wf.output_926||{}).legacy?.ok);
     const filename926 = (wf.output_926||{}).legacy?.filename || 'archivo_core.txt';
+    const nroAfiliacion = resolveContractNumber(a, payload);
+    const decisionStatus = normalizeText(decision.recommended_status || '');
+    const hasActiveBlockers = blockers.length > 0 || blockerRecords.length > 0;
+    const isAprobable = decisionStatus === 'aprobable' || (!hasActiveBlockers && normalizeText(estado).includes('aprob')) || normalizeText(wf.status||'') === 'completed';
+    const isNoAprobado = !isAprobable && normalizeText(wf.status||'') === 'stopped_prevalidacion';
 
     const stateClass = isNoAprobado ? 'err' : (isAprobable ? 'ok' : 'warn');
     const stateLabel = isNoAprobado ? 'No pasó validación' : (isAprobable ? 'Aprobable' : 'Observado');
@@ -1381,9 +1414,12 @@ function renderWorkflowResult(payload) {
         btn.addEventListener('click', async () => {
             const records = blockerRecords.length ? blockerRecords : blockers.map((b, i) => ({ message: blockerText(b), code: 'VALIDATION_ALERT', fingerprint: '', index: i }));
             const record = records[Number(btn.dataset.blockerIdx || 0)];
-            btn.disabled = true;
+            setValidationExceptionButtonsLoading(el, btn, true);
             try { await acceptValidationException(payload.id || activeCaseId, record); }
-            catch(e) { showToast('No pude guardar la excepción: ' + e.message, 'err', 6000); btn.disabled = false; }
+            catch(e) {
+                showToast('No pude guardar la excepción: ' + e.message, 'err', 6000);
+                setValidationExceptionButtonsLoading(el, btn, false);
+            }
         });
     });
 }
@@ -2089,9 +2125,12 @@ function renderValidacionOCR(container, payload) {
     container.querySelectorAll('.validation-exception-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
             const record = blockerRecords[Number(btn.dataset.blockerIdx || 0)];
-            btn.disabled = true;
+            setValidationExceptionButtonsLoading(container, btn, true);
             try { await acceptValidationException(payload.id || activeCaseId, record); }
-            catch(e) { showToast('No pude guardar la excepción: ' + e.message, 'err', 6000); btn.disabled = false; }
+            catch(e) {
+                showToast('No pude guardar la excepción: ' + e.message, 'err', 6000);
+                setValidationExceptionButtonsLoading(container, btn, false);
+            }
         });
     });
 
@@ -2284,16 +2323,17 @@ function renderReporte(container, payload) {
     const legacyFecha = legacy926.fecha || legacy926.processed_at || '';
     const legacyLote = legacy926.lote || legacy926.batch || '';
 
-    const estadoNorm = normalizeText(estado);
-    const isAprobable = estadoNorm.includes('aprob') || normalizeText(wf.status||'') === 'completed';
-    const isNoAprobado = normalizeText(wf.status||'') === 'stopped_prevalidacion' || estadoNorm.includes('no aprob');
-    const stateClass = isNoAprobado ? 'bloqueado' : (isAprobable ? 'aprobado' : 'observado');
-
     const blockers = Array.isArray(decision.blockers) ? decision.blockers :
                      Array.isArray(report.bloqueantes) ? report.bloqueantes : [];
     const blockerRecords = getValidationBlockerRecords(payload);
     const acceptedExceptions = getAcceptedValidationExceptions(payload);
     const observaciones = Array.isArray(report.observaciones) ? report.observaciones : [];
+    const estadoNorm = normalizeText(estado);
+    const decisionStatus = normalizeText(decision.recommended_status || '');
+    const hasActiveBlockers = blockers.length > 0 || blockerRecords.length > 0;
+    const isAprobable = decisionStatus === 'aprobable' || (!hasActiveBlockers && estadoNorm.includes('aprob')) || normalizeText(wf.status||'') === 'completed';
+    const isNoAprobado = !isAprobable && (normalizeText(wf.status||'') === 'stopped_prevalidacion' || estadoNorm.includes('no aprob'));
+    const stateClass = isNoAprobado ? 'bloqueado' : (isAprobable ? 'aprobado' : 'observado');
 
     // Extraer datos de comparación de razón social
     const vrMatches = (a.validacion_resumen?.matches || a.reporte_ejecutivo?.matches || {});
@@ -2503,9 +2543,12 @@ function renderReporte(container, payload) {
             event.stopPropagation();
             const records = blockerRecords.length ? blockerRecords : blockers.map((b, i) => ({ message: blockerText(b), code: 'VALIDATION_ALERT', fingerprint: '', index: i }));
             const record = records[Number(btn.dataset.blockerIdx || 0)];
-            btn.disabled = true;
+            setValidationExceptionButtonsLoading(container, btn, true);
             try { await acceptValidationException(caseId, record); }
-            catch(e) { showToast('No pude guardar la excepción: ' + e.message, 'err', 6000); btn.disabled = false; }
+            catch(e) {
+                showToast('No pude guardar la excepción: ' + e.message, 'err', 6000);
+                setValidationExceptionButtonsLoading(container, btn, false);
+            }
         });
     });
 
