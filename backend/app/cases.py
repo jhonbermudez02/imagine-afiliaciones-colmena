@@ -2345,6 +2345,27 @@ def _rut_nit_core(value: Any) -> str:
     return digits
 
 
+def _rut_ocr_numeric_fragment_to_digits(value: Any) -> str:
+    text = str(value or "")
+    translated = text.translate(str.maketrans({"O": "0", "o": "0", "I": "1", "l": "1", "|": "1"}))
+    return only_digits(translated)
+
+
+def _rut_nit_cores_from_digits(digits: Any) -> List[str]:
+    cleaned = only_digits(digits)
+    if len(cleaned) < 9:
+        return []
+    cores: List[str] = []
+    if 9 <= len(cleaned) <= 10:
+        cores.append(cleaned[:9])
+    if len(cleaned) <= 12:
+        for index in range(0, len(cleaned) - 8):
+            core = cleaned[index: index + 9]
+            if core not in cores:
+                cores.append(core)
+    return cores
+
+
 def _rut_nit_candidates_from_text(text: str) -> List[str]:
     normalized = normalize_text(text)
     if not normalized:
@@ -2356,14 +2377,37 @@ def _rut_nit_candidates_from_text(text: str) -> List[str]:
         search_windows.append(normalized[match.end(): match.end() + 220])
     search_windows.append(normalized)
     for window in search_windows:
+        for raw in re.findall(r"[0-9OoIl|](?:[\s./|-]*[0-9OoIl|]){8,11}", window):
+            digits = _rut_ocr_numeric_fragment_to_digits(raw)
+            for candidate in _rut_nit_cores_from_digits(digits):
+                if candidate not in seen:
+                    candidates.append(candidate)
+                    seen.add(candidate)
         for raw in re.findall(r"\d[\d\s./|lI-]{7,}\d", window):
-            digits = only_digits(raw)
-            if len(digits) < 9:
-                continue
-            candidate = digits[:9]
-            if candidate and candidate not in seen:
+            digits = _rut_ocr_numeric_fragment_to_digits(raw)
+            for candidate in _rut_nit_cores_from_digits(digits):
+                if candidate not in seen:
+                    candidates.append(candidate)
+                    seen.add(candidate)
+        for raw in re.findall(r"\b\d{8,12}\b", window):
+            for candidate in _rut_nit_cores_from_digits(raw):
+                if candidate not in seen:
+                    candidates.append(candidate)
+                    seen.add(candidate)
+    return candidates
+
+
+def _rut_nit_candidates_from_doc(doc: Dict[str, Any]) -> List[str]:
+    fields = doc.get("fields") or {}
+    raw_text = doc.get("ocr_text") or doc.get("text_preview") or ""
+    values: List[Any] = [fields.get("nit", ""), fields.get("document_number", "")]
+    values.extend(fields.get("all_numbers") or [])
+    values.extend(_rut_nit_candidates_from_text(_rut_first_marker_section(raw_text) or raw_text))
+    candidates: List[str] = []
+    for value in values:
+        for candidate in _rut_nit_cores_from_digits(_rut_ocr_numeric_fragment_to_digits(value)):
+            if candidate not in candidates:
                 candidates.append(candidate)
-                seen.add(candidate)
     return candidates
 
 
@@ -2418,7 +2462,11 @@ def _rut_first_marker_section(text: Any) -> str:
 
 def _rut_section_contains_nit(section: Any, expected_nit: Any) -> bool:
     expected = _rut_nit_core(expected_nit)
-    return bool(len(expected) == 9 and expected in only_digits(section))
+    if len(expected) != 9:
+        return False
+    if expected in only_digits(section):
+        return True
+    return expected in _rut_nit_candidates_from_text(str(section or ""))
 
 
 def _rut_section_contains_company(section: Any, expected_company: Any) -> bool:
@@ -3598,7 +3646,8 @@ def _infer_required_document_satisfaction(
                 nit_candidate = _best_numeric_candidate(
                     xlsx_nit,
                     [fields.get("nit", ""), fields.get("document_number", "")]
-                    + list(fields.get("all_numbers") or []),
+                    + list(fields.get("all_numbers") or [])
+                    + _rut_nit_candidates_from_doc(doc),
                 ) if xlsx_nit else ""
                 if nit_candidate and _rut_section_contains_nit(rut_section, xlsx_nit):
                     evidence.update(
@@ -6924,7 +6973,11 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
             for doc in docs:
                 fields = doc.get("fields") or {}
                 preview = normalize_haystack(doc.get("ocr_text", "") or doc.get("text_preview", ""))
-                candidates = [fields.get("nit", ""), fields.get("document_number", "")] + list(fields.get("all_numbers") or [])
+                candidates = (
+                    [fields.get("nit", ""), fields.get("document_number", "")]
+                    + list(fields.get("all_numbers") or [])
+                    + _rut_nit_candidates_from_doc(doc)
+                )
                 candidate = _best_numeric_candidate(xlsx_nit, candidates)
                 if candidate and (
                     doc.get("document_type") == "rut"
@@ -6944,12 +6997,14 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     if not rut_exempt_by_activity:
         rut_found = str(rut_affiliation_match.get("matched_nit_rut_5") or "")
         if not rut_found:
+            rut_doc_candidates = _rut_nit_candidates_from_doc(matched_rut or {}) if matched_rut else []
             rut_found = _best_numeric_candidate(
                 xlsx_nit,
                 [
                     ((matched_rut or {}).get("fields", {}) or {}).get("nit", ""),
                     ((matched_rut or {}).get("fields", {}) or {}).get("document_number", ""),
                     *list((((matched_rut or {}).get("fields", {}) or {}).get("all_numbers") or [])),
+                    *rut_doc_candidates,
                 ],
             )
         validations.append(
@@ -6972,12 +7027,14 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     if xlsx_nit:
         rut_matched_value = str(rut_affiliation_match.get("matched_nit_rut_5") or "")
         if not rut_matched_value:
+            rut_doc_candidates = _rut_nit_candidates_from_doc(matched_rut or {}) if matched_rut else []
             rut_matched_value = _best_numeric_candidate(
                 xlsx_nit,
                 [
                     ((matched_rut or {}).get("fields", {}) or {}).get("nit", ""),
                     ((matched_rut or {}).get("fields", {}) or {}).get("document_number", ""),
                     *list((((matched_rut or {}).get("fields", {}) or {}).get("all_numbers") or [])),
+                    *rut_doc_candidates,
                 ],
             )
         matches["rut_nit"] = {
