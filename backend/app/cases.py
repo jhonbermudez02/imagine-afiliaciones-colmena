@@ -3511,6 +3511,7 @@ def _infer_required_document_satisfaction(
         evidence: Dict[str, Any] = {"satisfied": direct, "direct": direct, "filename": "", "matched": "", "reason": ""}
         if required == "cedula":
             evidence.update({"satisfied": False, "direct": direct})
+            direct_cedula_doc = next((doc for doc in docs if doc.get("document_type") == "cedula"), None)
             for doc in docs:
                 fields = doc.get("fields") or {}
                 preview = normalize_haystack(doc.get("text_preview", ""))
@@ -3544,6 +3545,14 @@ def _infer_required_document_satisfaction(
                         }
                     )
                     break
+            if not evidence.get("satisfied") and direct_cedula_doc:
+                evidence.update(
+                    {
+                        "satisfied": True,
+                        "filename": direct_cedula_doc.get("filename", ""),
+                        "reason": "direct_type_without_identity_match" if xlsx_document else "direct_type",
+                    }
+                )
             results[required] = evidence
             continue
 
