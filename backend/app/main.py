@@ -640,6 +640,18 @@ def _find_aprobable_case_by_contract(contract_number: str, operation: str = "col
     return None
 
 
+def _find_existing_case_by_contract(contract_number: str, operation: str = "colima") -> Optional[Dict[str, Any]]:
+    contract_key = _contract_number_key(contract_number)
+    if not contract_key:
+        return None
+    operation_key = normalize_operation(operation)
+    for payload in list_cases(include_all=True, operation=operation_key):
+        existing_key = _contract_number_key(_resolve_case_contract_number(payload))
+        if existing_key and existing_key == contract_key:
+            return payload
+    return None
+
+
 def _unique_filenames(files: List[Any]) -> List[str]:
     seen: set[str] = set()
     ordered: List[str] = []
@@ -3071,22 +3083,24 @@ async def create_case(
             },
         )
     incoming_contract_number = extract_contract_number_from_uploads(accepted_uploads)
-    existing_aprobable = _find_aprobable_case_by_contract(incoming_contract_number, operation=operation_key)
-    if existing_aprobable:
-        existing_contract_number = _resolve_case_contract_number(existing_aprobable) or incoming_contract_number
-        existing_case_id = existing_aprobable.get("id")
-        existing_label = existing_aprobable.get("label") or existing_case_id or "caso existente"
+    existing_case = _find_existing_case_by_contract(incoming_contract_number, operation=operation_key)
+    if existing_case:
+        existing_contract_number = _resolve_case_contract_number(existing_case) or incoming_contract_number
+        existing_case_id = existing_case.get("id")
+        existing_label = existing_case.get("label") or existing_case_id or "caso existente"
         raise HTTPException(
             status_code=409,
             detail={
                 "message": (
-                    f"Este contrato ya fue cargado en {operation_label(operation_key)} y se encuentra en estado aprobable. "
+                    f"Este contrato ya fue cargado previamente en {operation_label(operation_key)}. "
                     f"No se permite volver a cargar el mismo contrato. Caso existente: {existing_label} ({existing_case_id})."
                 ),
-                "code": "CONTRATO_APROBABLE_DUPLICADO",
+                "code": "DUPLICATE_CONTRACT",
                 "contract_number": existing_contract_number,
                 "existing_case_id": existing_case_id,
                 "existing_label": existing_label,
+                "existing_status": existing_case.get("status") or "",
+                "existing_updated_at": existing_case.get("updated_at") or "",
             },
         )
     case_payload = store_case_files(label=label, uploads=accepted_uploads, operation=operation_key)
