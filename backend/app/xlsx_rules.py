@@ -1006,7 +1006,7 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
     common_cell_fields = [
         ("numero_radicacion", True, False),
         ("lugar_afiliacion", False, False),
-        ("codigo_lugar", False, False),
+        ("codigo_lugar", True, False),
         ("nombre_lugar", False, False),
         ("naturaleza_juridica_codigo_tramite", True, False),
         ("naturaleza_juridica_nombre", False, False),

@@ -1577,6 +1577,10 @@ _LIST_CASES_CACHE_TTL_SECONDS = 3.0
 _LIST_CASES_CACHE: Dict[tuple[bool, str], tuple[float, List[Dict[str, Any]]]] = {}
 
 
+def clear_cases_cache() -> None:
+    _LIST_CASES_CACHE.clear()
+
+
 def _clone_case_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [dict(item) for item in rows]
 
@@ -5780,7 +5784,8 @@ def _build_required_documents(xlsx_profile: Dict[str, Any]) -> List[str]:
         required.extend(["autorizacion", "entrega_documentos", "comision"])
         if _is_persona_natural_or_juridica(tipo_persona_norm):
             required.append("carta")
-        required.append("beneficiario_final")
+        if "juridic" in tipo_persona_norm:
+            required.append("beneficiario_final")
         return _unique_preserve(required)
     required = ["cedula", "autorizacion", "rut"]
     if any(token in afiliado for token in ["independ", "contratista"]):
@@ -9090,3 +9095,4 @@ def store_case_files(label: str, uploads: List[tuple[str, bytes]], operation: st
 
 def delete_case(case_id: str) -> None:
     shutil.rmtree(get_case_dir(case_id), ignore_errors=True)
+    clear_cases_cache()

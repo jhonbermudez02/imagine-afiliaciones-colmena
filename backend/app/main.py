@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from .cases import (
     analyze_case,
+    delete_case,
     export_manual_review_dataset,
     extract_contract_number_from_uploads,
     format_reason_lines,
@@ -3109,7 +3110,6 @@ async def case_detail(case_id: str, operation: Optional[str] = Query(default=Non
 @app.delete("/api/cases/{case_id}")
 async def case_delete(case_id: str, operation: Optional[str] = Query(default=None)):
     """Elimina un caso y todos sus archivos adjuntos."""
-    import shutil
     try:
         payload = load_case(case_id)
         _ensure_case_operation(payload, operation)
@@ -3117,7 +3117,7 @@ async def case_delete(case_id: str, operation: Optional[str] = Query(default=Non
         raise HTTPException(status_code=404, detail="Caso no encontrado.")
     case_dir = Path(settings.cases_dir) / case_id
     if case_dir.exists():
-        shutil.rmtree(str(case_dir))
+        delete_case(case_id)
         return {"ok": True, "deleted": case_id, "message": f"Caso {case_id} eliminado."}
     raise HTTPException(status_code=404, detail="Directorio del caso no encontrado.")
 
