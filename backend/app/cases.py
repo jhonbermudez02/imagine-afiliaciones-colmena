@@ -4838,6 +4838,7 @@ def _extract_form_fields_from_sheet(sheet: Any) -> Dict[str, str]:
         "sede_principal_correo": _sheet_value(sheet, 24, 27),
         "sede_principal_municipio_distrito": _sheet_value(sheet, 22, 8),
         "sede_principal_zona": _sheet_value(sheet, 22, 20),
+        "sede_principal_as22": _sheet_value(sheet, 22, 45),
         "sede_principal_localidad_comuna": _sheet_value(sheet, 22, 28),
         "sede_principal_departamento": _sheet_value(sheet, 22, 34),
         "responsable_sede_principal_nombre_completo": " ".join(
@@ -4905,6 +4906,9 @@ def _extract_form_cell_values_from_sheet(sheet: Any) -> Dict[str, Dict[str, Any]
         "sede_principal_direccion": ("U20", 20, 21, "Dirección de la sede principal"),
         "sede_principal_telefono": ("AN20", 20, 40, "Teléfono fijo/celular sede"),
         "sede_principal_correo": ("AN21", 21, 40, "Correo electrónico sede"),
+        "sede_principal_municipio_distrito": ("H22", 22, 8, "Municipio/Distrito sede principal"),
+        "sede_principal_zona": ("T22", 22, 20, "Zona sede principal"),
+        "sede_principal_as22": ("AS22", 22, 45, "Campo AS22 sede principal"),
         "responsable_sede_primer_apellido": ("K23", 23, 11, "Responsable sede / Primer apellido"),
         "responsable_sede_primer_nombre": ("AH23", 23, 34, "Responsable sede / Primer nombre"),
         "responsable_sede_tipo_documento": ("H24", 24, 8, "Responsable sede / Tipo de documento"),

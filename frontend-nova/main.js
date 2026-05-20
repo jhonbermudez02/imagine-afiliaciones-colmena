@@ -412,6 +412,16 @@ async function acceptValidationException(caseId, blocker) {
     if (reportEl && currentView === 'reporte') renderReporte(reportEl, payload);
     const validationEl = document.getElementById('validacionContent');
     if (validationEl && currentView === 'validacion') renderValidacionOCR(validationEl, payload);
+    if (currentView === 'clasificacion') {
+        const { empresa, nit } = resolveCase(payload);
+        const labelEl = document.getElementById('classifCaseLabel');
+        if (labelEl) {
+            labelEl.style.display = '';
+            labelEl.innerHTML = `📋 ${escapeHtml(empresa)}${nit !== 'n/d' ? ` · ${escapeHtml(nit)}` : ''}`;
+        }
+        renderClassifBlockers(payload);
+        renderClassifDocList(payload);
+    }
     const resultCard = document.getElementById('workflowResultCard');
     if (resultCard && resultCard.style.display !== 'none') renderWorkflowResult(payload);
     loadBandeja().catch(() => {});
@@ -1465,6 +1475,7 @@ async function loadClassifForCase(caseId) {
             labelEl.innerHTML = `📋 ${escapeHtml(empresa)}${nit !== 'n/d' ? ` · ${escapeHtml(nit)}` : ''}`;
         }
 
+        renderClassifBlockers(payload);
         renderClassifDocList(payload);
     } catch(e) {
         if (listEl) listEl.innerHTML = `<div class="error-msg">${escapeHtml(e.message)}</div>`;
@@ -1472,6 +1483,73 @@ async function loadClassifForCase(caseId) {
 }
 
 function onClassifCaseChange(caseId) { loadClassifForCase(caseId); }
+
+function ensureClassifBlockersPanel() {
+    let panel = document.getElementById('classifBlockersPanel');
+    if (panel) return panel;
+    const previewBody = document.getElementById('classifPreviewBody');
+    if (!previewBody?.parentElement) return null;
+    panel = document.createElement('div');
+    panel.id = 'classifBlockersPanel';
+    previewBody.parentElement.insertBefore(panel, previewBody.nextSibling);
+    return panel;
+}
+
+function renderClassifBlockers(payload) {
+    const panel = ensureClassifBlockersPanel();
+    if (!panel) return;
+    const a = payload?.analysis || {};
+    const decision = a.decision || {};
+    const report = (a.workflow_run || {}).executive_report_final || (a.workflow_run || {}).executive_report_precheck || a.reporte_ejecutivo || {};
+    const blockers = Array.isArray(decision.blockers) ? decision.blockers :
+                     Array.isArray(report.bloqueantes) ? report.bloqueantes : [];
+    const blockerRecords = getValidationBlockerRecords(payload);
+    const records = blockerRecords.length ? blockerRecords : blockers.map((b, i) => ({ message: blockerText(b), code: 'VALIDATION_ALERT', fingerprint: '', index: i }));
+    const acceptedExceptions = getAcceptedValidationExceptions(payload);
+    if (!records.length && !acceptedExceptions.length) {
+        panel.innerHTML = '';
+        panel.style.display = 'none';
+        return;
+    }
+    panel.style.display = '';
+    panel.innerHTML = `
+        ${records.length ? `
+            <div class="classif-blockers-box">
+                <div class="classif-blockers-title">Bloqueantes para validar (${records.length})</div>
+                ${records.map((b, i) => `
+                    <div class="classif-blocker-item">
+                        <span class="report-blocker-icon">✗</span>
+                        <span class="classif-blocker-text">${escapeHtml(b.message || blockerText(b))}</span>
+                        ${validationExceptionButtonHtml(b, i, 'margin-left:auto')}
+                    </div>
+                `).join('')}
+            </div>
+        ` : ''}
+        ${acceptedExceptions.length ? `
+            <div class="classif-blockers-box accepted">
+                <div class="classif-blockers-title ok">Aceptados manualmente (${acceptedExceptions.length})</div>
+                ${acceptedExceptions.slice(0, 5).map(item => `
+                    <div class="classif-blocker-item accepted">
+                        <span>✓</span>
+                        <span class="classif-blocker-text">${escapeHtml(item.message || '')}</span>
+                    </div>
+                `).join('')}
+            </div>
+        ` : ''}
+    `;
+    panel.querySelectorAll('.validation-exception-btn').forEach(btn => {
+        btn.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            const record = records[Number(btn.dataset.blockerIdx || 0)];
+            setValidationExceptionButtonsLoading(panel, btn, true);
+            try { await acceptValidationException(payload.id || activeCaseId, record); }
+            catch(e) {
+                showToast('No pude guardar la excepción: ' + e.message, 'err', 6000);
+                setValidationExceptionButtonsLoading(panel, btn, false);
+            }
+        });
+    });
+}
 
 function buildDocItems(payload) {
     if (!payload) return [];
