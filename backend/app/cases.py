@@ -1187,6 +1187,58 @@ def _decorate_validation_reason(reason: Dict[str, Any]) -> Dict[str, Any]:
     return item
 
 
+def _validation_reason_category(reason: Dict[str, Any]) -> str:
+    code = normalize_haystack(reason.get("code", ""))
+    message = normalize_haystack(reason.get("message", ""))
+    field = normalize_haystack(reason.get("field", ""))
+    text = f"{code} {message} {field}"
+    if any(token in text for token in ["correo", "email", "mail"]):
+        return "email"
+    if "celular" in text:
+        return "celular"
+    if any(token in text for token in ["telefono", "teléfono"]):
+        return "telefono"
+    if any(token in text for token in ["numerico", "numérico", "numero", "número", "not_numeric"]):
+        return "numeric"
+    return ""
+
+
+def _dedupe_xlsx_duplicate_reasons(reasons: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    xlsx_keys: set[tuple[str, str]] = set()
+    for reason in reasons:
+        if not isinstance(reason, dict):
+            continue
+        code = normalize_text(reason.get("code", "")).upper()
+        if not code.startswith("XLSX_"):
+            continue
+        row = normalize_text(reason.get("row", ""))
+        category = _validation_reason_category(reason)
+        if row and category:
+            xlsx_keys.add((row, category))
+
+    if not xlsx_keys:
+        return reasons
+
+    deduped: List[Dict[str, Any]] = []
+    for reason in reasons:
+        if not isinstance(reason, dict):
+            deduped.append(reason)
+            continue
+        code = normalize_text(reason.get("code", "")).upper()
+        if code.startswith("XLSX_"):
+            deduped.append(reason)
+            continue
+        row = normalize_text(reason.get("row", ""))
+        if not row:
+            match = re.search(r"\bfila\s+(\d+)\b", normalize_haystack(reason.get("message", "")))
+            row = match.group(1) if match else ""
+        category = _validation_reason_category(reason)
+        if row and category and (row, category) in xlsx_keys:
+            continue
+        deduped.append(reason)
+    return deduped
+
+
 def _apply_validation_exceptions(validation_summary: Dict[str, Any], manual_review: Dict[str, Any]) -> Dict[str, Any]:
     active_exceptions = _active_validation_exceptions(manual_review)
     precheck = validation_summary.setdefault("precheck", {})
@@ -2273,13 +2325,14 @@ def _compact_ascii_haystack(value: Any) -> str:
 
 def _is_valid_cedula_number(value: Any) -> bool:
     digits = only_digits(value)
-    return bool(5 <= len(digits) <= 10 and not digits.startswith("0"))
+    normalized = digits.lstrip("0") or "0"
+    return bool(5 <= len(normalized) <= 10)
 
 
 def _cedula_number_candidates(values: List[Any]) -> List[str]:
     candidates: List[str] = []
     for raw in values:
-        digits = only_digits(raw)
+        digits = (only_digits(raw).lstrip("0") or "0")
         if _is_valid_cedula_number(digits) and digits not in candidates:
             candidates.append(digits)
     return candidates
@@ -2828,9 +2881,7 @@ def _apply_document_learning_calibration(docs: List[Dict[str, Any]]) -> None:
         current_type = str(doc.get("document_type") or "")
         if current_type not in remaps_by_from:
             continue
-        haystack = normalize_haystack(
-            f"{doc.get('filename', '')} {doc.get('ocr_text', '') or doc.get('text_preview', '')}"
-        )
+        haystack = normalize_haystack(doc.get("ocr_text", "") or doc.get("text_preview", ""))
         if not haystack:
             continue
 
@@ -3034,9 +3085,7 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
         group.sort(key=lambda item: _extract_page_number(str(item.get("filename") or "")))
 
         for index, doc in enumerate(group):
-            haystack = normalize_haystack(
-                f"{doc.get('filename', '')} {doc.get('ocr_text', '') or doc.get('text_preview', '')}"
-            )
+            haystack = normalize_haystack(doc.get("ocr_text", "") or doc.get("text_preview", ""))
             doc_type = str(doc.get("document_type") or "")
 
             if _looks_like_beneficiario_final_document(haystack):
@@ -3085,7 +3134,7 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
                     doc["code_source"] = "post_cedula_identity_layout"
                     continue
 
-                if _looks_like_cedula_document(normalize_haystack(doc.get("filename", "")), haystack):
+                if _looks_like_cedula_document("", haystack):
                     doc["document_type"] = "cedula"
                     doc["legacy_code"] = 6
                     doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(6, "")
@@ -3172,7 +3221,7 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
                         not text_preview
                         or _text_quality_is_low(text_preview)
                         or (
-                            not _looks_like_cedula_document(normalize_haystack(doc.get("filename", "")), haystack)
+                            not _looks_like_cedula_document("", haystack)
                             and len((doc.get("fields") or {}).get("all_numbers") or []) <= 4
                         )
                     )
@@ -3241,9 +3290,7 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
     # A single contract should not finish with multiple identity documents classified as cédula.
     cedula_docs = [doc for doc in docs if doc.get("document_type") == "cedula"]
     for doc in list(cedula_docs):
-        haystack = normalize_haystack(
-            f"{doc.get('filename', '')} {doc.get('ocr_text', '') or doc.get('text_preview', '')}"
-        )
+        haystack = normalize_haystack(doc.get("ocr_text", "") or doc.get("text_preview", ""))
         if any(
             marker in haystack
             for marker in [
@@ -3278,12 +3325,10 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
     cedula_docs = [doc for doc in docs if doc.get("document_type") == "cedula"]
     if len(cedula_docs) > 1:
         def _cedula_rank(doc: Dict[str, Any]) -> tuple[int, int]:
-            haystack = normalize_haystack(
-                f"{doc.get('filename', '')} {doc.get('ocr_text', '') or doc.get('text_preview', '')}"
-            )
+            haystack = normalize_haystack(doc.get("ocr_text", "") or doc.get("text_preview", ""))
             fields = doc.get("fields") or {}
             score = 0
-            if _looks_like_cedula_document(normalize_haystack(doc.get("filename", "")), haystack):
+            if _looks_like_cedula_document("", haystack):
                 score += 10
             if fields.get("document_number"):
                 score += 6
@@ -3299,9 +3344,7 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
         for doc in cedula_docs:
             if doc is best_cedula:
                 continue
-            haystack = normalize_haystack(
-                f"{doc.get('filename', '')} {doc.get('ocr_text', '') or doc.get('text_preview', '')}"
-            )
+            haystack = normalize_haystack(doc.get("ocr_text", "") or doc.get("text_preview", ""))
             if _looks_like_constancia_afiliacion(haystack):
                 doc["document_type"] = "constancia_afiliacion"
                 doc["legacy_code"] = 7
@@ -3357,17 +3400,10 @@ def _number_anexo_sedes(docs: List[Dict[str, Any]]) -> None:
 
 
 def _classify_document(filename: str, text: str) -> Dict[str, Any]:
-    name_txt = normalize_haystack(filename)
     text_txt = normalize_haystack(text)
-    haystack = f"{name_txt} {text_txt}".strip()
+    haystack = text_txt
     lower_name = str(filename or "").lower()
 
-    if "formulario de afiliacion" in name_txt:
-        return {"document_type": "formulario_afiliacion", "legacy_code": 0, "code_source": "name_override_formulario"}
-    if re.search(r"\bsede[\s._-]*\d+\b", name_txt) or re.search(r"\bsedes?\b", name_txt):
-        return {"document_type": "anexo_sedes", "legacy_code": 1, "code_source": "name_override_sede"}
-    if re.match(r"^sede\d+(?:__p\d+)?\.pdf$", lower_name):
-        return {"document_type": "anexo_sedes", "legacy_code": 1, "code_source": "name_override_sede_compact"}
     if (
         "a. afiliacion" in haystack
         or "a. afiliación" in haystack
@@ -3394,7 +3430,7 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
         return {"document_type": "beneficiario_final", "legacy_code": 27, "code_source": "ocr_beneficiario_precise"}
     if _looks_like_rut_document(haystack):
         return {"document_type": "rut", "legacy_code": 8, "code_source": "ocr_rut_precise"}
-    if _looks_like_cedula_document(name_txt, haystack):
+    if _looks_like_cedula_document("", haystack):
         return {"document_type": "cedula", "legacy_code": 6, "code_source": "ocr_cedula_precise"}
     if _looks_like_camara_document(haystack):
         return {"document_type": "camara_comercio", "legacy_code": 5, "code_source": "ocr_camara_precise"}
@@ -3475,19 +3511,6 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
     if any(token in haystack for token in ["declaracion de renta", "declaracion renta", "honorarios", "ingresos", "desprendible de pago"]):
         return {"document_type": "soporte_ingresos", "legacy_code": 11, "code_source": "ocr_ingresos"}
 
-    name_rules: List[tuple[int, str, List[str], str]] = [
-        (5, "camara_comercio", ["camara", "comercio"], "name_camara"),
-        (8, "rut", ["rut"], "name_rut"),
-        (1, "anexo_sedes", ["sedes", "anexo_sedes"], "name_sedes"),
-        (2, "listado_trabajadores", ["trabajadores", "listado"], "name_listado"),
-        (10, "entrega_documentos", ["entrega", "anexos"], "name_entrega"),
-        (11, "soporte_pagos", ["pagos", "recibo"], "name_pagos"),
-        (12, "contrato", ["contrato"], "name_contrato"),
-    ]
-    for code, doc_type, keys, label in name_rules:
-        if any(key in name_txt for key in keys):
-            return {"document_type": doc_type, "legacy_code": code, "code_source": label}
-
     if lower_name.endswith((".xlsx", ".xlsm", ".xls")):
         return {"document_type": "xlsx", "legacy_code": -1, "code_source": "file_xlsx"}
     if lower_name.endswith(".pdf"):
@@ -3508,7 +3531,8 @@ def _infer_required_document_satisfaction(
     grouped_types = {doc.get("document_type") for doc in docs}
 
     for required in required_docs:
-        direct = required in grouped_types
+        equivalent_types = {"soporte_pagos", "soporte_ingresos"} if required in {"soporte_pagos", "soporte_ingresos"} else {required}
+        direct = any(doc_type in grouped_types for doc_type in equivalent_types)
         evidence: Dict[str, Any] = {"satisfied": direct, "direct": direct, "filename": "", "matched": "", "reason": ""}
         if required == "cedula":
             evidence.update({"satisfied": False, "direct": direct})
@@ -3527,7 +3551,7 @@ def _infer_required_document_satisfaction(
                     or (
                         doc_type not in {"carta", "rut", "camara_comercio", "soporte_ingresos", "entrega_documentos"}
                         and (
-                            _looks_like_cedula_document(normalize_haystack(doc.get("filename", "")), preview)
+                            _looks_like_cedula_document("", preview)
                             or "numero de cedula" in preview
                             or "numero de identificacion cc" in preview
                             or "tipo de documento numero de identificacion cc" in preview
@@ -3558,7 +3582,7 @@ def _infer_required_document_satisfaction(
             continue
 
         if direct:
-            doc = next((item for item in docs if item.get("document_type") == required), None)
+            doc = next((item for item in docs if item.get("document_type") in equivalent_types), None)
             evidence["filename"] = (doc or {}).get("filename", "")
             evidence["reason"] = "direct_type"
             results[required] = evidence
@@ -3567,14 +3591,16 @@ def _infer_required_document_satisfaction(
         if required == "rut":
             for doc in docs:
                 fields = doc.get("fields") or {}
-                preview = normalize_haystack(doc.get("text_preview", ""))
-                nit_candidate = _best_numeric_candidate(xlsx_nit, [fields.get("nit", ""), fields.get("document_number", "")] + list(fields.get("all_numbers") or [])) if xlsx_nit else ""
-                if nit_candidate and (
-                    "dian" in preview
-                    or "registro unico tributario" in preview
-                    or "direccion de impuestos" in preview
-                    or "numero de identificacion tributaria" in preview
-                ):
+                raw_text = doc.get("ocr_text") or doc.get("text_preview") or ""
+                rut_section = _rut_first_marker_section(raw_text)
+                if not rut_section:
+                    continue
+                nit_candidate = _best_numeric_candidate(
+                    xlsx_nit,
+                    [fields.get("nit", ""), fields.get("document_number", "")]
+                    + list(fields.get("all_numbers") or []),
+                ) if xlsx_nit else ""
+                if nit_candidate and _rut_section_contains_nit(rut_section, xlsx_nit):
                     evidence.update(
                         {
                             "satisfied": True,
@@ -3596,23 +3622,6 @@ def _infer_required_document_satisfaction(
                         }
                     )
                     break
-        elif required in {"soporte_ingresos", "soporte_pagos"}:
-            for doc in docs:
-                fields = doc.get("fields") or {}
-                preview = normalize_haystack(doc.get("text_preview", ""))
-                if fields.get("has_income_hint") or any(
-                    token in preview
-                    for token in ["pila pagada", "recibo de pago", "desprendible de pago", "ingresos", "autorizacion cargue retroactivo"]
-                ):
-                    evidence.update(
-                        {
-                            "satisfied": True,
-                            "filename": doc.get("filename", ""),
-                            "reason": "inferred_income_match",
-                        }
-                    )
-                    break
-
         results[required] = evidence
     return results
 
@@ -3857,7 +3866,7 @@ def _score_ocr_quality(text: str, used_ocr: bool, pages_processed: int) -> float
 
 
 def _document_signals(document_type: str, code_source: str, fields: Dict[str, Any], text: str, filename: str) -> List[str]:
-    haystack = normalize_haystack(f"{filename} {text}")
+    haystack = normalize_haystack(text)
     signals: List[str] = []
     if code_source:
         signals.append(f"source:{code_source}")
@@ -3987,9 +3996,6 @@ def _classification_confidence(document_type: str, code_source: str, fields: Dic
         "ocr_autorizacion_precise": 0.92,
         "ocr_carta_intermediacion": 0.92,
         "ocr_carta": 0.88,
-        "name_override_formulario": 0.92,
-        "name_override_sede": 0.92,
-        "name_override_sede_compact": 0.92,
         "learned_calibration_pdf_to_cedula": 0.82,
         "learned_calibration_pdf_to_soporte_ingresos": 0.8,
         "learned_calibration_rut_to_carta": 0.78,
@@ -6652,6 +6658,7 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
             for item in row_errors[:20]
         )
         next_actions.append("Corregir las filas inválidas del XLSX antes de continuar con la radicación.")
+    rejection_reasons = _dedupe_xlsx_duplicate_reasons(rejection_reasons)
 
     listed_workers = _doc_by_type(docs, "listado_trabajadores")
     listed_workers_present = bool(listed_workers) or parsed_sede_files > 0 or any(doc.get("document_type") == "anexo_sedes" for doc in docs)
@@ -6916,13 +6923,13 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         if not matched_rut:
             for doc in docs:
                 fields = doc.get("fields") or {}
-                preview = normalize_haystack(doc.get("text_preview", ""))
+                preview = normalize_haystack(doc.get("ocr_text", "") or doc.get("text_preview", ""))
                 candidates = [fields.get("nit", ""), fields.get("document_number", "")] + list(fields.get("all_numbers") or [])
                 candidate = _best_numeric_candidate(xlsx_nit, candidates)
                 if candidate and (
-                    doc.get("document_type") in {"rut", "entrega_documentos", "camara_comercio", "soporte_ingresos"}
-                    or "rut" in preview
-                    or "dian" in preview
+                    doc.get("document_type") == "rut"
+                    or "registro unico tributario" in preview
+                    or "direccion de impuestos" in preview
                     or "numero de identificacion tributaria" in preview
                 ):
                     matched_rut = doc
@@ -7523,6 +7530,7 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
             }
         )
         existing_reason_keys.add(reason_key)
+    precheck_reasons = _dedupe_xlsx_duplicate_reasons(precheck_reasons)
     precheck["motivos_de_rechazo"] = [
         _decorate_validation_reason(item)
         for item in precheck_reasons
