@@ -90,10 +90,12 @@ DOCUMENT_DISPLAY_PRIORITY = [
     "camara_comercio",
     "rut",
     "cedula",
+    "soporte_pagos",
     "inspector",
     "autorizacion",
     "entrega_documentos",
     "comision",
+    "carta",
     "beneficiario_final",
     "constancia_afiliacion",
 ]
@@ -2619,6 +2621,11 @@ def _inspector_exempt_by_entrega(docs: List[Dict[str, Any]]) -> bool:
     return False
 
 
+def _is_persona_natural_or_juridica(value: Any) -> bool:
+    normalized = _ascii_haystack(value)
+    return "natural" in normalized or "juridic" in normalized
+
+
 def _looks_like_anexo_sedes_document(haystack: str) -> bool:
     if any(
         marker in haystack
@@ -3389,7 +3396,7 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
     if _looks_like_constancia_afiliacion(haystack):
         return {"document_type": "constancia_afiliacion", "legacy_code": 7, "code_source": "ocr_constancia"}
     if _looks_like_comision_document(haystack):
-        return {"document_type": "comision", "legacy_code": 3, "code_source": "ocr_comision_precise"}
+        return {"document_type": "carta", "legacy_code": 4, "code_source": "ocr_carta_intermediacion"}
     if _looks_like_carta_document(haystack):
         return {"document_type": "carta", "legacy_code": 4, "code_source": "ocr_carta"}
     planilla_markers = [
@@ -3575,7 +3582,7 @@ def _infer_required_document_satisfaction(
                         }
                     )
                     break
-        elif required == "soporte_ingresos":
+        elif required in {"soporte_ingresos", "soporte_pagos"}:
             for doc in docs:
                 fields = doc.get("fields") or {}
                 preview = normalize_haystack(doc.get("text_preview", ""))
@@ -3964,7 +3971,7 @@ def _classification_confidence(document_type: str, code_source: str, fields: Dic
         "ocr_entrega_precise": 0.92,
         "ocr_planilla_precise": 0.93,
         "ocr_autorizacion_precise": 0.92,
-        "ocr_comision_precise": 0.92,
+        "ocr_carta_intermediacion": 0.92,
         "ocr_carta": 0.88,
         "name_override_formulario": 0.92,
         "name_override_sede": 0.92,
@@ -5628,6 +5635,7 @@ def _finalize_profile_from_docs(xlsx_profile: Dict[str, Any], docs: List[Dict[st
         "formulario_afiliacion": 3,
         "entrega_documentos": 3,
         "soporte_ingresos": 2,
+        "soporte_pagos": 2,
         "constancia_afiliacion": 2,
     }
     for doc in docs:
@@ -5740,30 +5748,52 @@ def _build_required_documents(xlsx_profile: Dict[str, Any]) -> List[str]:
         or profile.get("tipo_persona", "")
     )
     activity_code_g26 = only_digits(form_cell_raw("a_codigo_actividad_economica_principal"))
+    activity_code_s29 = only_digits(form_cell_raw("b_codigo_actividad_economica_principal"))
 
     # El formulario debe mandar sobre etiquetas heredadas o históricas.
     explicit_afiliacion = "afili" in tipo_tramite
     explicit_traslado = "traslado" in tipo_tramite and not explicit_afiliacion
 
-    required = ["cedula", "autorizacion"]
     if explicit_afiliacion:
+        required = ["cedula", "autorizacion"]
         if "natural" not in tipo_persona_norm:
             required.append("camara_comercio")
         if activity_code_g26 != "1970001":
             required.append("rut")
-    else:
-        required.append("rut")
+        required.append("inspector")
+        if any(token in afiliado for token in ["independ", "contratista"]):
+            required.append("contrato")
+        return _unique_preserve(required)
     if explicit_traslado or (not explicit_afiliacion and "traslado" in afiliado):
-        required.append("soporte_ingresos")
+        required = [
+            "formulario_afiliacion",
+            "anexo_sedes",
+            "camara_comercio",
+        ]
+        if activity_code_s29 != "1970001":
+            required.append("rut")
+        required.append("cedula")
+        if _is_persona_natural_or_juridica(tipo_persona_norm):
+            required.append("soporte_pagos")
+        if "juridic" in tipo_persona_norm and activity_code_s29 == "1970001":
+            required.append("inspector")
+        required.extend(["autorizacion", "entrega_documentos", "comision"])
+        if _is_persona_natural_or_juridica(tipo_persona_norm):
+            required.append("carta")
+        required.append("beneficiario_final")
+        return _unique_preserve(required)
+    required = ["cedula", "autorizacion", "rut"]
     if any(token in afiliado for token in ["independ", "contratista"]):
         required.append("contrato")
+    else:
+        required.append("inspector")
     return _unique_preserve(required)
 
 
 def _apply_conditional_required_documents(required_docs: List[str], docs: List[Dict[str, Any]]) -> List[str]:
     required = list(required_docs)
-    if not _inspector_exempt_by_entrega(docs):
-        required.append("inspector")
+    if _inspector_exempt_by_entrega(docs):
+        required = [doc for doc in required if doc != "inspector"]
     return _unique_preserve(required)
 
 
@@ -7029,35 +7059,36 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         }
 
     if is_afiliacion_i13 and not is_natural_au13:
+        camara_expected_nit = xlsx_nit
         camara_document_candidate = ""
-        if camara_primary and xlsx_document:
+        if camara_primary and camara_expected_nit:
             camara_fields = camara_primary.get("fields") or {}
             camara_document_candidate = _best_numeric_candidate(
-                xlsx_document,
+                camara_expected_nit,
                 [
                     camara_fields.get("nit", ""),
                     camara_fields.get("document_number", ""),
                     *list(camara_fields.get("all_numbers") or []),
                 ],
             )
-        camara_document_ok = bool(camara_primary and (not xlsx_document or camara_document_candidate))
+        camara_document_ok = bool(camara_primary and (not camara_expected_nit or camara_document_candidate))
         validations.append(
             {
                 "code": "CAMARA_DOCUMENTO_MATCH_XLSX",
                 "status": "OK" if camara_document_ok else "ALERTA",
                 "severity": "ok" if camara_document_ok else "blocker",
                 "message": (
-                    "La cámara de comercio coincide con el número de documento o NIT informado en el formulario de afiliación."
+                    "La cámara de comercio coincide con el NIT del empleador informado en el formulario de afiliación."
                     if camara_document_ok
                     else (
-                        "La cámara de comercio no coincide con el número de documento o NIT informado en el formulario de afiliación, o no fue detectada."
-                        + comparison_detail(xlsx_document, camara_document_candidate)
+                        "La cámara de comercio no coincide con el NIT del empleador informado en el formulario de afiliación, o no fue detectada."
+                        + comparison_detail(camara_expected_nit, camara_document_candidate)
                     )
                 ),
             }
         )
         matches["camara_documento"] = {
-            "expected": xlsx_document,
+            "expected": camara_expected_nit,
             "matched": camara_document_candidate,
             "filename": (camara_primary or {}).get("filename", ""),
             "ok": camara_document_ok,
