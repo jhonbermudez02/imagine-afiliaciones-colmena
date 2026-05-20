@@ -50,7 +50,16 @@ def _is_email_value(value: Any) -> bool:
     text = normalize_text(value)
     if not text:
         return False
-    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", text))
+    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]{2,}", text))
+
+
+def _has_letter_and_number_value(value: Any) -> bool:
+    text = normalize_text(value)
+    if not text:
+        return True
+    has_letter = any(unicodedata.category(char).startswith("L") for char in text)
+    has_number = any(unicodedata.category(char).startswith("N") for char in text)
+    return has_letter and has_number
 
 
 def _is_letters_only_value(value: Any) -> bool:
@@ -83,6 +92,36 @@ def _append_letters_only_validation(
         "field": field,
         "cell": cell,
         "message": f"{prefix} solo debe contener letras. Valor recibido: {raw_value}.",
+    }
+    if sheet:
+        payload["sheet"] = sheet
+    if row_number is not None:
+        payload["row"] = row_number
+    blockers.append(payload)
+
+
+def _append_letter_and_number_validation(
+    blockers: List[Dict[str, Any]],
+    cell_info: Dict[str, Any],
+    *,
+    code: str,
+    field: str,
+    message_prefix: str | None = None,
+    sheet: str | None = None,
+) -> None:
+    raw_value = cell_info.get("value")
+    if _is_blank_value(raw_value) or _has_letter_and_number_value(raw_value):
+        return
+    label = cell_info.get("label") or field
+    cell = cell_info.get("cell") or "celda requerida"
+    row_number = cell_info.get("row")
+    prefix = message_prefix or f"El campo '{label}' ({cell})"
+    payload: Dict[str, Any] = {
+        "code": code,
+        "severity": "blocker",
+        "field": field,
+        "cell": cell,
+        "message": f"{prefix} debe contener al menos una letra y al menos un número. Valor recibido: {raw_value}.",
     }
     if sheet:
         payload["sheet"] = sheet
@@ -1026,6 +1065,9 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
         ("sede_principal_direccion", False, False),
         ("sede_principal_telefono", True, False),
         ("sede_principal_correo", False, True),
+        ("sede_principal_municipio_distrito", False, False),
+        ("sede_principal_zona", False, False),
+        ("sede_principal_as22", False, False),
         ("responsable_sede_tipo_documento", False, False),
         ("responsable_sede_numero_documento", True, False),
         ("responsable_sede_correo", False, True),
@@ -1075,6 +1117,13 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
             code="XLSX_FORM_LETTERS_ONLY",
             field=field,
         )
+
+    _append_letter_and_number_validation(
+        blockers,
+        form_cell_values.get("sede_principal_direccion") or {},
+        code="XLSX_FORM_REQUIRES_LETTER_AND_NUMBER",
+        field="sede_principal_direccion",
+    )
 
     for field in ["autorizacion_1", "autorizacion_2", "autorizacion_3"]:
         _append_required_cell_validation(
