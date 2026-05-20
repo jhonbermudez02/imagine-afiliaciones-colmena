@@ -5768,7 +5768,7 @@ def _build_required_documents(xlsx_profile: Dict[str, Any]) -> List[str]:
     explicit_traslado = "traslado" in tipo_tramite and not explicit_afiliacion
 
     if explicit_afiliacion:
-        required = ["cedula", "autorizacion"]
+        required = ["cedula", "autorizacion", "entrega_documentos"]
         if "natural" not in tipo_persona_norm:
             required.append("camara_comercio")
         if activity_code_g26 != "1970001":
@@ -6904,6 +6904,8 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     rut_docs = _doc_by_type(docs, "rut")
     matched_rut = None
     rut_ok = False
+    rut_affiliation_match = matches.get("rut_afiliacion") or {}
+    rut_affiliation_ok = bool(rut_affiliation_match.get("ok"))
     if xlsx_nit:
         matched_rut = next((doc for doc in rut_docs if _canonical_numeric_value(doc["fields"].get("nit", "")) == _canonical_numeric_value(xlsx_nit)), None)
         if not matched_rut:
@@ -6923,15 +6925,21 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         rut_ok = bool(matched_rut)
     else:
         rut_ok = bool(rut_docs)
+    if rut_affiliation_ok:
+        rut_ok = True
+        if not matched_rut and rut_affiliation_match.get("filename"):
+            matched_rut = next((doc for doc in docs if doc.get("filename") == rut_affiliation_match.get("filename")), None)
     if not rut_exempt_by_activity:
-        rut_found = _best_numeric_candidate(
-            xlsx_nit,
-            [
-                ((matched_rut or {}).get("fields", {}) or {}).get("nit", ""),
-                ((matched_rut or {}).get("fields", {}) or {}).get("document_number", ""),
-                *list((((matched_rut or {}).get("fields", {}) or {}).get("all_numbers") or [])),
-            ],
-        )
+        rut_found = str(rut_affiliation_match.get("matched_nit_rut_5") or "")
+        if not rut_found:
+            rut_found = _best_numeric_candidate(
+                xlsx_nit,
+                [
+                    ((matched_rut or {}).get("fields", {}) or {}).get("nit", ""),
+                    ((matched_rut or {}).get("fields", {}) or {}).get("document_number", ""),
+                    *list((((matched_rut or {}).get("fields", {}) or {}).get("all_numbers") or [])),
+                ],
+            )
         validations.append(
             {
                 "code": "RUT_MATCH_XLSX",
@@ -6950,18 +6958,21 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         if not rut_ok:
             alerts.append(validations[-1])
     if xlsx_nit:
-        matches["rut_nit"] = {
-            "expected": xlsx_nit,
-            "matched": _best_numeric_candidate(
+        rut_matched_value = str(rut_affiliation_match.get("matched_nit_rut_5") or "")
+        if not rut_matched_value:
+            rut_matched_value = _best_numeric_candidate(
                 xlsx_nit,
                 [
                     ((matched_rut or {}).get("fields", {}) or {}).get("nit", ""),
                     ((matched_rut or {}).get("fields", {}) or {}).get("document_number", ""),
                     *list((((matched_rut or {}).get("fields", {}) or {}).get("all_numbers") or [])),
                 ],
-            ),
+            )
+        matches["rut_nit"] = {
+            "expected": xlsx_nit,
+            "matched": rut_matched_value,
             "filename": (matched_rut or {}).get("filename", ""),
-            "ok": bool(matched_rut) or rut_exempt_by_activity,
+            "ok": bool(matched_rut) or rut_exempt_by_activity or rut_affiliation_ok,
             "exempt": rut_exempt_by_activity,
             "activity_code_g26": activity_code_g26 if rut_exempt_by_activity else "",
         }
