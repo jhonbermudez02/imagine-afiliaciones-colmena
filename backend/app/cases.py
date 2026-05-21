@@ -63,6 +63,8 @@ LEGACY_CODE_TO_TYPE = {
 }
 
 DOC_TYPE_LABELS = {
+    "pdf": "PDF / Imagen",
+    "imagen": "PDF / Imagen",
     "comision": "Comisión",
     "carta": "Cartas",
     "constancia_afiliacion": "Verificación",
@@ -778,6 +780,22 @@ def validation_exception_fingerprint(code: Any, message: Any) -> str:
     return hashlib.sha256(base.encode("utf-8")).hexdigest()[:16]
 
 
+def _validation_reason_message(reason: Dict[str, Any]) -> str:
+    if not isinstance(reason, dict):
+        return normalize_text(reason)
+    return normalize_text(
+        reason.get("message")
+        or reason.get("detalle")
+        or reason.get("detail")
+        or reason.get("descripcion")
+        or reason.get("texto")
+        or reason.get("text")
+        or reason.get("reason")
+        or reason.get("motivo")
+        or (f"{reason.get('field')}: {reason.get('value') or reason.get('valor') or ''}" if reason.get("field") else "")
+    )
+
+
 def extract_contract_number_from_uploads(uploads: List[tuple[str, bytes]]) -> str:
     candidates: List[str] = []
     for filename, content in uploads:
@@ -1121,6 +1139,7 @@ def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, exp
         "expected_code": DOC_TYPE_TO_PRIMARY_CODE.get(normalized_expected_type) if normalized_expected_type else None,
         "updated_at": utc_now(),
     }
+    _apply_manual_document_review_overrides(analysis)
     payload["updated_at"] = utc_now()
     save_case(payload)
     _refresh_learning_artifacts()
@@ -1182,7 +1201,8 @@ def _active_validation_exceptions(manual_review: Dict[str, Any]) -> List[Dict[st
 def _decorate_validation_reason(reason: Dict[str, Any]) -> Dict[str, Any]:
     item = dict(reason or {})
     code = item.get("code") or "VALIDATION_ALERT"
-    message = item.get("message") or ""
+    message = _validation_reason_message(item)
+    item["message"] = message
     item["fingerprint"] = item.get("fingerprint") or validation_exception_fingerprint(code, message)
     return item
 
@@ -1333,7 +1353,25 @@ def _sync_document_workspace(payload: Dict[str, Any]) -> Dict[str, Any]:
     return workspace
 
 
-def save_document_workspace(case_id: str, action: str, filename: str = "", order: Optional[List[str]] = None) -> Dict[str, Any]:
+def _clean_document_order(files: List[Dict[str, Any]], order: Optional[List[str]]) -> List[str]:
+    valid_order = [str(item.get("filename") or "").strip() for item in files if str(item.get("filename") or "").strip()]
+    valid = set(valid_order)
+    cleaned: List[str] = []
+    seen = set()
+    for item in order or []:
+        name = str(item or "").strip()
+        if not name or name not in valid or name in seen:
+            continue
+        cleaned.append(name)
+        seen.add(name)
+    for name in valid_order:
+        if name not in seen:
+            cleaned.append(name)
+            seen.add(name)
+    return cleaned
+
+
+def save_document_workspace(case_id: str, action: str, filename: str = "", order: Optional[List[str]] = None, target_position: Optional[int] = None) -> Dict[str, Any]:
     payload = load_case(case_id)
     existing_workspace = ((payload.get("analysis") or {}).get("document_workspace") or {})
     had_manual_order = bool(existing_workspace.get("manual_order"))
@@ -1343,16 +1381,30 @@ def save_document_workspace(case_id: str, action: str, filename: str = "", order
     filename = str(filename or "").strip()
 
     if action_key == "set_order":
+        workspace["order"] = _clean_document_order(files, order)
+        workspace["manual_order"] = True
+    elif action_key == "set_position":
         valid = {str(item.get("filename") or "").strip() for item in files}
-        cleaned: List[str] = []
-        seen = set()
-        for item in order or []:
-            name = str(item or "").strip()
-            if not name or name not in valid or name in seen:
-                continue
-            cleaned.append(name)
-            seen.add(name)
-        workspace["order"] = cleaned
+        if not filename or filename not in valid:
+            raise ValueError("Debes indicar un archivo valido para reordenar.")
+        current_order = _clean_document_order(files, order if order else workspace.get("order") or [])
+        current_idx = current_order.index(filename)
+        try:
+            requested_position = int(target_position or current_idx + 1)
+        except (TypeError, ValueError):
+            requested_position = current_idx + 1
+        if requested_position < 1:
+            target_idx = 0
+            moved = current_order.pop(current_idx)
+            current_order.insert(target_idx, moved)
+        elif requested_position > len(current_order):
+            moved = current_order.pop(current_idx)
+            current_order.append(moved)
+        else:
+            target_idx = requested_position - 1
+            if current_idx != target_idx:
+                current_order[current_idx], current_order[target_idx] = current_order[target_idx], current_order[current_idx]
+        workspace["order"] = current_order
         workspace["manual_order"] = True
     elif action_key == "remove":
         if filename and filename not in workspace["removed_files"]:
@@ -3042,10 +3094,53 @@ def _looks_like_autorizacion_document(haystack: str) -> bool:
     return has_riesgos_laborales and positive_hits >= 3 and negative_hits == 0
 
 
+def _apply_manual_document_review_overrides(analysis: Dict[str, Any]) -> bool:
+    docs = analysis.get("documents")
+    if not isinstance(docs, list):
+        return False
+    manual_docs = ((analysis.get("manual_review") or {}).get("documents") or {})
+    if not isinstance(manual_docs, dict) or not manual_docs:
+        return False
+    changed = False
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        filename = str(doc.get("filename") or "")
+        override = manual_docs.get(filename)
+        if not isinstance(override, dict):
+            continue
+        if str(override.get("verdict") or "") != "no" or not override.get("expected_type"):
+            continue
+        expected_type = str(override.get("expected_type") or "")
+        expected_code = override.get("expected_code") or DOC_TYPE_TO_PRIMARY_CODE.get(expected_type, 99)
+        if (
+            doc.get("document_type") == expected_type
+            and doc.get("legacy_code") == expected_code
+            and doc.get("code_source") == "manual_review_override"
+        ):
+            continue
+        doc["document_type"] = expected_type
+        doc["legacy_code"] = expected_code
+        doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(expected_code, expected_type) if isinstance(expected_code, int) else expected_type
+        doc["code_source"] = "manual_review_override"
+        changed = True
+    if "_summarize_received_documents" in globals():
+        checklist = analysis.setdefault("checklist", {})
+        if isinstance(checklist, dict):
+            received = sorted({str(item.get("document_type") or "") for item in docs if isinstance(item, dict) and item.get("document_type")})
+            received_summary = _summarize_received_documents(docs)
+            if checklist.get("received") != received or checklist.get("received_summary") != received_summary:
+                checklist["received"] = received
+                checklist["received_summary"] = received_summary
+                changed = True
+    return changed
+
+
 def _apply_authorization_phrase_overrides(analysis: Dict[str, Any]) -> None:
     docs = analysis.get("documents")
     if not isinstance(docs, list):
         return
+    manual_changed = _apply_manual_document_review_overrides(analysis)
     manual_docs = ((analysis.get("manual_review") or {}).get("documents") or {})
     changed = False
     for doc in docs:
@@ -3072,7 +3167,7 @@ def _apply_authorization_phrase_overrides(analysis: Dict[str, Any]) -> None:
         doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(98, "")
         doc["code_source"] = "ocr_autorizacion_phrase_override"
         changed = True
-    if changed and "_summarize_received_documents" in globals():
+    if (changed or manual_changed) and "_summarize_received_documents" in globals():
         checklist = analysis.setdefault("checklist", {})
         if isinstance(checklist, dict):
             checklist["received"] = sorted({str(item.get("document_type") or "") for item in docs if isinstance(item, dict) and item.get("document_type")})

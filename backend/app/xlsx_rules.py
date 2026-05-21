@@ -203,6 +203,33 @@ def _append_cell_length_validation(
         )
 
 
+def _append_min_length_validation(
+    blockers: List[Dict[str, Any]],
+    form_cell_values: Dict[str, Any],
+    field: str,
+    *,
+    min_length: int,
+    code_prefix: str,
+) -> None:
+    cell_info = form_cell_values.get(field) or {}
+    raw_value = cell_info.get("value")
+    if _is_blank_value(raw_value):
+        return
+    label = cell_info.get("label") or field
+    cell = cell_info.get("cell") or "celda requerida"
+    text = normalize_text(raw_value)
+    if len(text) < min_length:
+        blockers.append(
+            {
+                "code": f"{code_prefix}_MIN_LENGTH",
+                "severity": "blocker",
+                "field": field,
+                "cell": cell,
+                "message": f"El campo '{label}' ({cell}) debe tener al menos {min_length} caracteres. Valor recibido: {raw_value}.",
+            }
+        )
+
+
 def _append_digits_length_validation(
     blockers: List[Dict[str, Any]],
     form_cell_values: Dict[str, Any],
@@ -1118,11 +1145,12 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
             field=field,
         )
 
-    _append_letter_and_number_validation(
+    _append_min_length_validation(
         blockers,
-        form_cell_values.get("sede_principal_direccion") or {},
-        code="XLSX_FORM_REQUIRES_LETTER_AND_NUMBER",
-        field="sede_principal_direccion",
+        form_cell_values,
+        "sede_principal_direccion",
+        min_length=5,
+        code_prefix="XLSX_COMMON_REQUIRED_CELL",
     )
 
     for field in ["autorizacion_1", "autorizacion_2", "autorizacion_3"]:
