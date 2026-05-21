@@ -177,6 +177,7 @@ class CaseDocumentWorkspaceRequest(BaseModel):
     action: str
     filename: Optional[str] = None
     order: Optional[List[str]] = None
+    target_position: Optional[int] = None
 
 
 class Consolidated926Request(BaseModel):
@@ -3281,6 +3282,7 @@ async def case_document_workspace(case_id: str, request: CaseDocumentWorkspaceRe
             action=request.action,
             filename=request.filename or "",
             order=request.order or [],
+            target_position=request.target_position,
         )
         return {
             "case_id": case_id,

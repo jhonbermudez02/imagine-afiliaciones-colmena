@@ -424,6 +424,7 @@ html, body { height: 100%; font-family: var(--font); font-size: 14px; color: var
     margin-bottom: 6px;
     border: 1px solid transparent;
     transition: border-color 0.12s, background 0.12s;
+    min-width: 0;
 }
 .report-blocker-interactive.clickable { cursor: pointer; }
 .report-blocker-interactive.clickable:hover { border-color: var(--c-err); background: #fde8e8; }
@@ -431,7 +432,7 @@ html, body { height: 100%; font-family: var(--font); font-size: 14px; color: var
 .report-blocker-main { display: flex; gap: 10px; align-items: flex-start; flex: 1; min-width: 0; }
 .report-blocker-icon { color: var(--c-err); font-size: 14px; flex-shrink: 0; margin-top: 1px; }
 .report-blocker-content { flex: 1; min-width: 0; }
-.report-blocker-text { font-size: 12px; color: var(--c-err); font-weight: 500; }
+.report-blocker-text { font-size: 12px; color: var(--c-err); font-weight: 500; overflow-wrap: anywhere; line-height: 1.35; }
 .report-blocker-meta { font-size: 11px; color: var(--c-text-2); margin-top: 3px; }
 .report-blocker-action-hint {
     font-size: 11px; color: var(--c-info); white-space: nowrap; flex-shrink: 0;
@@ -443,7 +444,8 @@ html, body { height: 100%; font-family: var(--font); font-size: 14px; color: var
     border: 1px solid var(--c-border);
     border-radius: var(--radius);
     background: var(--c-surface);
-    overflow: hidden;
+    overflow: auto;
+    max-width: 100%;
 }
 .report-blocker-panel.hidden { display: none; }
 .report-data-panel {
@@ -463,8 +465,9 @@ html, body { height: 100%; font-family: var(--font); font-size: 14px; color: var
     padding: 8px 12px;
     background: var(--c-surface-2);
     border-bottom: 1px solid var(--c-border);
+    min-width: 0;
 }
-.blocker-panel-title { font-size: 12px; font-weight: 600; flex: 1; }
+.blocker-panel-title { font-size: 12px; font-weight: 600; flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .blocker-table {
     width: 100%; border-collapse: collapse; font-size: 11px;
 }
@@ -503,6 +506,7 @@ html, body { height: 100%; font-family: var(--font); font-size: 14px; color: var
 .report-doc-preview {
     border-top: 1px solid var(--c-border);
     margin-top: 4px;
+    min-width: 0;
 }
 
 /* ============================================================ CASES TABLE (mantener por compatibilidad) */
@@ -734,6 +738,10 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
   font-size: 12px; color: var(--c-err);
   margin-bottom: 6px;
 }
+.result-blocker-item span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .result-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
 
 .classif-blockers-box {
@@ -783,12 +791,13 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
   min-height: 0;
   overflow: hidden;
 }
-.two-col-layout { display: flex; gap: 16px; align-items: stretch; height: calc(100vh - var(--topbar-h) - 32px); overflow: hidden; }
+.two-col-layout { display: flex; gap: 16px; align-items: stretch; height: calc(100dvh - var(--topbar-h) - 40px); overflow: hidden; min-height: 0; }
 #view-clasificacion .two-col-layout {
   height: calc(100vh - var(--topbar-h) - 40px);
   min-height: 0;
 }
 .col-left { min-width: 240px; max-width: 300px; flex-shrink: 0; overflow-y: auto; display: flex; flex-direction: column; }
+#view-clasificacion .col-left { min-width: 173px; max-width: 216px; }
 .col-left .section-card { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .col-right { flex: 1; min-width: 0; overflow-y: auto; min-height: 0; }
 .col-right .section-card { min-height: 100%; }
@@ -814,10 +823,9 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
   overflow: hidden;
 }
 #classifPreviewBody {
-  flex: 0 0 clamp(460px, calc(100vh - var(--topbar-h) - 310px), 680px);
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  border-bottom: 1px solid var(--c-border);
 }
 #classifBlockersPanel {
   flex: 1 1 auto;
@@ -827,9 +835,55 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
 #classifBlockersPanel:empty {
   display: none;
 }
+#classifPreviewCard.has-classif-blockers {
+  min-height: 0;
+}
+#classifPreviewCard.has-classif-blockers #classifPreviewBody {
+  flex: 1 1 auto;
+  min-height: 220px;
+  overflow: auto;
+  border-bottom: 1px solid var(--c-border);
+}
+#classifPreviewCard.has-classif-blockers #classifPreviewBody .doc-frame {
+  height: 100%;
+  min-height: 0;
+}
+#classifPreviewCard.has-classif-blockers #classifPreviewBody .doc-frame iframe {
+  height: 100%;
+  min-height: 0;
+}
+#classifPreviewCard.has-classif-blockers #classifBlockersPanel {
+  flex: 0 0 clamp(150px, 26dvh, 260px);
+  min-height: 150px;
+  max-height: 260px;
+  overflow-y: auto;
+  border-top: 1px solid var(--c-border);
+  background: var(--c-surface);
+  -webkit-overflow-scrolling: touch;
+}
 
 /* ============================================================ DOC LIST */
 .doc-list { display: flex; flex-direction: column; padding: 8px; gap: 2px; max-height: calc(100vh - 280px); overflow-y: auto; scroll-behavior: smooth; }
+.doc-list.is-busy {
+  position: relative;
+  pointer-events: none;
+  opacity: 0.62;
+  filter: grayscale(0.25);
+}
+.doc-list.is-busy::before {
+  content: attr(data-busy-message);
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: block;
+  padding: 7px 10px;
+  margin: -8px -8px 6px;
+  background: var(--c-info-bg);
+  color: var(--c-info);
+  border-bottom: 1px solid var(--c-border);
+  font-size: 11px;
+  font-weight: 700;
+}
 .doc-list::-webkit-scrollbar { width: 5px; }
 .doc-list::-webkit-scrollbar-track { background: var(--c-surface-2); }
 .doc-list::-webkit-scrollbar-thumb { background: var(--c-brand); border-radius: 3px; }
@@ -858,14 +912,6 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
 }
 .doc-item:hover { background: var(--c-surface-2); }
 .doc-item.active { background: var(--c-brand-light); }
-.doc-item-type {
-  font-size: 10px; font-weight: 700;
-  padding: 2px 5px; border-radius: 4px;
-  background: var(--c-surface-2); color: var(--c-text-2);
-  text-transform: uppercase; flex-shrink: 0;
-}
-.doc-item-type.ok { background: var(--c-ok-bg); color: var(--c-ok); }
-.doc-item-type.warn { background: var(--c-warn-bg); color: var(--c-warn); }
 .doc-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text); }
 .doc-item-corrected { font-size: 10px; color: var(--c-warn); flex-shrink: 0; }
 .doc-item-actions { display: none; gap: 2px; flex-shrink: 0; margin-left: auto; }
@@ -888,11 +934,12 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
   height: 100%;
   display: flex; flex-direction: column;
   padding: 0;
+  overflow: auto;
 }
 .doc-frame iframe {
   flex: 1;
   width: 100%;
-  min-height: 460px;
+  min-height: clamp(360px, 62dvh, 760px);
   border: none;
 }
 .doc-frame img {
@@ -951,6 +998,7 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
   padding: 20px 16px;
   border-bottom: 1px solid var(--c-border);
   display: flex; align-items: flex-start; gap: 16px;
+  min-width: 0;
 }
 .report-state-badge {
   padding: 6px 14px; border-radius: 20px;
@@ -960,8 +1008,8 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
 .report-state-badge.aprobado { background: var(--c-ok-bg); color: var(--c-ok); }
 .report-state-badge.observado { background: var(--c-warn-bg); color: var(--c-warn); }
 .report-state-badge.bloqueado { background: var(--c-err-bg); color: var(--c-err); }
-.report-empresa { font-size: 18px; font-weight: 700; color: var(--c-text); }
-.report-nit { font-size: 12px; color: var(--c-text-2); margin-top: 4px; }
+.report-empresa { font-size: 18px; font-weight: 700; color: var(--c-text); overflow-wrap: anywhere; }
+.report-nit { font-size: 12px; color: var(--c-text-2); margin-top: 4px; overflow-wrap: anywhere; }
 .report-body { padding: 16px; }
 .report-section { margin-bottom: 20px; }
 .report-section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--c-text-3); margin-bottom: 10px; }
@@ -1184,7 +1232,8 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
 /* ============================================================ REPORTE LAYOUT */
 .reporte-layout {
   display: flex;
-  height: calc(100vh - var(--topbar-h));
+  height: calc(100dvh - var(--topbar-h) - 40px);
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -1259,6 +1308,8 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
 
 /* ============================================================ LEGACY RESULT */
@@ -1289,18 +1340,362 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
 
 /* Responsive */
 @media (max-width: 900px) {
+  .view-area {
+    padding: 12px;
+    gap: 12px;
+  }
   .metrics-row { grid-template-columns: 1fr 1fr; }
-  .two-col-layout { flex-direction: column; }
-  .col-left { max-width: 100%; }
+  .two-col-layout {
+    flex-direction: column;
+    height: calc(100dvh - var(--topbar-h) - 24px);
+    min-height: 0;
+    overflow: hidden;
+  }
+  .col-left,
+  #view-visor .col-left[style],
+  #view-visor .col-left {
+    width: 100%;
+    max-width: 100% !important;
+    min-width: 0;
+    overflow: auto;
+    flex: 0 0 min(260px, 34dvh);
+  }
+  .col-left .section-card {
+    height: 100%;
+    max-height: none;
+    overflow: hidden;
+  }
+  .col-right {
+    overflow: auto;
+    flex: 1 1 auto;
+  }
   .report-grid { grid-template-columns: 1fr 1fr; }
   .reporte-sidebar { width: 180px; }
+  #view-clasificacion {
+    overflow: hidden;
+  }
+  #view-clasificacion .two-col-layout {
+    height: calc(100dvh - var(--topbar-h) - 24px);
+    overflow: hidden;
+  }
+  #view-clasificacion .col-right,
+  #classifPreviewCard {
+    overflow: hidden;
+    height: 100%;
+  }
+  #classifPreviewBody {
+    flex: 1 1 auto;
+    max-height: none;
+    overflow: auto;
+  }
+  #classifBlockersPanel {
+    flex: 0 0 clamp(150px, 28dvh, 260px);
+    overflow: auto;
+  }
+  #view-visor .col-right .section-card {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+  #visorDocFrame {
+    min-height: 0;
+    overflow: auto;
+  }
+  .doc-list {
+    max-height: none;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .reporte-layout {
+    height: calc(100dvh - var(--topbar-h) - 24px);
+    min-height: 0;
+    overflow: hidden;
+  }
+  .reporte-main {
+    overflow: hidden;
+  }
+  .reporte-main > .section-card {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .report-header {
+    flex-wrap: wrap;
+  }
+  .report-header > div:last-child {
+    margin-left: 0 !important;
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+  .report-blocker-interactive {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .report-blocker-action-hint {
+    white-space: normal;
+  }
+  .report-blocker-panel .doc-frame,
+  .report-doc-preview .doc-frame {
+    height: min(520px, 48dvh);
+    min-height: 300px;
+  }
+  .report-blocker-panel {
+    max-height: min(620px, 58dvh);
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
 }
 @media (max-width: 600px) {
   :root { --sidebar-w: 0px; }
   .sidebar { display: none; }
-  .topbar { padding: 0 12px; gap: 8px; }
+  .topbar {
+    height: auto;
+    min-height: var(--topbar-h);
+    padding: 8px 12px;
+    gap: 8px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .topbar-left {
+    flex: 1 1 160px;
+  }
   .page-breadcrumb { display: none; }
-  .mobile-view-select { display: block; }
+  .mobile-view-select {
+    display: block;
+    flex: 1 1 150px;
+    max-width: none;
+  }
+  .topbar-right {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+  .view-area {
+    padding: 8px;
+  }
   .metrics-row { grid-template-columns: 1fr 1fr; }
   .reporte-sidebar { display: none; }
+  .report-header {
+    padding: 14px 12px;
+    gap: 10px;
+  }
+  .report-state-badge {
+    border-radius: var(--radius);
+    font-size: 12px;
+    padding: 5px 10px;
+  }
+  .report-empresa {
+    font-size: 15px;
+  }
+  .report-body {
+    padding: 12px;
+  }
+  .report-grid {
+    grid-template-columns: 1fr;
+  }
+  .report-section-title {
+    line-height: 1.35;
+  }
+  .report-blocker-interactive {
+    padding: 9px 10px;
+  }
+  .blocker-panel-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .blocker-panel-head .btn-icon {
+    margin-left: auto;
+  }
+  .blocker-table {
+    min-width: 560px;
+  }
+  .report-blocker-panel .doc-frame,
+  .report-doc-preview .doc-frame,
+  #visorDocFrame {
+    height: min(460px, 48dvh);
+    min-height: 280px;
+  }
+  .doc-frame iframe {
+    min-height: 100%;
+    height: 100%;
+  }
+  .doc-list {
+    max-height: none;
+  }
+  .section-card-head {
+    gap: 8px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  #visorDocActions {
+    width: 100%;
+  }
+  .report-blocker-panel {
+    max-height: 52dvh;
+  }
+}
+
+/* ============================================================
+   MOBILE SCROLL RESCUE
+   En pantallas pequenas no puede existir una cadena de padres con
+   overflow:hidden sobre los bloqueantes. Estas reglas ganan al layout
+   de escritorio y a estilos inline del reporte/clasificacion.
+   ============================================================ */
+@media (max-width: 900px) {
+  .app-shell {
+    height: 100dvh !important;
+    overflow: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .main-area,
+  .view-area,
+  .view.active,
+  #view-reporte,
+  #view-clasificacion,
+  #view-visor {
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  .view-area {
+    display: block !important;
+    height: auto !important;
+    padding-bottom: 28px !important;
+  }
+
+  .reporte-layout,
+  .reporte-main,
+  .reporte-main > .section-card {
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  #reporteContent {
+    max-height: calc(100dvh - 92px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .report-body {
+    overflow: visible !important;
+  }
+
+  .report-blockers-list {
+    max-height: 42dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-right: 4px;
+  }
+
+  .report-blocker-panel {
+    max-height: 58dvh !important;
+    overflow: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .two-col-layout,
+  #view-clasificacion .two-col-layout {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  .col-left,
+  .col-right,
+  #view-visor .col-right .section-card {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  #view-clasificacion .col-right,
+  #classifPreviewCard {
+    height: min(760px, calc(100dvh - var(--topbar-h) - 24px)) !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: hidden !important;
+  }
+
+  #classifPreviewBody {
+    flex: 1 1 auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #classifPreviewCard.has-classif-blockers #classifPreviewBody {
+    flex: 1 1 auto !important;
+    height: 46dvh !important;
+    min-height: 280px !important;
+    overflow: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #visorDocFrame {
+    height: 46dvh !important;
+    min-height: 280px !important;
+    overflow: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #classifBlockersPanel {
+    flex: 0 0 34dvh !important;
+    height: auto !important;
+    min-height: 180px !important;
+    max-height: 260px !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 600px) {
+  #reporteContent {
+    max-height: calc(100dvh - 112px);
+  }
+
+  .report-blockers-list {
+    max-height: 46dvh;
+  }
+
+  #classifPreviewCard.has-classif-blockers #classifPreviewBody,
+  #visorDocFrame {
+    height: 40dvh !important;
+    min-height: 240px !important;
+  }
+
+  #classifBlockersPanel {
+    height: 38dvh !important;
+    min-height: 190px !important;
+  }
+}
+
+@media (max-height: 760px) {
+  #view-clasificacion .two-col-layout {
+    height: calc(100dvh - var(--topbar-h) - 20px);
+  }
+
+  #classifPreviewCard.has-classif-blockers #classifPreviewBody {
+    min-height: 190px;
+  }
+
+  #classifPreviewCard.has-classif-blockers #classifBlockersPanel {
+    flex-basis: clamp(150px, 30dvh, 210px);
+    min-height: 150px;
+    max-height: 210px;
+  }
+
+  .classif-blockers-box {
+    margin: 8px;
+    padding: 7px;
+  }
+
+  .classif-blocker-item {
+    padding: 6px 0;
+  }
 }

@@ -84,6 +84,39 @@ let selectedColmenaCaseIds = new Set();
 let currentView = 'bandeja';
 let bandejaActiveTab = 'todos';
 let allCases = [];
+let classifDocListBusyCount = 0;
+
+function applyClassifDocListBusyState() {
+    const el = document.getElementById('classifDocList');
+    if (!el) return;
+    const busy = classifDocListBusyCount > 0;
+    el.classList.toggle('is-busy', busy);
+    el.setAttribute('aria-busy', busy ? 'true' : 'false');
+    el.querySelectorAll('button, input, select, textarea').forEach(control => {
+        control.disabled = busy;
+    });
+}
+
+function setClassifDocListBusy(loading, message = 'Procesando cambios...') {
+    if (loading) classifDocListBusyCount += 1;
+    else classifDocListBusyCount = Math.max(0, classifDocListBusyCount - 1);
+    const el = document.getElementById('classifDocList');
+    if (el) el.dataset.busyMessage = message;
+    applyClassifDocListBusyState();
+}
+
+async function refreshClassifAfterManualChange(caseId) {
+    if (!caseId) return null;
+    const r = await fetchWithRetry(caseApiUrl(caseId, '/analyze'), { method: 'POST' });
+    const payload = await r.json();
+    activeCaseId = caseId;
+    activeCasePayload = payload;
+    if (currentView === 'clasificacion') {
+        renderClassifBlockers(payload);
+        renderClassifDocList(payload);
+    }
+    return payload;
+}
 
 function normalizeOperation(value = '') {
     return 'colima';
@@ -360,7 +393,7 @@ function getValidationBlockerRecords(payload) {
         return reasons.map((item, index) => ({
             code: item?.code || 'VALIDATION_ALERT',
             message: blockerText(item),
-            fingerprint: item?.fingerprint || '',
+            fingerprint: item?.message ? (item?.fingerprint || '') : '',
             index,
             raw: item,
         }));
@@ -681,7 +714,6 @@ function switchView(viewId) {
     if (viewId === 'busqueda') { doSearch(''); }
     if (viewId === 'admin') { setTimeout(loadAdminTables, 200); }
     if (viewId === 'clasificacion') {
-        populateCaseSelect('classifCaseSelect', onClassifCaseChange);
         if (activeCaseId) setTimeout(() => loadClassifForCase(activeCaseId), 100);
     }
     if (viewId === 'validacion') populateCaseSelect('validacionCaseSelect', onValidacionCaseChange);
@@ -1457,8 +1489,6 @@ async function populateCaseSelect(selectId, onChangeFn) {
 
 async function loadClassifForCase(caseId) {
     if (!caseId) return;
-    const sel = document.getElementById('classifCaseSelect');
-    if (sel) sel.value = caseId;
     const listEl = document.getElementById('classifDocList');
     if (listEl) listEl.innerHTML = '<div class="loading-msg">Cargando documentos...</div>';
     try {
@@ -1482,8 +1512,6 @@ async function loadClassifForCase(caseId) {
     }
 }
 
-function onClassifCaseChange(caseId) { loadClassifForCase(caseId); }
-
 function ensureClassifBlockersPanel() {
     let panel = document.getElementById('classifBlockersPanel');
     if (panel) return panel;
@@ -1498,6 +1526,7 @@ function ensureClassifBlockersPanel() {
 function renderClassifBlockers(payload) {
     const panel = ensureClassifBlockersPanel();
     if (!panel) return;
+    const previewCard = document.getElementById('classifPreviewCard');
     const a = payload?.analysis || {};
     const decision = a.decision || {};
     const report = (a.workflow_run || {}).executive_report_final || (a.workflow_run || {}).executive_report_precheck || a.reporte_ejecutivo || {};
@@ -1509,9 +1538,11 @@ function renderClassifBlockers(payload) {
     if (!records.length && !acceptedExceptions.length) {
         panel.innerHTML = '';
         panel.style.display = 'none';
+        previewCard?.classList.remove('has-classif-blockers');
         return;
     }
     panel.style.display = '';
+    previewCard?.classList.add('has-classif-blockers');
     panel.innerHTML = `
         ${records.length ? `
             <div class="classif-blockers-box">
@@ -1540,9 +1571,12 @@ function renderClassifBlockers(payload) {
     panel.querySelectorAll('.validation-exception-btn').forEach(btn => {
         btn.addEventListener('click', async (event) => {
             event.stopPropagation();
-            const record = records[Number(btn.dataset.blockerIdx || 0)];
+            const latestPayload = activeCasePayload?.id === payload.id ? activeCasePayload : payload;
+            const latestRecords = getValidationBlockerRecords(latestPayload);
+            const availableRecords = latestRecords.length ? latestRecords : records;
+            const record = availableRecords[Number(btn.dataset.blockerIdx || 0)] || records[Number(btn.dataset.blockerIdx || 0)];
             setValidationExceptionButtonsLoading(panel, btn, true);
-            try { await acceptValidationException(payload.id || activeCaseId, record); }
+            try { await acceptValidationException(latestPayload.id || payload.id || activeCaseId, record); }
             catch(e) {
                 showToast('No pude guardar la excepción: ' + e.message, 'err', 6000);
                 setValidationExceptionButtonsLoading(panel, btn, false);
@@ -1688,9 +1722,6 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
             <span class="doc-item-order">
                 <input class="doc-order-input" data-file="${escapeHtml(item.file)}" type="number" min="1" max="${items.length}" value="${i + 1}" title="Cambiar orden" aria-label="Orden del documento">
             </span>
-            <span class="doc-item-type ${item.kind==='xlsx'?'ok':''}">
-                ${item.kind==='xlsx'?'XLSX':escapeHtml(item.type?.toUpperCase().slice(0,6)||'DOC')}
-            </span>
             <span class="doc-item-name" title="${escapeHtml(item.displayName||item.file)}">${escapeHtml(item.label)}</span>
             ${isRag ? '<span class="doc-item-corrected" style="background:var(--c-info-bg);color:var(--c-blue)" title="Clasificado por RAG">🧠</span>' : ''}
             ${item.corrected ? '<span class="doc-item-corrected">corregido</span>' : ''}
@@ -1772,33 +1803,53 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
             const currentIdx = items.findIndex(it => it.file === file);
             if (currentIdx < 0 || !payload?.id) return;
             const requested = Number.parseInt(input.value, 10);
-            const newPos = Math.min(Math.max(Number.isFinite(requested) ? requested : currentIdx + 1, 1), items.length) - 1;
-            input.value = String(newPos + 1);
-            if (currentIdx === newPos) return;
+            const requestedPosition = Number.isFinite(requested) ? requested : currentIdx + 1;
+            const targetIdx = requestedPosition < 1 ? 0 : (requestedPosition > items.length ? items.length - 1 : requestedPosition - 1);
+            input.value = String(requestedPosition > items.length ? items.length : targetIdx + 1);
+            if (currentIdx === targetIdx) return;
 
             const newItems = [...items];
-            const [moved] = newItems.splice(currentIdx, 1);
-            newItems.splice(newPos, 0, moved);
+            if (requestedPosition < 1) {
+                const [moved] = newItems.splice(currentIdx, 1);
+                newItems.unshift(moved);
+            } else if (requestedPosition > items.length) {
+                const [moved] = newItems.splice(currentIdx, 1);
+                newItems.push(moved);
+            } else {
+                [newItems[currentIdx], newItems[targetIdx]] = [newItems[targetIdx], newItems[currentIdx]];
+            }
+            const currentOrder = items.map(it => it.file);
             const newOrder = newItems.map(it => it.file);
-            input.disabled = true;
+            setClassifDocListBusy(true, 'Guardando orden...');
             try {
-                await fetchWithRetry(caseApiUrl(payload.id, '/document-workspace'), {
+                const response = await fetchWithRetry(caseApiUrl(payload.id, '/document-workspace'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'set_order', order: newOrder }),
+                    body: JSON.stringify({
+                        action: 'set_position',
+                        filename: file,
+                        target_position: requestedPosition,
+                        order: currentOrder,
+                    }),
                 });
+                const data = await response.json().catch(() => null);
+                const updatedCase = data?.case || payload;
                 payload.analysis = payload.analysis || {};
                 payload.analysis.document_workspace = payload.analysis.document_workspace || {};
-                payload.analysis.document_workspace.order = newOrder;
-                renderClassifDocList(payload, sortBy, sortDir);
+                payload.analysis.document_workspace.order = data?.document_workspace?.order || newOrder;
+                payload.analysis.document_workspace.manual_order = true;
+                activeCasePayload = updatedCase;
+                renderClassifDocList(updatedCase, sortBy, sortDir);
             } catch(e) {
                 console.warn('Error reordenando:', e);
-                input.disabled = false;
                 input.value = String(currentIdx + 1);
                 showToast('No se pudo guardar el orden del documento', 'err');
+            } finally {
+                setClassifDocListBusy(false);
             }
         });
     });
+    applyClassifDocListBusyState();
 
 }
 
@@ -1874,6 +1925,7 @@ function renderClassifActions(item, payload) {
         const status = document.getElementById('reclassifyStatus');
         if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
         if (status) { status.textContent = ''; status.style.color = ''; }
+        setClassifDocListBusy(true, 'Reclasificando documento...');
         try {
             const r = await fetchWithRetry(caseApiUrl(payload.id, '/manual-review'), {
                 method: 'POST',
@@ -1909,9 +1961,7 @@ function renderClassifActions(item, payload) {
             // Actualizar el elemento en la lista sin recargar todo
             const activeDocItem = document.querySelector('.doc-item.active');
             if (activeDocItem) {
-                const typeEl = activeDocItem.querySelector('.doc-item-type');
                 const nameEl = activeDocItem.querySelector('.doc-item-name');
-                if (typeEl) typeEl.textContent = newType.toUpperCase().slice(0,6);
                 if (nameEl) nameEl.textContent = newLabel;
             }
 
@@ -1931,8 +1981,8 @@ function renderClassifActions(item, payload) {
             const currentEl = document.querySelector('.reclassify-value');
             if (currentEl) { currentEl.textContent = `${newLabel} · corregido manualmente`; currentEl.classList.add('corrected'); }
 
-            // Recargar la lista en background para sincronizar
-            setTimeout(() => loadClassifForCase(payload.id), 1500);
+            status?.insertAdjacentHTML('beforeend', '<div style="margin-top:6px;font-size:11px;color:var(--c-text-2)">Actualizando validaciones...</div>');
+            await refreshClassifAfterManualChange(payload.id);
 
         } catch(e) {
             let errMsg = '';
@@ -1942,6 +1992,8 @@ function renderClassifActions(item, payload) {
             else errMsg = JSON.stringify(e);
             if (status) { status.style.color = 'var(--c-err)'; status.textContent = 'Error: ' + errMsg; }
             if (btn) { btn.disabled = false; btn.textContent = 'Reclasificar'; }
+        } finally {
+            setClassifDocListBusy(false);
         }
     });
 
@@ -2018,6 +2070,7 @@ function renderClassifActions(item, payload) {
 }
 
 async function reclassifyDocument(caseId, item, newType) {
+    setClassifDocListBusy(true, 'Reclasificando documento...');
     try {
         const r = await fetchWithRetry(caseApiUrl(caseId, '/manual-review'), {
             method: 'POST',
@@ -2025,10 +2078,12 @@ async function reclassifyDocument(caseId, item, newType) {
             body: JSON.stringify({ kind: item.kind||'document', filename: item.file, file: item.file, expected_type: newType, verdict: 'no' }),
         });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        await loadClassifForCase(caseId);
+        await refreshClassifAfterManualChange(caseId);
     } catch(e) {
         console.error('reclassifyDocument:', e);
         showToast('No se pudo reclasificar: ' + e.message, 'err');
+    } finally {
+        setClassifDocListBusy(false);
     }
 }
 
@@ -2233,7 +2288,6 @@ async function loadVisorForCase(caseId) {
         if (!items.length) { listEl.innerHTML = '<div class="empty-state">Sin documentos</div>'; return; }
         listEl.innerHTML = items.map((item, i) => `
             <div class="doc-item" data-index="${i}">
-                <span class="doc-item-type ${item.kind==='xlsx'?'ok':''}">${item.kind==='xlsx'?'XLSX':item.type?.toUpperCase().slice(0,4)||'DOC'}</span>
                 <span class="doc-item-name" title="${escapeHtml(item.displayName)}">${escapeHtml(item.label)}</span>
             </div>
         `).join('');
