@@ -1682,7 +1682,6 @@ function getManualReviewEntry(manualReview, kind, file) {
 function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
     const el = document.getElementById('classifDocList');
     const preview = document.getElementById('classifPreviewBody');
-    const previewTitle = document.getElementById('classifPreviewTitle');
     if (!el) return;
     let items = buildDocItems(payload);
     if (!items.length) {
@@ -1741,7 +1740,6 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
             const idx = parseInt(el.dataset.index);
             const item = items[idx];
             if (!item) return;
-            if (previewTitle) previewTitle.textContent = item.label;
             if (preview) {
                 preview.innerHTML = '<div class="loading-msg">Cargando documento...</div>';
                 await renderDocPreview(preview, payload.id, item);
@@ -1762,7 +1760,6 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
                 if (r.ok) {
                     showToast(`Archivo eliminado: ${filename}`, 'ok');
                     if (preview) preview.innerHTML = '<div class="empty-state">Selecciona un documento</div>';
-                    if (previewTitle) previewTitle.textContent = 'Vista previa';
                     const actions = document.getElementById('classifPreviewActions');
                     if (actions) actions.innerHTML = '';
                     await loadClassifForCase(payload.id);
@@ -1903,16 +1900,15 @@ function renderClassifActions(item, payload) {
             </div>
             <div class="reclassify-status" id="reclassifyStatus"></div>
         </div>
-        ${item.type === 'entrega_documentos' ? `
-        <div class="reclassify-panel" style="margin-top:10px;border-top:1px solid var(--c-border);padding-top:12px">
+        ${canonicalDocumentType(item.type) === 'comision' ? `
+        <div class="reclassify-panel comision-manual-panel">
             <div style="font-size:12px;font-weight:600;color:var(--c-text-1);margin-bottom:8px">Corrección manual de comisiones</div>
-            <div style="font-size:11px;color:var(--c-text-2);margin-bottom:10px">Si el sistema leyó mal la tabla CPS-F-11, ingresa los datos manualmente.</div>
-            <div id="comisionRows" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
-            <button class="btn-secondary" id="addComisionRow" type="button" style="font-size:11px;padding:5px 10px">+ Agregar intermediario</button>
-            <div style="margin-top:8px;display:flex;gap:6px">
-                <button class="btn-primary" id="saveComisiones" type="button" style="font-size:12px;padding:6px 14px">Guardar comisiones</button>
-                <span id="comisionStatus" style="font-size:11px;line-height:2.2"></span>
+            <div id="comisionRows"></div>
+            <div class="comision-actions-grid">
+                <button class="btn-secondary" id="addComisionRow" type="button">+ Agregar intermediario</button>
+                <button class="btn-primary" id="saveComisiones" type="button">Guardar comisiones</button>
             </div>
+            <span id="comisionStatus"></span>
         </div>` : ''}
     `;
 
@@ -1965,10 +1961,6 @@ function renderClassifActions(item, payload) {
                 if (nameEl) nameEl.textContent = newLabel;
             }
 
-            // Actualizar el header del visor
-            const previewTitle = document.getElementById('classifPreviewTitle');
-            if (previewTitle) previewTitle.textContent = newLabel;
-
             // Mostrar confirmación + mensaje RAG
             if (status) {
                 status.style.color = 'var(--c-ok)';
@@ -1997,8 +1989,8 @@ function renderClassifActions(item, payload) {
         }
     });
 
-    // ── Panel de comisiones manuales (solo para entrega_documentos) ──
-    if (item.type === 'entrega_documentos') {
+    // ── Panel de comisiones manuales (solo para documentos de comision) ──
+    if (canonicalDocumentType(item.type) === 'comision') {
         const comisionRows = document.getElementById('comisionRows');
         const addBtn = document.getElementById('addComisionRow');
         const saveBtn = document.getElementById('saveComisiones');
