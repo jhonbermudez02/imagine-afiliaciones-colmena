@@ -508,31 +508,27 @@ function resolveCase(item) {
     return { empresa, nit, status, finalStatus, fecha, has926, filename, blockers, nroAfiliacion, nroRadicacion };
 }
 
-function caseStatusClass(status, finalStatus) {
+function isApprovedCaseStatus(status, finalStatus) {
     const s = normalizeText(status);
     const f = normalizeText(finalStatus);
-    if (s === 'stopped_prevalidacion' || f.includes('rechaz')) return 'err';
-    if (s === 'completed' && (f.includes('aprob') || f === 'ok' || f === 'completed' || !f)) return 'ok';
-    if (f.includes('observ')) return 'warn';
-    if (s === 'failed') return 'err';
-    if (s === 'analyzed') return 'warn';
-    if (s === 'completed') return 'ok';
-    return 'neutral';
+    if (
+        f.includes('no aprob') ||
+        f.includes('rechaz') ||
+        f.includes('observ') ||
+        f.includes('bloque') ||
+        ['failed', 'stopped_prevalidacion'].includes(s)
+    ) {
+        return false;
+    }
+    return f.includes('aprob') || f === 'ok' || (s === 'completed' && (f === 'completed' || !f));
+}
+
+function caseStatusClass(status, finalStatus) {
+    return isApprovedCaseStatus(status, finalStatus) ? 'ok' : 'err';
 }
 
 function casePillLabel(status, finalStatus) {
-    const s = normalizeText(status);
-    const f = normalizeText(finalStatus);
-    if (s === 'stopped_prevalidacion') return 'No pasó validación';
-    if (f.includes('rechaz')) return 'No pasó validación';
-    if (f.includes('aprob') || (s === 'completed' && (f === 'completed' || !f))) return 'Aprobable';
-    if (f.includes('observ')) return 'Observado';
-    if (f.includes('bloque')) return 'Bloqueado';
-    if (s === 'completed') return 'Completado';
-    if (s === 'analyzed') return 'Analizado';
-    if (s === 'failed') return 'Error';
-    if (['uploaded','pending','processing','queued'].includes(s)) return 'En proceso';
-    return localizeStatus(status) || 'Pendiente';
+    return isApprovedCaseStatus(status, finalStatus) ? 'Aprobado' : 'No aprobado';
 }
 
 // ── LOGIN ────────────────────────────────────────────────────
@@ -863,48 +859,27 @@ async function loadBandeja() {
 }
 
 function renderMetrics(cases) {
-    let enProceso = 0, aprobables = 0, observados = 0, noAprobados = 0;
+    let aprobados = 0, noAprobados = 0;
     for (const c of cases) {
         const { status, finalStatus } = resolveCase(c);
-        const s = normalizeText(status);
-        const f = normalizeText(finalStatus);
-        if (f.includes('aprob') || f === 'ok' || (s === 'completed' && (f === 'completed' || !f))) { aprobables++; continue; }
-        if (s === 'stopped_prevalidacion') { noAprobados++; continue; }
-        if (f.includes('observ') || s === 'completed') { observados++; continue; }
-        enProceso++;
+        if (isApprovedCaseStatus(status, finalStatus)) aprobados++;
+        else noAprobados++;
     }
-    document.getElementById('metricEnProceso').textContent = enProceso;
-    document.getElementById('metricAprobables').textContent = aprobables;
-    document.getElementById('metricObservados').textContent = observados;
+    document.getElementById('metricAprobables').textContent = aprobados;
     document.getElementById('metricNoAprobados').textContent = noAprobados;
-    document.getElementById('metricEnProcesoSub').textContent = enProceso ? 'en prevalidación' : '';
-    document.getElementById('metricAprobablesSub').textContent = aprobables ? 'listos para plano' : '';
-    document.getElementById('metricObservadosSub').textContent = observados ? 'requieren revisión' : '';
-    document.getElementById('metricNoAprobadosSub').textContent = noAprobados ? 'no pasaron validación' : '';
+    document.getElementById('metricAprobablesSub').textContent = aprobados ? 'resultado satisfactorio' : '';
+    document.getElementById('metricNoAprobadosSub').textContent = noAprobados ? 'pendientes por revisión' : '';
 }
 
 function filterCasesByTab(cases, tab) {
     if (tab === 'todos') return cases;
-    if (tab === 'aprobables') return cases.filter(c => {
+    if (tab === 'aprobados') return cases.filter(c => {
         const { status, finalStatus } = resolveCase(c);
-        const s = normalizeText(status), f = normalizeText(finalStatus);
-        return f.includes('aprob') || f === 'ok' || (s === 'completed' && (f === 'completed' || !f));
-    });
-    if (tab === 'observados') return cases.filter(c => {
-        const { status, finalStatus } = resolveCase(c);
-        const s = normalizeText(status), f = normalizeText(finalStatus);
-        return f.includes('observ') || (s === 'completed' && !f.includes('aprob') && f !== 'ok' && f !== 'completed');
+        return isApprovedCaseStatus(status, finalStatus);
     });
     if (tab === 'no-aprobados') return cases.filter(c => {
-        const { status } = resolveCase(c);
-        return normalizeText(status) === 'stopped_prevalidacion';
-    });
-    if (tab === 'cola') return cases.filter(c => {
         const { status, finalStatus } = resolveCase(c);
-        const s = normalizeText(status), f = normalizeText(finalStatus);
-        // Casos que NO están terminados ni rechazados — pendientes de acción
-        return !['completed','stopped_prevalidacion'].includes(s) || 
-               (['uploaded','pending','processing','queued','analyzing','analyzed'].includes(s));
+        return !isApprovedCaseStatus(status, finalStatus);
     });
     return cases;
 }
@@ -992,8 +967,8 @@ function renderCasesTable(cases, tab = 'todos') {
         const wfStatus = normalizeText(status);
         const isProcessing = ['processing','pending','uploaded','queued'].includes(wfStatus);
         if (isProcessing) hasProcessing = true;
-        const cls = isProcessing ? 'processing' : caseStatusClass(status, finalStatus);
-        const label = isProcessing ? 'Procesando...' : casePillLabel(status, finalStatus);
+        const cls = caseStatusClass(status, finalStatus);
+        const label = casePillLabel(status, finalStatus);
         const id = item.id || '';
         const stepInfo = isProcessing ? (STEP_PROGRESS[item.current_step || ''] || { pct: 15, label: 'Iniciando...' }) : null;
 
@@ -2318,12 +2293,11 @@ async function loadReporteSidebar() {
         const r = await fetchWithRetry(operationApiUrl('/api/cases/production-summary'));
         const data = await r.json();
         let cases = Array.isArray(data.cases) ? data.cases : [];
-        // Perfil Colmena: solo mostrar contratos aprobables
+        // Perfil Colmena: solo mostrar contratos aprobados
         if (readProfile() === 'colmena') {
             cases = cases.filter(c => {
                 const { status, finalStatus } = resolveCase(c);
-                const s = normalizeText(status), f = normalizeText(finalStatus);
-                return s === 'completed' && (f.includes('aprob') || f === 'ok' || f === 'completed' || !f);
+                return isApprovedCaseStatus(status, finalStatus);
             });
         }
         cases.sort((a,b) => String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
@@ -3395,8 +3369,7 @@ async function loadProduccion() {
         let cases = Array.isArray(data.cases) ? data.cases : [];
         cases = cases.filter(c => {
             const { status, finalStatus } = resolveCase(c);
-            const s = normalizeText(status), f = normalizeText(finalStatus);
-            return s === 'completed' && (f.includes('aprob') || f === 'ok' || f === 'completed' || !f);
+            return isApprovedCaseStatus(status, finalStatus);
         });
         cases.sort((a,b) => String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
         if (!cases.length) { el.innerHTML = `<div class="empty-state">No hay contratos aprobados para ${escapeHtml(currentOperation().name)}</div>`; return; }
@@ -4205,9 +4178,7 @@ function init() {
         const filter = card.dataset.filter;
         // Mapear filtro a tab
         const tabMap = {
-            'cola': 'cola',
-            'aprobables': 'aprobables',
-            'observados': 'observados',
+            'aprobados': 'aprobados',
             'no-aprobados': 'no-aprobados',
         };
         const tab = tabMap[filter] || 'todos';

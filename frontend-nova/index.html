@@ -145,20 +145,10 @@
       <!-- BANDEJA -->
       <section class="view active" id="view-bandeja">
         <div class="metrics-row" id="metricsRow">
-          <div class="metric-card" data-filter="cola" role="button" tabindex="0" title="Ver contratos en proceso">
-            <div class="metric-label">En proceso</div>
-            <div class="metric-val" id="metricEnProceso">—</div>
-            <div class="metric-sub" id="metricEnProcesoSub"></div>
-          </div>
-          <div class="metric-card" data-filter="aprobables" role="button" tabindex="0" title="Ver contratos aprobables">
-            <div class="metric-label">Aprobables</div>
+          <div class="metric-card" data-filter="aprobados" role="button" tabindex="0" title="Ver contratos aprobados">
+            <div class="metric-label">Aprobados</div>
             <div class="metric-val" id="metricAprobables">—</div>
             <div class="metric-sub ok" id="metricAprobablesSub"></div>
-          </div>
-          <div class="metric-card" data-filter="observados" role="button" tabindex="0" title="Ver contratos observados">
-            <div class="metric-label">Observados</div>
-            <div class="metric-val" id="metricObservados">—</div>
-            <div class="metric-sub warn" id="metricObservadosSub"></div>
           </div>
           <div class="metric-card" data-filter="no-aprobados" role="button" tabindex="0" title="Ver contratos no aprobados">
             <div class="metric-label">No aprobados</div>
@@ -171,10 +161,8 @@
           <div class="section-card-head">
             <div class="tabs-row" id="bandejaTabsRow">
               <button class="tab active" data-tab="todos" type="button">Todos</button>
-              <button class="tab" data-tab="aprobables" type="button">Aprobables</button>
-              <button class="tab" data-tab="observados" type="button">Observados</button>
+              <button class="tab" data-tab="aprobados" type="button">Aprobados</button>
               <button class="tab" data-tab="no-aprobados" type="button">No aprobados</button>
-              <button class="tab" data-tab="cola" type="button">Cola</button>
             </div>
             <button class="btn-icon" id="refreshBandejaBtn" title="Actualizar" type="button">↺</button>
           </div>

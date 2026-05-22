@@ -2853,17 +2853,7 @@ async def cases_production_summary(operation: str = Query(default="colima")):
         analysis = payload.get("analysis") or {}
         workflow = analysis.get("workflow_run") or {}
         decision = analysis.get("decision") or {}
-        workflow_status = str(workflow.get("status") or "").strip().lower()
-        payload_status = str(payload.get("status") or "").strip().lower()
         decision_status = str(decision.get("recommended_status") or "").strip().lower()
-        terminal_statuses = {"completed", "stopped_prevalidacion"}
-        terminal_decision_statuses = {"aprobable", "observado", "rechazado", "rechazado_prevalidacion"}
-        if (
-            workflow_status not in terminal_statuses
-            and payload_status not in terminal_statuses
-            and decision_status not in terminal_decision_statuses
-        ):
-            continue
         final_report = workflow.get("executive_report_final") or {}
         precheck_report = workflow.get("executive_report_precheck") or analysis.get("reporte_ejecutivo") or {}
         report = final_report or precheck_report

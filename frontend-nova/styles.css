@@ -250,7 +250,7 @@ html, body { height: 100%; font-family: var(--font); font-size: 14px; color: var
 .view.active { display: flex; }
 
 /* ============================================================ METRICS */
-.metrics-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
+.metrics-row { display: grid; grid-template-columns: repeat(2,1fr); gap: 12px; }
 .metric-card {
   background: var(--c-surface);
   border-radius: var(--radius);
