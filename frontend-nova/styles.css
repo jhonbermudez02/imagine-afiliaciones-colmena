@@ -1204,6 +1204,7 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
 .sede-pdf-tools {
   padding: 8px;
   border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface);
 }
 .sede-pdf-frame {
   display: block;

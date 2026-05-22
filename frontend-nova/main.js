@@ -2763,11 +2763,9 @@ function renderFormularioSedePanels(payload, sede, centroIndex = 'all') {
     return `
         <div class="sede-split-layout">
             <div class="sede-split-panel">
-                <div class="sede-panel-title">Trabajadores</div>
                 ${renderFormularioTrabajadoresTable(filterSedeWorkers(sede, centroIndex))}
             </div>
             <div class="sede-split-panel">
-                <div class="sede-panel-title">Documentos</div>
                 ${renderFormularioPdfPanel(payload, sede)}
             </div>
         </div>
@@ -2819,13 +2817,11 @@ function renderFormularioReporte(container, payload) {
         <div class="report-body report-body-form">
             <div class="sede-selector-layout">
                 <div class="sede-selector-panel">
-                    <label class="sede-selector-label" for="formSedeSelect">Sede</label>
                     <select id="formSedeSelect" class="field-select sede-select" ${sedesFormulario.length ? '' : 'disabled'}>
                         ${sedesFormulario.length
                             ? sedesFormulario.map((sede, index) => `<option value="${index}">${escapeHtml(sede.label)}</option>`).join('')
                             : '<option>Sin sedes</option>'}
                     </select>
-                    <label class="sede-selector-label" for="formCentroSelect">Centro</label>
                     <select id="formCentroSelect" class="field-select sede-select" ${sedesFormulario.length ? '' : 'disabled'}>
                         ${(sedesFormulario[0]?.centros || []).length
                             ? `<option value="all">Todos</option>${sedesFormulario[0].centros.map((centro, index) => `<option value="${index}">${escapeHtml(centroTrabajoLabel(centro, index))}</option>`).join('')}`
