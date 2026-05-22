@@ -2798,6 +2798,7 @@ function renderFormularioReporte(container, payload) {
     const totalTrabajadores = formFields.a_numero_inicial_trabajadores_estudiantes || formFields.b_numero_total_trabajadores_estudiantes || profile.numero_trabajadores || resumen.numero_trabajadores || 'n/d';
     const totalNomina = totalNominaRaw ? formatFormValue('nomina_total', totalNominaRaw) : 'n/d';
     const sedesFormulario = buildFormularioSedes(payload, totalSedes);
+    const caseId = payload?.id || activeCaseId || '';
 
     container.innerHTML = `
         <div class="report-header report-header-compact">
@@ -2812,6 +2813,9 @@ function renderFormularioReporte(container, payload) {
                     <span><strong>Sedes totales:</strong> ${escapeHtml(String(totalSedes))}</span>
                     <span><strong>Trabajadores totales:</strong> ${escapeHtml(String(totalTrabajadores))}</span>
                 </div>
+            </div>
+            <div class="report-header-actions">
+                <button class="btn-secondary" data-action="clasificacion" data-case="${escapeHtml(caseId)}" type="button">Ver documentos</button>
             </div>
         </div>
         <div class="report-body report-body-form">
@@ -2872,6 +2876,9 @@ function renderFormularioReporte(container, payload) {
         if (sedeDetail) sedeDetail.innerHTML = renderFormularioSedeDetalle(selectedSede, selectedCentro);
         if (sedePanels) sedePanels.innerHTML = renderFormularioSedePanels(payload, selectedSede, selectedCentro);
         bindPdfSelect();
+    });
+    container.querySelectorAll('[data-action]').forEach(btn => {
+        btn.addEventListener('click', () => handleCaseAction(btn.dataset.action, btn.dataset.case, btn.dataset.file));
     });
     bindPdfSelect();
 }

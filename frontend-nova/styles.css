@@ -1044,6 +1044,13 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
   padding: 14px 16px;
 }
 .report-heading-main { min-width: 0; }
+.report-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-shrink: 0;
+}
 .report-header-meta {
   display: flex;
   flex-wrap: wrap;
