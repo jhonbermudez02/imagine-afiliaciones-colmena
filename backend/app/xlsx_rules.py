@@ -50,7 +50,59 @@ def _is_email_value(value: Any) -> bool:
     text = normalize_text(value)
     if not text:
         return False
-    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]{2,}", text))
+    if ".." in text:
+        return False
+    match = re.fullmatch(
+        r"[A-Za-z0-9.!$%&'*+/=?^_`{|}~-]+@"
+        r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+        r"[A-Za-z]{2,}",
+        text,
+    )
+    if not match:
+        return False
+    local, domain = text.rsplit("@", 1)
+    return not (local.startswith(".") or local.endswith(".") or "#" in local or "#" in domain)
+
+
+def _ascii_lower(value: Any) -> str:
+    text = unicodedata.normalize("NFKD", normalize_text(value))
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    return text.lower()
+
+
+def _address_quality_issue(value: Any) -> str | None:
+    text = normalize_text(value)
+    if not text:
+        return None
+    normalized = _ascii_lower(text)
+    alnum = re.sub(r"[^0-9a-z]+", "", normalized)
+    letters = re.sub(r"[^a-z]+", "", normalized)
+    if not letters:
+        return "no puede estar formada solo por números o caracteres especiales"
+    if len(alnum) < 5:
+        return "es demasiado corta para identificar una dirección"
+    generic_values = {
+        "bogota",
+        "bogota dc",
+        "bogota d c",
+        "casa",
+        "oficina",
+        "sede",
+        "principal",
+        "direccion",
+        "no aplica",
+        "n/a",
+        "na",
+    }
+    if normalized in generic_values:
+        return "es demasiado genérica para identificar una dirección"
+    if re.fullmatch(r"(?:manzana|mz|mza)\s+[0-9a-z]{1,2}", normalized):
+        return "está incompleta; agrega la dirección completa de la manzana"
+    return None
+
+
+def _is_valid_roman_risk(value: Any) -> bool:
+    return normalize_text(value).upper() in {"I", "II", "III", "IV", "V"}
 
 
 def _has_letter_and_number_value(value: Any) -> bool:
@@ -228,6 +280,37 @@ def _append_min_length_validation(
                 "message": f"El campo '{label}' ({cell}) debe tener al menos {min_length} caracteres. Valor recibido: {raw_value}.",
             }
         )
+
+
+def _append_address_quality_validation(
+    blockers: List[Dict[str, Any]],
+    cell_info: Dict[str, Any],
+    *,
+    code: str,
+    field: str,
+    message_prefix: str | None = None,
+    sheet: str | None = None,
+) -> None:
+    raw_value = cell_info.get("value")
+    issue = _address_quality_issue(raw_value)
+    if not issue:
+        return
+    label = cell_info.get("label") or field
+    cell = cell_info.get("cell") or "celda requerida"
+    row_number = cell_info.get("row")
+    prefix = message_prefix or f"El campo '{label}' ({cell})"
+    payload: Dict[str, Any] = {
+        "code": code,
+        "severity": "blocker",
+        "field": field,
+        "cell": cell,
+        "message": f"{prefix} {issue}. Valor recibido: {raw_value}.",
+    }
+    if sheet:
+        payload["sheet"] = sheet
+    if row_number is not None:
+        payload["row"] = row_number
+    blockers.append(payload)
 
 
 def _append_digits_length_validation(
@@ -991,6 +1074,21 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                 require_numeric=require_numeric,
                 code_prefix="XLSX_TRASLADO_REQUIRED_CELL",
             )
+        b_clase_riesgo_info = form_cell_values.get("b_clase_riesgo") or {}
+        b_clase_riesgo_value = b_clase_riesgo_info.get("value")
+        if not _is_blank_value(b_clase_riesgo_value) and not _is_valid_roman_risk(b_clase_riesgo_value):
+            blockers.append(
+                {
+                    "code": "XLSX_TRASLADO_REQUIRED_CELL_INVALID_ROMAN_RISK",
+                    "severity": "blocker",
+                    "field": "b_clase_riesgo",
+                    "cell": b_clase_riesgo_info.get("cell") or "M29",
+                    "message": (
+                        "Para afiliaciones de traslado, el campo 'Clase de riesgo' (M29) debe ser un número romano "
+                        f"entre I y V. Valor recibido: {b_clase_riesgo_value}."
+                    ),
+                }
+            )
         for field in PRIMARY_REQUIRED_TRASLADO:
             if not normalize_text(form_fields.get(field, "")):
                 missing_fields.append(field)
@@ -1095,6 +1193,8 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
         ("sede_principal_municipio_distrito", False, False),
         ("sede_principal_zona", False, False),
         ("sede_principal_as22", False, False),
+        ("responsable_sede_primer_apellido", False, False),
+        ("responsable_sede_primer_nombre", False, False),
         ("responsable_sede_tipo_documento", False, False),
         ("responsable_sede_numero_documento", True, False),
         ("responsable_sede_correo", False, True),
@@ -1151,6 +1251,12 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
         "sede_principal_direccion",
         min_length=5,
         code_prefix="XLSX_COMMON_REQUIRED_CELL",
+    )
+    _append_address_quality_validation(
+        blockers,
+        form_cell_values.get("sede_principal_direccion") or {},
+        code="XLSX_COMMON_REQUIRED_CELL_INVALID_ADDRESS",
+        field="sede_principal_direccion",
     )
 
     for field in ["autorizacion_1", "autorizacion_2", "autorizacion_3"]:
@@ -1540,6 +1646,18 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                         f"el campo '{cell_info.get('label') or field}' ({cell_info.get('cell') or 'celda requerida'})"
                     ),
                 )
+            address_info = _worker_cell_info(row_values, "direccion")
+            _append_address_quality_validation(
+                blockers,
+                address_info,
+                code="XLSX_TRABAJADOR_REQUIRED_CELL_INVALID_ADDRESS",
+                field="direccion",
+                sheet=sheet_name,
+                message_prefix=(
+                    f"{sheet_name}, fila {address_info.get('row')}: "
+                    f"el campo '{address_info.get('label') or 'direccion'}' ({address_info.get('cell') or 'celda requerida'})"
+                ),
+            )
             worker_center_info = _worker_cell_info(row_values, "codigo_centro_trabajo")
             worker_center_code = normalize_text(worker_center_info.get("value"))
             if worker_center_code and worker_center_code not in sheet_center_codes:

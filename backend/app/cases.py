@@ -389,6 +389,22 @@ def normalize_haystack(value: Any) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _is_strict_email_value(value: Any) -> bool:
+    text = normalize_text(value)
+    if not text or ".." in text:
+        return False
+    match = re.fullmatch(
+        r"[A-Za-z0-9.!$%&'*+/=?^_`{|}~-]+@"
+        r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+        r"[A-Za-z]{2,}",
+        text,
+    )
+    if not match:
+        return False
+    local, domain = text.rsplit("@", 1)
+    return not (local.startswith(".") or local.endswith(".") or "#" in local or "#" in domain)
+
+
 def fuzzy_text_score(query: str, candidate: Any) -> int:
     q = normalize_haystack(query)
     c = normalize_haystack(candidate)
@@ -6146,7 +6162,7 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
         ("sede_principal_correo", "El correo de la sede principal"),
     ):
         email_value = normalize_text(form_fields.get(email_key, ""))
-        if email_value and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email_value):
+        if email_value and not _is_strict_email_value(email_value):
             rejection_reasons.append(
                 {
                     "code": "FORMULARIO_CORREO_INVALIDO",
@@ -6787,7 +6803,7 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
 
         email = normalize_text(record.get("mail") or record.get("correo") or record.get("correo_electronico") or "")
         if email:
-            simple_email_ok = bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email))
+            simple_email_ok = _is_strict_email_value(email)
             if not simple_email_ok:
                 row_errors.append({
                     "row": row_excel,

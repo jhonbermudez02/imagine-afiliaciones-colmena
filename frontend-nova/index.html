@@ -145,20 +145,10 @@
       <!-- BANDEJA -->
       <section class="view active" id="view-bandeja">
         <div class="metrics-row" id="metricsRow">
-          <div class="metric-card" data-filter="cola" role="button" tabindex="0" title="Ver contratos en proceso">
-            <div class="metric-label">En proceso</div>
-            <div class="metric-val" id="metricEnProceso">—</div>
-            <div class="metric-sub" id="metricEnProcesoSub"></div>
-          </div>
-          <div class="metric-card" data-filter="aprobables" role="button" tabindex="0" title="Ver contratos aprobables">
-            <div class="metric-label">Aprobables</div>
+          <div class="metric-card" data-filter="aprobados" role="button" tabindex="0" title="Ver contratos aprobados">
+            <div class="metric-label">Aprobados</div>
             <div class="metric-val" id="metricAprobables">—</div>
             <div class="metric-sub ok" id="metricAprobablesSub"></div>
-          </div>
-          <div class="metric-card" data-filter="observados" role="button" tabindex="0" title="Ver contratos observados">
-            <div class="metric-label">Observados</div>
-            <div class="metric-val" id="metricObservados">—</div>
-            <div class="metric-sub warn" id="metricObservadosSub"></div>
           </div>
           <div class="metric-card" data-filter="no-aprobados" role="button" tabindex="0" title="Ver contratos no aprobados">
             <div class="metric-label">No aprobados</div>
@@ -171,10 +161,8 @@
           <div class="section-card-head">
             <div class="tabs-row" id="bandejaTabsRow">
               <button class="tab active" data-tab="todos" type="button">Todos</button>
-              <button class="tab" data-tab="aprobables" type="button">Aprobables</button>
-              <button class="tab" data-tab="observados" type="button">Observados</button>
+              <button class="tab" data-tab="aprobados" type="button">Aprobados</button>
               <button class="tab" data-tab="no-aprobados" type="button">No aprobados</button>
-              <button class="tab" data-tab="cola" type="button">Cola</button>
             </div>
             <button class="btn-icon" id="refreshBandejaBtn" title="Actualizar" type="button">↺</button>
           </div>
@@ -259,7 +247,6 @@
           <div class="col-right">
             <div class="section-card" id="classifPreviewCard">
               <div class="section-card-head" style="position:sticky;top:0;z-index:10;background:var(--c-surface)">
-                <div class="section-title" id="classifPreviewTitle">Vista previa</div>
                 <div id="classifPreviewActions"></div>
               </div>
               <div id="classifPreviewBody">
@@ -319,21 +306,10 @@
       <!-- REPORTE EJECUTIVO -->
       <section class="view" id="view-reporte">
         <div class="reporte-layout">
-          <!-- Panel lateral de contratos -->
-          <div class="reporte-sidebar">
-            <div class="reporte-sidebar-head">
-              <span class="section-title" style="font-size:12px">Contratos</span>
-              <input class="field-input" id="reporteSidebarSearch" type="text" placeholder="Buscar..." style="font-size:11px;padding:4px 8px;height:28px;flex:1;min-width:0" />
-            </div>
-            <div id="reporteSidebarList" class="reporte-sidebar-list">
-              <div class="loading-msg">Cargando...</div>
-            </div>
-          </div>
-          <!-- Contenido del reporte -->
           <div class="reporte-main">
             <div class="section-card" style="margin:0;border-radius:0;border:none;flex:1;overflow-y:auto">
               <div id="reporteContent">
-                <div class="empty-state" style="padding:48px">Selecciona un contrato del panel izquierdo</div>
+                <div class="empty-state" style="padding:48px">Selecciona un contrato desde la bandeja</div>
               </div>
             </div>
           </div>

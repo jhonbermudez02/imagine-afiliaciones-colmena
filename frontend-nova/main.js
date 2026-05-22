@@ -508,31 +508,27 @@ function resolveCase(item) {
     return { empresa, nit, status, finalStatus, fecha, has926, filename, blockers, nroAfiliacion, nroRadicacion };
 }
 
-function caseStatusClass(status, finalStatus) {
+function isApprovedCaseStatus(status, finalStatus) {
     const s = normalizeText(status);
     const f = normalizeText(finalStatus);
-    if (s === 'stopped_prevalidacion' || f.includes('rechaz')) return 'err';
-    if (s === 'completed' && (f.includes('aprob') || f === 'ok' || f === 'completed' || !f)) return 'ok';
-    if (f.includes('observ')) return 'warn';
-    if (s === 'failed') return 'err';
-    if (s === 'analyzed') return 'warn';
-    if (s === 'completed') return 'ok';
-    return 'neutral';
+    if (
+        f.includes('no aprob') ||
+        f.includes('rechaz') ||
+        f.includes('observ') ||
+        f.includes('bloque') ||
+        ['failed', 'stopped_prevalidacion'].includes(s)
+    ) {
+        return false;
+    }
+    return f.includes('aprob') || f === 'ok' || (s === 'completed' && (f === 'completed' || !f));
+}
+
+function caseStatusClass(status, finalStatus) {
+    return isApprovedCaseStatus(status, finalStatus) ? 'ok' : 'err';
 }
 
 function casePillLabel(status, finalStatus) {
-    const s = normalizeText(status);
-    const f = normalizeText(finalStatus);
-    if (s === 'stopped_prevalidacion') return 'No pasó validación';
-    if (f.includes('rechaz')) return 'No pasó validación';
-    if (f.includes('aprob') || (s === 'completed' && (f === 'completed' || !f))) return 'Aprobable';
-    if (f.includes('observ')) return 'Observado';
-    if (f.includes('bloque')) return 'Bloqueado';
-    if (s === 'completed') return 'Completado';
-    if (s === 'analyzed') return 'Analizado';
-    if (s === 'failed') return 'Error';
-    if (['uploaded','pending','processing','queued'].includes(s)) return 'En proceso';
-    return localizeStatus(status) || 'Pendiente';
+    return isApprovedCaseStatus(status, finalStatus) ? 'Aprobado' : 'No aprobado';
 }
 
 // ── LOGIN ────────────────────────────────────────────────────
@@ -863,48 +859,27 @@ async function loadBandeja() {
 }
 
 function renderMetrics(cases) {
-    let enProceso = 0, aprobables = 0, observados = 0, noAprobados = 0;
+    let aprobados = 0, noAprobados = 0;
     for (const c of cases) {
         const { status, finalStatus } = resolveCase(c);
-        const s = normalizeText(status);
-        const f = normalizeText(finalStatus);
-        if (f.includes('aprob') || f === 'ok' || (s === 'completed' && (f === 'completed' || !f))) { aprobables++; continue; }
-        if (s === 'stopped_prevalidacion') { noAprobados++; continue; }
-        if (f.includes('observ') || s === 'completed') { observados++; continue; }
-        enProceso++;
+        if (isApprovedCaseStatus(status, finalStatus)) aprobados++;
+        else noAprobados++;
     }
-    document.getElementById('metricEnProceso').textContent = enProceso;
-    document.getElementById('metricAprobables').textContent = aprobables;
-    document.getElementById('metricObservados').textContent = observados;
+    document.getElementById('metricAprobables').textContent = aprobados;
     document.getElementById('metricNoAprobados').textContent = noAprobados;
-    document.getElementById('metricEnProcesoSub').textContent = enProceso ? 'en prevalidación' : '';
-    document.getElementById('metricAprobablesSub').textContent = aprobables ? 'listos para plano' : '';
-    document.getElementById('metricObservadosSub').textContent = observados ? 'requieren revisión' : '';
-    document.getElementById('metricNoAprobadosSub').textContent = noAprobados ? 'no pasaron validación' : '';
+    document.getElementById('metricAprobablesSub').textContent = aprobados ? 'resultado satisfactorio' : '';
+    document.getElementById('metricNoAprobadosSub').textContent = noAprobados ? 'pendientes por revisión' : '';
 }
 
 function filterCasesByTab(cases, tab) {
     if (tab === 'todos') return cases;
-    if (tab === 'aprobables') return cases.filter(c => {
+    if (tab === 'aprobados') return cases.filter(c => {
         const { status, finalStatus } = resolveCase(c);
-        const s = normalizeText(status), f = normalizeText(finalStatus);
-        return f.includes('aprob') || f === 'ok' || (s === 'completed' && (f === 'completed' || !f));
-    });
-    if (tab === 'observados') return cases.filter(c => {
-        const { status, finalStatus } = resolveCase(c);
-        const s = normalizeText(status), f = normalizeText(finalStatus);
-        return f.includes('observ') || (s === 'completed' && !f.includes('aprob') && f !== 'ok' && f !== 'completed');
+        return isApprovedCaseStatus(status, finalStatus);
     });
     if (tab === 'no-aprobados') return cases.filter(c => {
-        const { status } = resolveCase(c);
-        return normalizeText(status) === 'stopped_prevalidacion';
-    });
-    if (tab === 'cola') return cases.filter(c => {
         const { status, finalStatus } = resolveCase(c);
-        const s = normalizeText(status), f = normalizeText(finalStatus);
-        // Casos que NO están terminados ni rechazados — pendientes de acción
-        return !['completed','stopped_prevalidacion'].includes(s) || 
-               (['uploaded','pending','processing','queued','analyzing','analyzed'].includes(s));
+        return !isApprovedCaseStatus(status, finalStatus);
     });
     return cases;
 }
@@ -992,8 +967,8 @@ function renderCasesTable(cases, tab = 'todos') {
         const wfStatus = normalizeText(status);
         const isProcessing = ['processing','pending','uploaded','queued'].includes(wfStatus);
         if (isProcessing) hasProcessing = true;
-        const cls = isProcessing ? 'processing' : caseStatusClass(status, finalStatus);
-        const label = isProcessing ? 'Procesando...' : casePillLabel(status, finalStatus);
+        const cls = caseStatusClass(status, finalStatus);
+        const label = casePillLabel(status, finalStatus);
         const id = item.id || '';
         const stepInfo = isProcessing ? (STEP_PROGRESS[item.current_step || ''] || { pct: 15, label: 'Iniciando...' }) : null;
 
@@ -1080,7 +1055,7 @@ async function handleCaseAction(action, caseId, file) {
             const el = document.getElementById('reporteContent');
             const sel = document.getElementById('reporteCaseSelect');
             if (sel) sel.value = caseId;
-            if (el) renderReporte(el, activeCasePayload);
+            if (el) renderFormularioReporte(el, activeCasePayload);
         }
     } else if (action === 'eliminar') {
         const empresa = document.querySelector(`[data-action="eliminar"][data-case="${caseId}"]`)?.dataset?.empresa || caseId;
@@ -1682,7 +1657,6 @@ function getManualReviewEntry(manualReview, kind, file) {
 function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
     const el = document.getElementById('classifDocList');
     const preview = document.getElementById('classifPreviewBody');
-    const previewTitle = document.getElementById('classifPreviewTitle');
     if (!el) return;
     let items = buildDocItems(payload);
     if (!items.length) {
@@ -1741,7 +1715,6 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
             const idx = parseInt(el.dataset.index);
             const item = items[idx];
             if (!item) return;
-            if (previewTitle) previewTitle.textContent = item.label;
             if (preview) {
                 preview.innerHTML = '<div class="loading-msg">Cargando documento...</div>';
                 await renderDocPreview(preview, payload.id, item);
@@ -1762,7 +1735,6 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
                 if (r.ok) {
                     showToast(`Archivo eliminado: ${filename}`, 'ok');
                     if (preview) preview.innerHTML = '<div class="empty-state">Selecciona un documento</div>';
-                    if (previewTitle) previewTitle.textContent = 'Vista previa';
                     const actions = document.getElementById('classifPreviewActions');
                     if (actions) actions.innerHTML = '';
                     await loadClassifForCase(payload.id);
@@ -1903,16 +1875,15 @@ function renderClassifActions(item, payload) {
             </div>
             <div class="reclassify-status" id="reclassifyStatus"></div>
         </div>
-        ${item.type === 'entrega_documentos' ? `
-        <div class="reclassify-panel" style="margin-top:10px;border-top:1px solid var(--c-border);padding-top:12px">
+        ${canonicalDocumentType(item.type) === 'comision' ? `
+        <div class="reclassify-panel comision-manual-panel">
             <div style="font-size:12px;font-weight:600;color:var(--c-text-1);margin-bottom:8px">Corrección manual de comisiones</div>
-            <div style="font-size:11px;color:var(--c-text-2);margin-bottom:10px">Si el sistema leyó mal la tabla CPS-F-11, ingresa los datos manualmente.</div>
-            <div id="comisionRows" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
-            <button class="btn-secondary" id="addComisionRow" type="button" style="font-size:11px;padding:5px 10px">+ Agregar intermediario</button>
-            <div style="margin-top:8px;display:flex;gap:6px">
-                <button class="btn-primary" id="saveComisiones" type="button" style="font-size:12px;padding:6px 14px">Guardar comisiones</button>
-                <span id="comisionStatus" style="font-size:11px;line-height:2.2"></span>
+            <div id="comisionRows"></div>
+            <div class="comision-actions-grid">
+                <button class="btn-secondary" id="addComisionRow" type="button">+ Agregar intermediario</button>
+                <button class="btn-primary" id="saveComisiones" type="button">Guardar comisiones</button>
             </div>
+            <span id="comisionStatus"></span>
         </div>` : ''}
     `;
 
@@ -1965,10 +1936,6 @@ function renderClassifActions(item, payload) {
                 if (nameEl) nameEl.textContent = newLabel;
             }
 
-            // Actualizar el header del visor
-            const previewTitle = document.getElementById('classifPreviewTitle');
-            if (previewTitle) previewTitle.textContent = newLabel;
-
             // Mostrar confirmación + mensaje RAG
             if (status) {
                 status.style.color = 'var(--c-ok)';
@@ -1997,8 +1964,8 @@ function renderClassifActions(item, payload) {
         }
     });
 
-    // ── Panel de comisiones manuales (solo para entrega_documentos) ──
-    if (item.type === 'entrega_documentos') {
+    // ── Panel de comisiones manuales (solo para documentos de comision) ──
+    if (canonicalDocumentType(item.type) === 'comision') {
         const comisionRows = document.getElementById('comisionRows');
         const addBtn = document.getElementById('addComisionRow');
         const saveBtn = document.getElementById('saveComisiones');
@@ -2326,12 +2293,11 @@ async function loadReporteSidebar() {
         const r = await fetchWithRetry(operationApiUrl('/api/cases/production-summary'));
         const data = await r.json();
         let cases = Array.isArray(data.cases) ? data.cases : [];
-        // Perfil Colmena: solo mostrar contratos aprobables
+        // Perfil Colmena: solo mostrar contratos aprobados
         if (readProfile() === 'colmena') {
             cases = cases.filter(c => {
                 const { status, finalStatus } = resolveCase(c);
-                const s = normalizeText(status), f = normalizeText(finalStatus);
-                return s === 'completed' && (f.includes('aprob') || f === 'ok' || f === 'completed' || !f);
+                return isApprovedCaseStatus(status, finalStatus);
             });
         }
         cases.sort((a,b) => String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
@@ -2414,10 +2380,504 @@ async function loadReporteForCase(caseId) {
         const r = await fetchWithRetry(caseApiUrl(caseId));
         const payload = await r.json();
         el.dataset.caseId = caseId;  // confirmar después de cargar
-        renderReporte(el, payload);
+        renderFormularioReporte(el, payload);
     } catch(e) {
         el.innerHTML = `<div class="error-msg">${escapeHtml(e.message)}</div>`;
     }
+}
+
+function formFieldLabel(key) {
+    const custom = {
+        empleador_razon_social: 'Razón social',
+        empleador_tipo_documento: 'Tipo documento empleador',
+        empleador_numero_documento_nit: 'Documento / NIT',
+        rep_legal_nombre_completo: 'Nombre completo',
+        rep_legal_primer_apellido: 'Primer apellido',
+        rep_legal_primer_nombre: 'Primer nombre',
+        rep_legal_tipo_documento: 'Tipo documento',
+        rep_legal_numero_documento: 'Número documento',
+        rep_legal_correo: 'Correo',
+        rep_legal_correo_electronico: 'Correo electrónico',
+        sede_principal_codigo: 'Código',
+        sede_principal_nombre: 'Nombre',
+        sede_principal_direccion: 'Dirección',
+        sede_principal_telefono: 'Teléfono',
+        sede_principal_correo: 'Correo',
+        sede_principal_municipio_distrito: 'Municipio / distrito',
+        sede_principal_zona: 'Zona',
+        sede_principal_departamento: 'Departamento',
+        sede_principal_localidad_comuna: 'Localidad / comuna',
+        a_codigo_actividad_economica_principal: 'Código actividad económica',
+        a_clase_riesgo: 'Clase de riesgo',
+        a_numero_sedes: 'Número de sedes',
+        a_numero_centros_trabajo: 'Número de centros de trabajo',
+        a_numero_inicial_trabajadores_estudiantes: 'Trabajadores / estudiantes',
+        a_valor_total_nomina: 'Valor total nómina',
+        b_arl_de_la_cual_se_traslada: 'ARL de la cual se traslada',
+        b_clase_riesgo: 'Clase de riesgo',
+        b_codigo_actividad_economica_principal: 'Código actividad económica',
+        b_numero_sedes: 'Número de sedes',
+        b_numero_centros_trabajo: 'Número de centros de trabajo',
+        b_numero_total_trabajadores_estudiantes: 'Trabajadores / estudiantes',
+        b_monto_total_cotizacion: 'Monto total cotización',
+        estado_cuenta_empleador: 'Estado cuenta empleador',
+    };
+    if (custom[key]) return custom[key];
+    return String(key || '')
+        .replace(/^a_/, '')
+        .replace(/^b_/, '')
+        .replace(/^rep_legal_/, '')
+        .replace(/^sede_principal_/, '')
+        .replace(/^empleador_/, '')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, ch => ch.toUpperCase());
+}
+
+function isBlankFormValue(value) {
+    if (value === null || value === undefined) return true;
+    if (Array.isArray(value)) return value.length === 0;
+    if (typeof value === 'object') return Object.keys(value).length === 0;
+    return String(value).trim() === '';
+}
+
+function formatFormValue(key, value) {
+    if (isBlankFormValue(value)) return '';
+    if (Array.isArray(value)) return `${value.length} registro(s)`;
+    if (typeof value === 'object') return JSON.stringify(value);
+    const text = String(value).trim();
+    const numeric = Number(String(text).replace(/[^\d.-]/g, ''));
+    if (/nomina|nómina|monto|cotizacion|cotización|salario|ibc/i.test(key) && Number.isFinite(numeric) && numeric > 0) {
+        return formatCurrency(numeric);
+    }
+    return text;
+}
+
+function renderFormFieldGrid(entries) {
+    const items = entries.filter(([, value]) => !isBlankFormValue(value));
+    if (!items.length) return '<div class="form-empty">Sin información recuperada.</div>';
+    return `
+        <div class="form-info-grid">
+            ${items.map(([key, value]) => `
+                <div class="form-info-item">
+                    <div class="form-info-label">${escapeHtml(formFieldLabel(key))}</div>
+                    <div class="form-info-value">${escapeHtml(formatFormValue(key, value))}</div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function renderCentrosTrabajo(centros) {
+    if (!Array.isArray(centros) || !centros.length) return '';
+    return `
+        <div class="form-table-wrap">
+            <table class="form-table">
+                <thead>
+                    <tr>
+                        <th>Código</th>
+                        <th>Nombre</th>
+                        <th>Actividad</th>
+                        <th>Riesgo</th>
+                        <th>Trab.</th>
+                        <th>Dirección</th>
+                        <th>Responsable</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${centros.map(c => `
+                        <tr>
+                            <td>${escapeHtml(c.codigo || c.codigo_ct || c.centro_trabajo || '')}</td>
+                            <td>${escapeHtml(c.nombre || c.nombre_ct || '')}</td>
+                            <td>${escapeHtml(c.actividad_economica_codigo || c.actividad_economica || '')}</td>
+                            <td>${escapeHtml(c.clase_riesgo || c.clase_riesgo_ct || '')}</td>
+                            <td>${escapeHtml(c.cantidad_trabajadores || c.trabajadores || '')}</td>
+                            <td>${escapeHtml(c.direccion || c.direccion_ct || '')}</td>
+                            <td>${escapeHtml(c.responsable_nombre || c.responsable || '')}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function parseSedeNumber(value, fallback = 1) {
+    const match = String(value || '').match(/sedes?[_\s-]*(?:principal|0*(\d+))|Sede\s*0*(\d+)/i);
+    if (!match) return fallback;
+    if (/principal/i.test(match[0])) return 1;
+    return Number(match[1] || match[2] || fallback) || fallback;
+}
+
+function sedePrefixFromNumber(number) {
+    const num = Number(number) || 1;
+    return num === 1 ? 'sede_principal' : `sede_${String(num).padStart(2, '0')}`;
+}
+
+function buildFormularioSedes(payload, declaredTotal) {
+    const a = payload?.analysis || {};
+    const xlsxProfile = a.xlsx_profile || {};
+    const formFields = xlsxProfile.form_fields || {};
+    const records = xlsxProfile.records || [];
+    const workerCounts = xlsxProfile.worker_sheet_counts || {};
+    const salaryCounts = xlsxProfile.worker_sheet_salary_totals || {};
+    const bySedeNumber = new Map();
+    const declaredCount = Number(String(declaredTotal || '').replace(/[^\d]/g, '')) || 0;
+    const canIncludeSede = number => !declaredCount || (Number(number) || 1) <= declaredCount;
+    const ensureSede = number => {
+        const num = Number(number) || 1;
+        if (!canIncludeSede(num)) return null;
+        if (!bySedeNumber.has(num)) {
+            bySedeNumber.set(num, { number: num, label: `Sede ${String(num).padStart(2, '0')}`, workers: [] });
+        }
+        return bySedeNumber.get(num);
+    };
+
+    for (let i = 1; i <= declaredCount; i++) ensureSede(i);
+
+    Object.keys(formFields).forEach(key => {
+        const match = key.match(/^sede_(principal|\d{2})_/);
+        if (match) ensureSede(match[1] === 'principal' ? 1 : Number(match[1]));
+    });
+
+    records.forEach(record => {
+        const num = parseSedeNumber(record._sheet, bySedeNumber.size + 1);
+        const sede = ensureSede(num);
+        if (sede) sede.workers.push(record);
+    });
+
+    Object.entries(workerCounts).forEach(([name, count]) => {
+        const sede = ensureSede(parseSedeNumber(name, bySedeNumber.size + 1));
+        if (sede) {
+            sede.workerCount = count;
+            sede.sourceName = name;
+        }
+    });
+
+    Object.entries(salaryCounts).forEach(([name, amount]) => {
+        const sede = ensureSede(parseSedeNumber(name, bySedeNumber.size + 1));
+        if (sede) sede.salaryTotal = amount;
+    });
+
+    return [...bySedeNumber.values()].sort((a, b) => a.number - b.number).map(sede => {
+        const prefix = sedePrefixFromNumber(sede.number);
+        const centros = Array.isArray(formFields[`${prefix}_centros_de_trabajo`])
+            ? formFields[`${prefix}_centros_de_trabajo`]
+            : [];
+        const workersSalary = sede.workers.reduce((sum, worker) => sum + (Number(worker.salario) || 0), 0);
+        const salary = workersSalary || Number(sede.salaryTotal || 0);
+        const responsableNombre = formFields[`responsable_${prefix}_nombre_completo`] || '';
+        const responsableDoc = [
+            formFields[`responsable_${prefix}_tipo_documento`],
+            formFields[`responsable_${prefix}_numero_documento`],
+        ].filter(Boolean).join(' ');
+
+        return {
+            ...sede,
+            codigo: formFields[`${prefix}_codigo`] || '',
+            nombre: formFields[`${prefix}_nombre`] || '',
+            direccion: formFields[`${prefix}_direccion`] || '',
+            municipio: formFields[`${prefix}_municipio_distrito`] || '',
+            departamento: formFields[`${prefix}_departamento`] || '',
+            zona: formFields[`${prefix}_zona`] || '',
+            telefono: formFields[`${prefix}_telefono`] || '',
+            correo: formFields[`${prefix}_correo`] || '',
+            responsable: responsableNombre,
+            responsableDoc,
+            centros,
+            centrosCount: centros.length,
+            workerCount: sede.workerCount ?? sede.workers.length,
+            salary,
+        };
+    });
+}
+
+function centroTrabajoLabel(centro, index) {
+    return `C. Trabajo ${String(index + 1).padStart(2, '0')}`;
+}
+
+function renderFormularioCentroDetalle(centro) {
+    if (!centro) return '';
+    const responsable = [
+        centro.responsable_apellido1,
+        centro.responsable_apellido2,
+        centro.responsable_nombre1,
+        centro.responsable_nombre2,
+    ].filter(Boolean).join(' ');
+    const responsableDoc = [centro.responsable_tipo_doc, centro.responsable_num_doc].filter(Boolean).join(' ');
+    const fields = [
+        ['Código', centro.codigo || centro.codigo_ct],
+        ['Nombre', centro.nombre || centro.nombre_ct],
+        ['Actividad', centro.actividad_economica_codigo || centro.actividad_economica],
+        ['Riesgo', centro.clase_riesgo || centro.clase_riesgo_ct],
+        ['Trabajadores', centro.cantidad_trabajadores || centro.trabajadores],
+        ['Cotización', centro.monto_cotizacion],
+        ['Municipio', centro.municipio],
+        ['Departamento', centro.departamento],
+        ['Zona', centro.zona],
+        ['Dirección', centro.direccion || centro.direccion_ct],
+        ['Teléfono', centro.telefono],
+        ['Correo', centro.correo],
+        ['Responsable', responsable || centro.responsable_nombre || centro.responsable],
+        ['Doc. responsable', responsableDoc],
+        ['Correo resp.', centro.responsable_correo],
+        ['Novedades', centro.novedades],
+    ].filter(([, value]) => !isBlankFormValue(value));
+    if (!fields.length) return '';
+    return `
+        <div class="sede-detail-subtitle">Centro de trabajo</div>
+        <div class="sede-info-flow">
+            ${fields.map(([label, value]) => `
+                <span><strong>${escapeHtml(label)}:</strong> ${escapeHtml(formatFormValue(label, value))}</span>
+            `).join('')}
+        </div>
+    `;
+}
+
+function centroTrabajoCode(centro) {
+    return String(centro?.codigo || centro?.codigo_ct || centro?.centro_trabajo || '').trim();
+}
+
+function filterSedeWorkers(sede, centroIndex = 'all') {
+    const workers = sede?.workers || [];
+    if (centroIndex === 'all') return workers;
+    const centro = (sede?.centros || [])[Number(centroIndex) || 0];
+    const code = normalizeText(centroTrabajoCode(centro));
+    if (!code) return workers;
+    return workers.filter(worker => normalizeText(worker.codigo_del_centro_de_trabajo || worker.codigo_centro_trabajo || '') === code);
+}
+
+function sumWorkersSalary(workers) {
+    return (workers || []).reduce((sum, worker) => sum + (Number(worker.salario) || 0), 0);
+}
+
+function renderFormularioSedeDetalle(sede, centroIndex = 'all') {
+    if (!sede) return '<div class="form-empty">Sin información de sede.</div>';
+    const selectedWorkers = filterSedeWorkers(sede, centroIndex);
+    const selectedSalary = centroIndex === 'all' ? sede.salary : sumWorkersSalary(selectedWorkers);
+    const centro = centroIndex === 'all' ? null : (sede.centros || [])[Number(centroIndex) || 0];
+    const mainFields = centroIndex === 'all'
+        ? [
+            ['Total nómina', selectedSalary ? formatCurrency(selectedSalary) : 'n/d'],
+            ['Total trabajadores', sede.workerCount || selectedWorkers.length || '0'],
+            ['Total centros de trabajo', sede.centrosCount || '0'],
+            ['Código sede', sede.codigo],
+            ['Nombre sede', sede.nombre],
+            ['Municipio', sede.municipio],
+            ['Departamento', sede.departamento],
+        ]
+        : [
+            ['Trabajadores', selectedWorkers.length || centro?.cantidad_trabajadores || '0'],
+            ['Nómina', selectedSalary ? formatCurrency(selectedSalary) : (centro?.monto_cotizacion || 'n/d')],
+            ['Código sede', sede.codigo],
+            ['Nombre sede', sede.nombre],
+            ['Municipio', sede.municipio],
+            ['Departamento', sede.departamento],
+        ];
+    const visibleFields = mainFields.filter(([, value]) => !isBlankFormValue(value));
+
+    return `
+        <div class="sede-info-flow">
+            ${visibleFields.map(([label, value]) => `
+                <span><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(value))}</span>
+            `).join('')}
+        </div>
+        ${renderFormularioCentroDetalle(centro)}
+    `;
+}
+
+function renderFormularioTrabajadoresTable(workers) {
+    if (!workers || !workers.length) return '<div class="form-empty">Sin trabajadores para esta selección.</div>';
+    return `
+        <div class="sede-workers-table-wrap">
+            <table class="sede-workers-table">
+                <thead>
+                    <tr>
+                        <th>Documento</th>
+                        <th>Nombre</th>
+                        <th>Centro</th>
+                        <th>Cargo</th>
+                        <th>Salario</th>
+                        <th>EPS</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${workers.map(worker => {
+                        const name = [
+                            worker.primer_apellido,
+                            worker.segundo_apellido,
+                            worker.primer_nombre,
+                            worker.segundo_nombre,
+                        ].filter(Boolean).join(' ');
+                        return `
+                            <tr>
+                                <td>${escapeHtml(worker.numero_de_identificacion || '')}</td>
+                                <td>${escapeHtml(name || worker.nombre || '')}</td>
+                                <td>${escapeHtml(worker.codigo_del_centro_de_trabajo || worker.codigo_centro_trabajo || '')}</td>
+                                <td>${escapeHtml(worker.cargo || worker.nombre_del_cargo || '')}</td>
+                                <td>${escapeHtml(worker.salario ? formatCurrency(worker.salario) : '')}</td>
+                                <td>${escapeHtml(worker.eps || '')}</td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+function formularioDocLabel(doc, index) {
+    const type = String(doc?.document_type || '');
+    if (type === 'formulario_afiliacion') return 'Formulario afiliación';
+    if (type.startsWith('anexo_sedes')) return `Anexo sede ${String(parseSedeNumber(`${type} ${doc?.filename || ''}`, index + 1)).padStart(2, '0')}`;
+    return doc?.filename || `Documento ${index + 1}`;
+}
+
+function formularioDocsForSede(payload, sede) {
+    const docs = payload?.analysis?.documents || payload?.documents || [];
+    const sedeNumber = sede?.number || 1;
+    return docs.filter(doc => {
+        const type = String(doc.document_type || '');
+        if (type === 'formulario_afiliacion') return true;
+        if (!type.startsWith('anexo_sedes')) return false;
+        const parsed = parseSedeNumber(`${type} ${doc.filename || ''}`, NaN);
+        return Number.isFinite(parsed) ? parsed === sedeNumber : sedeNumber === 1;
+    });
+}
+
+function renderFormularioPdfPanel(payload, sede) {
+    const caseId = payload?.id || '';
+    const docs = formularioDocsForSede(payload, sede);
+    if (!caseId || !docs.length) return '<div class="form-empty">Sin PDFs de formulario o anexo para esta sede.</div>';
+    const firstUrl = caseFileUrl(caseId, docs[0].filename || '', true);
+    return `
+        <div class="sede-pdf-tools">
+            <select id="formPdfSelect" class="field-select sede-select">
+                ${docs.map((doc, index) => `<option value="${index}" data-url="${escapeHtml(caseFileUrl(caseId, doc.filename || '', true))}">${escapeHtml(formularioDocLabel(doc, index))}</option>`).join('')}
+            </select>
+        </div>
+        <iframe id="formPdfFrame" class="sede-pdf-frame" src="${escapeHtml(firstUrl)}" title="PDF formulario"></iframe>
+    `;
+}
+
+function renderFormularioSedePanels(payload, sede, centroIndex = 'all') {
+    return `
+        <div class="sede-split-layout">
+            <div class="sede-split-panel">
+                <div class="sede-panel-title">Trabajadores</div>
+                ${renderFormularioTrabajadoresTable(filterSedeWorkers(sede, centroIndex))}
+            </div>
+            <div class="sede-split-panel">
+                <div class="sede-panel-title">Documentos</div>
+                ${renderFormularioPdfPanel(payload, sede)}
+            </div>
+        </div>
+    `;
+}
+
+function renderFormularioReporte(container, payload) {
+    const a = payload?.analysis || {};
+    const wf = a.workflow_run || {};
+    const xlsxProfile = a.xlsx_profile || {};
+    const profile = xlsxProfile.profile || {};
+    const formFields = xlsxProfile.form_fields || {};
+    const report = wf.executive_report_final || wf.executive_report_precheck || a.reporte_ejecutivo || {};
+    const resumen = report.resumen_ejecutivo || {};
+    const decision = a.decision || {};
+
+    const empresa = formFields.empleador_razon_social || resumen.empresa || profile.empresa || payload.label || 'n/d';
+    const nit = formFields.empleador_numero_documento_nit || resumen.nit || profile.nit || 'n/d';
+    const nroAfiliacion = resolveContractNumber(a, payload);
+    const estado = resumen.estado || decision.recommended_status || wf.status || 'n/d';
+    const estadoNorm = normalizeText(estado);
+    const decisionStatus = normalizeText(decision.recommended_status || '');
+    const isNoAprobado = estadoNorm.includes('no aprob') || estadoNorm.includes('rechaz') || normalizeText(wf.status || '') === 'stopped_prevalidacion';
+    const isAprobable = !isNoAprobado && (decisionStatus === 'aprobable' || estadoNorm.includes('aprob') || normalizeText(wf.status || '') === 'completed');
+    const stateClass = isNoAprobado ? 'bloqueado' : (isAprobable ? 'aprobado' : 'observado');
+    const fecha = resumen.fecha_proceso_human || formatDateTime(payload.updated_at);
+
+    const totalNominaRaw = formFields.a_valor_total_nomina || formFields.b_monto_total_cotizacion || profile.nomina_total || resumen.nomina_total;
+    const totalSedes = formFields.a_numero_sedes || formFields.b_numero_sedes || profile.numero_sedes || resumen.numero_sedes || 'n/d';
+    const totalTrabajadores = formFields.a_numero_inicial_trabajadores_estudiantes || formFields.b_numero_total_trabajadores_estudiantes || profile.numero_trabajadores || resumen.numero_trabajadores || 'n/d';
+    const totalNomina = totalNominaRaw ? formatFormValue('nomina_total', totalNominaRaw) : 'n/d';
+    const sedesFormulario = buildFormularioSedes(payload, totalSedes);
+
+    container.innerHTML = `
+        <div class="report-header report-header-compact">
+            <span class="report-state-badge ${stateClass}">${escapeHtml(estado)}</span>
+            <div class="report-heading-main">
+                <div class="report-empresa">${escapeHtml(empresa)}</div>
+                <div class="report-header-meta">
+                    <span><strong>NIT:</strong> ${escapeHtml(nit)}</span>
+                    <span><strong>Contrato:</strong> ${escapeHtml(nroAfiliacion || 'n/d')}</span>
+                    <span><strong>Actualizado:</strong> ${escapeHtml(fecha)}</span>
+                    <span><strong>Nómina total:</strong> ${escapeHtml(totalNomina)}</span>
+                    <span><strong>Sedes totales:</strong> ${escapeHtml(String(totalSedes))}</span>
+                    <span><strong>Trabajadores totales:</strong> ${escapeHtml(String(totalTrabajadores))}</span>
+                </div>
+            </div>
+        </div>
+        <div class="report-body report-body-form">
+            <div class="sede-selector-layout">
+                <div class="sede-selector-panel">
+                    <label class="sede-selector-label" for="formSedeSelect">Sede</label>
+                    <select id="formSedeSelect" class="field-select sede-select" ${sedesFormulario.length ? '' : 'disabled'}>
+                        ${sedesFormulario.length
+                            ? sedesFormulario.map((sede, index) => `<option value="${index}">${escapeHtml(sede.label)}</option>`).join('')
+                            : '<option>Sin sedes</option>'}
+                    </select>
+                    <label class="sede-selector-label" for="formCentroSelect">Centro</label>
+                    <select id="formCentroSelect" class="field-select sede-select" ${sedesFormulario.length ? '' : 'disabled'}>
+                        ${(sedesFormulario[0]?.centros || []).length
+                            ? `<option value="all">Todos</option>${sedesFormulario[0].centros.map((centro, index) => `<option value="${index}">${escapeHtml(centroTrabajoLabel(centro, index))}</option>`).join('')}`
+                            : '<option>Sin centros</option>'}
+                    </select>
+                </div>
+                <div class="sede-detail-panel" id="formSedeDetail">
+                    ${renderFormularioSedeDetalle(sedesFormulario[0])}
+                </div>
+            </div>
+            <div id="formSedePanels">
+                ${renderFormularioSedePanels(payload, sedesFormulario[0], 'all')}
+            </div>
+        </div>
+    `;
+
+    const sedeSelect = container.querySelector('#formSedeSelect');
+    const centroSelect = container.querySelector('#formCentroSelect');
+    const sedeDetail = container.querySelector('#formSedeDetail');
+    const sedePanels = container.querySelector('#formSedePanels');
+    const bindPdfSelect = () => {
+        const pdfSelect = container.querySelector('#formPdfSelect');
+        const pdfFrame = container.querySelector('#formPdfFrame');
+        pdfSelect?.addEventListener('change', () => {
+            const option = pdfSelect.options[pdfSelect.selectedIndex];
+            if (pdfFrame && option?.dataset?.url) pdfFrame.src = option.dataset.url;
+        });
+    };
+    const renderSelectedSede = () => {
+        const selectedSede = sedesFormulario[Number(sedeSelect?.value) || 0];
+        const centros = selectedSede?.centros || [];
+        if (centroSelect) {
+            centroSelect.innerHTML = centros.length
+                ? `<option value="all">Todos</option>${centros.map((centro, index) => `<option value="${index}">${escapeHtml(centroTrabajoLabel(centro, index))}</option>`).join('')}`
+                : '<option>Sin centros</option>';
+            centroSelect.disabled = !selectedSede;
+        }
+        if (sedeDetail) sedeDetail.innerHTML = renderFormularioSedeDetalle(selectedSede, 'all');
+        if (sedePanels) sedePanels.innerHTML = renderFormularioSedePanels(payload, selectedSede, 'all');
+        bindPdfSelect();
+    };
+    sedeSelect?.addEventListener('change', () => {
+        renderSelectedSede();
+    });
+    centroSelect?.addEventListener('change', () => {
+        const selectedSede = sedesFormulario[Number(sedeSelect?.value) || 0];
+        const selectedCentro = centroSelect.value === 'all' ? 'all' : Number(centroSelect.value) || 0;
+        if (sedeDetail) sedeDetail.innerHTML = renderFormularioSedeDetalle(selectedSede, selectedCentro);
+        if (sedePanels) sedePanels.innerHTML = renderFormularioSedePanels(payload, selectedSede, selectedCentro);
+        bindPdfSelect();
+    });
+    bindPdfSelect();
 }
 
 function renderReporte(container, payload) {
@@ -2446,14 +2906,6 @@ function renderReporte(container, payload) {
     })();
     const has926 = Boolean((wf.output_926||{}).legacy?.ok);
     const filename926 = (wf.output_926||{}).legacy?.filename || 'archivo_core.txt';
-
-    // Resultado legacy APOLO
-    const legacy926 = (wf.output_926||{}).legacy || (a.output_926||{}).legacy || {};
-    const legacyOk = legacy926.ok || false;
-    const legacyNumAfil = resolveContractNumber(a, payload);
-    const legacyObs = legacy926.observacion || legacy926.observation || legacy926.message || '';
-    const legacyFecha = legacy926.fecha || legacy926.processed_at || '';
-    const legacyLote = legacy926.lote || legacy926.batch || '';
 
     const blockers = Array.isArray(decision.blockers) ? decision.blockers :
                      Array.isArray(report.bloqueantes) ? report.bloqueantes : [];
@@ -2653,17 +3105,6 @@ function renderReporte(container, payload) {
             </div>
             <div id="reportDocPreviewBody" style="min-height:400px"></div>
         </div>
-        ${legacyNumAfil || legacyObs ? `
-        <div class="legacy-result-card">
-            <div class="legacy-result-title">Resultado en sistema APOLO</div>
-            <div class="legacy-result-grid">
-                ${legacyNumAfil ? `<div class="legacy-result-kv"><div class="legacy-result-kv-label">Nro. Afiliación</div><div class="legacy-result-kv-val">${escapeHtml(legacyNumAfil)}</div></div>` : ''}
-                ${legacyLote ? `<div class="legacy-result-kv"><div class="legacy-result-kv-label">Lote</div><div class="legacy-result-kv-val">${escapeHtml(legacyLote)}</div></div>` : ''}
-                ${legacyFecha ? `<div class="legacy-result-kv"><div class="legacy-result-kv-label">Procesado</div><div class="legacy-result-kv-val">${escapeHtml(legacyFecha)}</div></div>` : ''}
-                ${legacyObs ? `<div class="legacy-result-kv" style="grid-column:1/-1"><div class="legacy-result-kv-label">Observación APOLO</div><div class="legacy-result-kv-val" style="font-size:12px;color:${legacyOk?'var(--c-ok)':'var(--c-warn)'}">${escapeHtml(legacyObs)}</div></div>` : ''}
-            </div>
-        </div>
-        ` : ''}
     `;
 
     // Botones de acción del header
@@ -3403,8 +3844,7 @@ async function loadProduccion() {
         let cases = Array.isArray(data.cases) ? data.cases : [];
         cases = cases.filter(c => {
             const { status, finalStatus } = resolveCase(c);
-            const s = normalizeText(status), f = normalizeText(finalStatus);
-            return s === 'completed' && (f.includes('aprob') || f === 'ok' || f === 'completed' || !f);
+            return isApprovedCaseStatus(status, finalStatus);
         });
         cases.sort((a,b) => String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
         if (!cases.length) { el.innerHTML = `<div class="empty-state">No hay contratos aprobados para ${escapeHtml(currentOperation().name)}</div>`; return; }
@@ -4213,9 +4653,7 @@ function init() {
         const filter = card.dataset.filter;
         // Mapear filtro a tab
         const tabMap = {
-            'cola': 'cola',
-            'aprobables': 'aprobables',
-            'observados': 'observados',
+            'aprobados': 'aprobados',
             'no-aprobados': 'no-aprobados',
         };
         const tab = tabMap[filter] || 'todos';
