@@ -351,6 +351,17 @@ function blockerText(b) {
 function isXlsxOrFormularioBlocker(b) {
     const code = String(b?.code || b?.raw?.code || '').toUpperCase();
     const msg = normalizeText(b?.message || blockerText(b?.raw || b));
+    const isMissingDocumentBlocker =
+        code.startsWith('MISSING_REQUIRED_DOCUMENTS') ||
+        (
+            ['faltan soportes', 'faltan documentos', 'soportes obligatorios', 'documentos obligatorios']
+                .some(token => msg.includes(token)) &&
+            !code.startsWith('XLSX_')
+        );
+    if (isMissingDocumentBlocker) return false;
+    if (b?.can_accept_exception === false || b?.raw?.can_accept_exception === false) return true;
+    const field = normalizeText(b?.field || b?.raw?.field || '');
+    const cell = normalizeText(b?.cell || b?.raw?.cell || '');
     const documentValidationCodes = [
         'CEDULA_MATCH',
         'RUT_MATCH',
@@ -366,8 +377,20 @@ function isXlsxOrFormularioBlocker(b) {
     ];
     if (documentValidationCodes.some(prefix => code.startsWith(prefix))) return false;
     return code.startsWith('XLSX_') ||
+           code.startsWith('FORMULARIO_') ||
+           code.startsWith('RESPONSABLE_SEDE_') ||
+           code.startsWith('SEDE_PRINCIPAL_') ||
+           Boolean(field || cell) ||
            msg.startsWith('el xlsx ') ||
-           msg.startsWith('el campo ');
+           msg.startsWith('el campo ') ||
+           msg.startsWith('el correo ') ||
+           msg.startsWith('la cedula del responsable ') ||
+           msg.startsWith('la cédula del responsable ') ||
+           msg.startsWith('el telefono de la sede principal ') ||
+           msg.startsWith('el teléfono de la sede principal ') ||
+           msg.startsWith('la direccion de la sede principal ') ||
+           msg.startsWith('la dirección de la sede principal ') ||
+           /\b[a-z]{1,3}\d{1,3}\b/i.test(String(b?.message || blockerText(b?.raw || b) || ''));
 }
 
 function validationExceptionButtonHtml(b, index, style = '') {
@@ -394,6 +417,18 @@ function getValidationBlockerRecords(payload) {
             code: item?.code || 'VALIDATION_ALERT',
             message: blockerText(item),
             fingerprint: item?.message ? (item?.fingerprint || '') : '',
+            can_accept_exception: item?.can_accept_exception !== false,
+            index,
+            raw: item,
+        }));
+    }
+    const decisionRecords = a.decision?.blocker_records || [];
+    if (Array.isArray(decisionRecords) && decisionRecords.length) {
+        return decisionRecords.map((item, index) => ({
+            code: item?.code || 'VALIDATION_ALERT',
+            message: blockerText(item),
+            fingerprint: item?.message ? (item?.fingerprint || '') : '',
+            can_accept_exception: item?.can_accept_exception !== false,
             index,
             raw: item,
         }));

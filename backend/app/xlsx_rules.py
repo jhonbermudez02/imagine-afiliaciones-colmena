@@ -222,7 +222,7 @@ def _append_required_cell_validation(
                 "severity": "blocker",
                 "field": field,
                 "cell": cell,
-                "message": f"El campo '{label}' ({cell}) debe tener formato de correo electrónico válido. Valor recibido: {raw_value}.",
+                "message": f"El campo '{label}' ({cell}) debe tener formato de correo electrónico válido.",
             }
         )
 
@@ -393,7 +393,7 @@ def _append_sede_cell_validation(
                 "field": field,
                 "sheet": sheet_name,
                 "cell": cell,
-                "message": f"{message_prefix} debe tener formato de correo electrónico válido. Valor recibido: {raw_value}.",
+                "message": f"{message_prefix} debe tener formato de correo electrónico válido.",
             }
         )
     elif require_date and not _parse_date_value(raw_value):
@@ -464,7 +464,7 @@ def _append_center_cell_validation(
                 "sheet": sheet_name,
                 "cell": cell,
                 "row": row_number,
-                "message": f"{message_prefix} debe tener formato de correo electrónico válido. Valor recibido: {raw_value}.",
+                "message": f"{message_prefix} debe tener formato de correo electrónico válido.",
             }
         )
     if min_length is not None and max_length is not None:
@@ -550,7 +550,7 @@ def _append_worker_cell_validation(
                 "sheet": sheet_name,
                 "cell": cell,
                 "row": row_number,
-                "message": f"{message_prefix} debe tener formato de correo electrónico válido. Valor recibido: {raw_value}.",
+                "message": f"{message_prefix} debe tener formato de correo electrónico válido.",
             }
         )
     if min_length is not None and max_length is not None:

@@ -31,6 +31,7 @@ from .cases import (
     only_digits,
     rebuild_document_registry,
     _resolve_case_contract_number,
+    is_validation_exception_allowed,
     run_case_workflow,
     save_case,
     save_document_workspace,
@@ -3245,6 +3246,8 @@ async def case_validation_exception(case_id: str, request: CaseValidationExcepti
             raise HTTPException(status_code=400, detail="La excepción requiere el mensaje del hallazgo.")
         if not normalize_haystack(request.reason):
             raise HTTPException(status_code=400, detail="La excepción requiere una justificación.")
+        if not is_validation_exception_allowed(request.code, request.message):
+            raise HTTPException(status_code=400, detail="Este bloqueante pertenece al formulario/XLSX y no se puede aceptar para este contrato.")
         review_store = save_validation_exception(
             case_id=case_id,
             code=request.code,

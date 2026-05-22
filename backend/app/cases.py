@@ -1220,7 +1220,43 @@ def _decorate_validation_reason(reason: Dict[str, Any]) -> Dict[str, Any]:
     message = _validation_reason_message(item)
     item["message"] = message
     item["fingerprint"] = item.get("fingerprint") or validation_exception_fingerprint(code, message)
+    item["can_accept_exception"] = is_validation_exception_allowed(code, message, item)
     return item
+
+
+def is_validation_exception_allowed(code: Any, message: Any = "", reason: Optional[Dict[str, Any]] = None) -> bool:
+    code_text = normalize_text(code).upper()
+    message_text = normalize_haystack(message)
+    field_text = normalize_haystack((reason or {}).get("field", "")) if isinstance(reason, dict) else ""
+    cell_text = normalize_haystack((reason or {}).get("cell", "")) if isinstance(reason, dict) else ""
+    if code_text.startswith("MISSING_REQUIRED_DOCUMENTS") or (
+        any(token in message_text for token in ["faltan soportes", "faltan documentos", "soportes obligatorios", "documentos obligatorios"])
+        and not code_text.startswith("XLSX_")
+    ):
+        return True
+    form_prefixes = (
+        "XLSX_",
+        "FORMULARIO_",
+        "RESPONSABLE_SEDE_",
+        "SEDE_PRINCIPAL_",
+    )
+    if code_text.startswith(form_prefixes):
+        return False
+    form_message_prefixes = (
+        "el campo ",
+        "el correo ",
+        "la cedula del responsable ",
+        "la cédula del responsable ",
+        "el telefono de la sede principal ",
+        "el teléfono de la sede principal ",
+        "la direccion de la sede principal ",
+        "la dirección de la sede principal ",
+    )
+    if message_text.startswith(form_message_prefixes):
+        return False
+    if field_text or cell_text:
+        return False
+    return True
 
 
 def _validation_reason_category(reason: Dict[str, Any]) -> str:
@@ -1239,7 +1275,48 @@ def _validation_reason_category(reason: Dict[str, Any]) -> str:
     return ""
 
 
+def _validation_reason_duplicate_key(reason: Dict[str, Any]) -> tuple[str, str, str]:
+    if not isinstance(reason, dict):
+        return ("", "", "")
+    category = _validation_reason_category(reason)
+    message = normalize_haystack(reason.get("message", ""))
+    field = normalize_haystack(reason.get("field", "")).replace(" ", "_")
+    cell = normalize_haystack(reason.get("cell", "")).replace(" ", "")
+    if field in {"rep_legal_correo", "rep_legal_correo_electronico"} or (
+        category == "email" and "representante legal" in message
+    ):
+        return ("email", "representante_legal", cell or "aa18")
+    if field == "sede_principal_correo" or (category == "email" and "sede principal" in message):
+        return ("email", "sede_principal", cell or "an21")
+    if category and cell:
+        return (category, field or "", cell)
+    return ("", "", "")
+
+
 def _dedupe_xlsx_duplicate_reasons(reasons: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    semantic_deduped: List[Dict[str, Any]] = []
+    semantic_indexes: Dict[tuple[str, str, str], int] = {}
+    for reason in reasons:
+        if not isinstance(reason, dict):
+            semantic_deduped.append(reason)
+            continue
+        duplicate_key = _validation_reason_duplicate_key(reason)
+        if not duplicate_key[0]:
+            semantic_deduped.append(reason)
+            continue
+        existing_index = semantic_indexes.get(duplicate_key)
+        if existing_index is None:
+            semantic_indexes[duplicate_key] = len(semantic_deduped)
+            semantic_deduped.append(reason)
+            continue
+        existing = semantic_deduped[existing_index]
+        if isinstance(existing, dict):
+            existing_has_cell = bool(existing.get("cell") or existing.get("field"))
+            reason_has_cell = bool(reason.get("cell") or reason.get("field"))
+            if reason_has_cell and not existing_has_cell:
+                semantic_deduped[existing_index] = reason
+    reasons = semantic_deduped
+
     xlsx_keys: set[tuple[str, str]] = set()
     for reason in reasons:
         if not isinstance(reason, dict):
@@ -1298,6 +1375,9 @@ def _apply_validation_exceptions(validation_summary: Dict[str, Any], manual_revi
     accepted: List[Dict[str, Any]] = []
     accepted_keys: set[tuple[str, str]] = set()
     for reason in reasons:
+        if not is_validation_exception_allowed(reason.get("code"), reason.get("message"), reason):
+            remaining.append(reason)
+            continue
         exception = exception_by_fingerprint.get(str(reason.get("fingerprint") or ""))
         if not exception:
             remaining.append(reason)
@@ -3204,9 +3284,15 @@ def _looks_like_comision_document(haystack: str) -> bool:
 
 
 def _looks_like_beneficiario_final_document(haystack: str) -> bool:
-    positive_markers = [
+    if not re.search(r"\brub\b", haystack, flags=re.IGNORECASE):
+        return False
+    generic_markers = [
         "beneficiario final",
         "beneficiarios finales",
+        "registro unico de beneficiarios finales",
+        "registro único de beneficiarios finales",
+    ]
+    strong_markers = [
         "registro unico de beneficiarios finales",
         "registro único de beneficiarios finales",
         "participacion directa o indirecta mayor al 5",
@@ -3218,7 +3304,14 @@ def _looks_like_beneficiario_final_document(haystack: str) -> bool:
         "accionista",
         "representante legaladministrador",
     ]
-    return sum(1 for marker in positive_markers if marker in haystack) >= 2
+    generic_hits = sum(1 for marker in generic_markers if marker in haystack)
+    strong_hits = sum(1 for marker in strong_markers if marker in haystack)
+    if _looks_like_rut_document(haystack) and not any(
+        marker in haystack
+        for marker in ["registro unico de beneficiarios finales", "registro único de beneficiarios finales"]
+    ):
+        return False
+    return generic_hits >= 1 and strong_hits >= 1
 
 
 def _extract_page_number(filename: str) -> int:
@@ -3664,6 +3757,8 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
         (17, "inspector", ["risk consulting global group"], "ocr_inspector"),
     ]
     for code, doc_type, keys, label in strong_rules:
+        if doc_type == "beneficiario_final" and not re.search(r"\brub\b", haystack, flags=re.IGNORECASE):
+            continue
         if any(key in haystack for key in keys):
             return {"document_type": doc_type, "legacy_code": code, "code_source": label}
 
@@ -5947,6 +6042,8 @@ def _build_required_documents(xlsx_profile: Dict[str, Any]) -> List[str]:
         required.append("inspector")
         if any(token in afiliado for token in ["independ", "contratista"]):
             required.append("contrato")
+        if "juridic" in tipo_persona_norm:
+            required.append("beneficiario_final")
         return _unique_preserve(required)
     if explicit_traslado or (not explicit_afiliacion and "traslado" in afiliado):
         required = [
@@ -6167,7 +6264,8 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
                 {
                     "code": "FORMULARIO_CORREO_INVALIDO",
                     "severity": "blocker",
-                    "message": f"{email_label} no tiene un formato válido ({email_value}).",
+                    "field": email_key,
+                    "message": f"{email_label} no tiene un formato válido.",
                 }
             )
 
@@ -9146,10 +9244,15 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
 
     validation_summary = _build_validation_summary(xlsx_profile, docs, missing_docs)
     validation_summary = _apply_validation_exceptions(validation_summary, previous_manual_review)
+    blocker_records = [
+        dict(item)
+        for item in validation_summary.get("precheck", {}).get("motivos_de_rechazo", [])
+        if isinstance(item, dict)
+    ]
     blockers = []
     blockers.extend(
         item["message"]
-        for item in validation_summary.get("precheck", {}).get("motivos_de_rechazo", [])
+        for item in blocker_records
         if item["message"] not in blockers
     )
     non_blocking_alerts = [
@@ -9184,6 +9287,7 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
         "recommended_status": decision_status,
         "summary": "Contrato listo para radicacion." if decision_status == "aprobable" else "Contrato con faltantes o inconsistencias.",
         "blockers": blockers,
+        "blocker_records": blocker_records,
         "alerts": non_blocking_alerts,
         "next_step": next_step,
     }
