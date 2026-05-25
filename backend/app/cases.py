@@ -1579,11 +1579,39 @@ def _unique_duplicate_path(files_dir: Path, stem: str, suffix: str, marker: str)
     return target
 
 
+def _is_auto_entrega_comision_file(file_entry: Dict[str, Any], filename: str) -> bool:
+    if str((file_entry or {}).get("generated_role") or "") == "comision":
+        return True
+    if str((file_entry or {}).get("source_filename") or "") and "__comision" in filename:
+        return True
+    return "__comision" in filename
+
+
+def _apply_auto_entrega_comision_metadata(doc: Dict[str, Any], file_entry: Dict[str, Any]) -> None:
+    filename = str(doc.get("filename") or "")
+    if not _is_auto_entrega_comision_file(file_entry, filename):
+        return
+    source_filename = str((file_entry or {}).get("source_filename") or "")
+    doc.update(
+        {
+            "source_filename": source_filename,
+            "document_type": "comision",
+            "legacy_code": 3,
+            "legacy_label": LEGACY_CODE_TO_TYPE.get(3, ""),
+            "code_source": "auto_duplicate_entrega_comision",
+            "display_name": "Comisión",
+            "display_filename": filename,
+            "download_filename": filename,
+        }
+    )
+
+
 def _ensure_entrega_comision_duplicate(case_id: str, payload: Dict[str, Any], docs: List[Dict[str, Any]]) -> None:
     entrega_docs = [
         doc for doc in docs
         if str(doc.get("document_type") or "") == "entrega_documentos"
         and not str(doc.get("code_source") or "").startswith("auto_duplicate_")
+        and not _is_auto_entrega_comision_file({}, str(doc.get("filename") or ""))
     ]
     if not entrega_docs:
         return
@@ -6049,17 +6077,19 @@ def _build_required_documents(xlsx_profile: Dict[str, Any]) -> List[str]:
         required = [
             "formulario_afiliacion",
             "anexo_sedes",
-            "camara_comercio",
         ]
-        if activity_code_s29 != "1970001":
+        if "natural" not in tipo_persona_norm:
+            required.append("camara_comercio")
+        traslado_activity_exempt = activity_code_s29 == "1970001"
+        if not traslado_activity_exempt:
             required.append("rut")
         required.append("cedula")
-        if _is_persona_natural_or_juridica(tipo_persona_norm):
+        if _is_persona_natural_or_juridica(tipo_persona_norm) and not traslado_activity_exempt:
             required.append("soporte_pagos")
-        if "juridic" in tipo_persona_norm and activity_code_s29 == "1970001":
+        if "juridic" in tipo_persona_norm:
             required.append("inspector")
         required.extend(["autorizacion", "entrega_documentos", "comision"])
-        if _is_persona_natural_or_juridica(tipo_persona_norm):
+        if _is_persona_natural_or_juridica(tipo_persona_norm) and not traslado_activity_exempt:
             required.append("carta")
         if "juridic" in tipo_persona_norm:
             required.append("beneficiario_final")
@@ -6075,7 +6105,7 @@ def _build_required_documents(xlsx_profile: Dict[str, Any]) -> List[str]:
 def _apply_conditional_required_documents(required_docs: List[str], docs: List[Dict[str, Any]]) -> List[str]:
     required = list(required_docs)
     if _inspector_exempt_by_entrega(docs):
-        required = [doc for doc in required if doc != "inspector"]
+        required = [doc for doc in required if doc not in {"inspector", "soporte_pagos", "carta"}]
     return _unique_preserve(required)
 
 
@@ -6994,25 +7024,35 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     tipo_persona_norm = _ascii_haystack(form_fields.get("tipo_persona", "") or profile.get("tipo_persona", ""))
 
     activity_code_g26 = only_digits(form_cell_raw("a_codigo_actividad_economica_principal"))
+    activity_code_s29 = only_digits(form_cell_raw("b_codigo_actividad_economica_principal"))
     is_afiliacion_i13 = "afili" in tipo_tramite_norm
+    is_traslado_n13 = "traslado" in tipo_tramite_norm and not is_afiliacion_i13
     is_natural_au13 = "natural" in tipo_persona_norm
-    rut_exempt_by_activity = bool(is_afiliacion_i13 and activity_code_g26 == "1970001")
+    rut_exempt_by_activity = bool(
+        (is_afiliacion_i13 and activity_code_g26 == "1970001")
+        or (is_traslado_n13 and activity_code_s29 == "1970001")
+    )
 
     if rut_exempt_by_activity:
+        exempt_cell = "S29" if is_traslado_n13 else "G26"
+        exempt_activity_code = activity_code_s29 if is_traslado_n13 else activity_code_g26
         validations.append(
             {
-                "code": "RUT_EXENTO_ACTIVIDAD_G26",
+                "code": f"RUT_EXENTO_ACTIVIDAD_{exempt_cell}",
                 "status": "OK",
                 "severity": "ok",
                 "message": (
-                    "No se exige RUT para esta afiliación por la actividad económica informada."
+                    "No se exige RUT para este trámite por la actividad económica informada."
                 ),
             }
         )
         matches["rut_afiliacion"] = {
             "expected_tipo_persona_au13": normalize_text(form_cell_raw("tipo_persona")),
             "activity_code_g26": activity_code_g26,
-            "match_mode": "rut_exempt_by_activity_g26",
+            "activity_code_s29": activity_code_s29,
+            "exempt_cell": exempt_cell,
+            "exempt_activity_code": exempt_activity_code,
+            "match_mode": f"rut_exempt_by_activity_{exempt_cell.lower()}",
             "ok": True,
             "exempt": True,
         }
@@ -7253,6 +7293,7 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
             "ok": bool(matched_rut) or rut_exempt_by_activity or rut_affiliation_ok,
             "exempt": rut_exempt_by_activity,
             "activity_code_g26": activity_code_g26 if rut_exempt_by_activity else "",
+            "activity_code_s29": activity_code_s29 if rut_exempt_by_activity else "",
         }
 
     formulario_docs = _doc_by_type(docs, "formulario_afiliacion")
@@ -7345,7 +7386,7 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     camara_company_official = _normalize_company_official(camara_company_source)
     form_company_official = _normalize_company_official(form_company_source)
     company_ok = False
-    if is_afiliacion_i13 and is_natural_au13:
+    if (is_afiliacion_i13 or is_traslado_n13) and is_natural_au13:
         validations.append(
             {
                 "code": "CAMARA_COMERCIO_EXENTA_PERSONA_NATURAL",
@@ -9114,6 +9155,12 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
             result = {"text": text, "used_ocr": False, "pages_processed": 1 if text else 0}
 
         doc_meta = _classify_document(path.name, result["text"])
+        if _is_auto_entrega_comision_file(file_entry, path.name):
+            doc_meta = {
+                "document_type": "comision",
+                "legacy_code": 3,
+                "code_source": "auto_duplicate_entrega_comision",
+            }
         fields = _extract_fields(result["text"])
         key_fields = _document_key_fields(doc_meta["document_type"], fields)
         field_confidence = _field_confidence(doc_meta["document_type"], fields, result["text"])
@@ -9145,6 +9192,7 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
                 "ocr_quality_score": ocr_quality_score,
             }
         )
+        _apply_auto_entrega_comision_metadata(docs[-1], file_entry)
 
     _apply_document_classification_overrides(docs)
     _number_anexo_sedes(docs)
