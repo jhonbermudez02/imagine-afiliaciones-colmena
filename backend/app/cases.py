@@ -390,7 +390,7 @@ def normalize_haystack(value: Any) -> str:
 
 
 def _is_strict_email_value(value: Any) -> bool:
-    text = normalize_text(value)
+    text = re.sub(r"\s+", "", normalize_text(value))
     if not text or ".." in text:
         return False
     match = re.fullmatch(
@@ -431,6 +431,33 @@ def slugify(value: str) -> str:
 
 def only_digits(value: Any) -> str:
     return re.sub(r"\D+", "", str(value or ""))
+
+
+def _compact_contact_text(value: Any) -> str:
+    return re.sub(r"\s+", "", normalize_text(value))
+
+
+def _clean_contact_value(field: Any, value: Any) -> str:
+    field_norm = normalize_haystack(field)
+    if any(token in field_norm for token in ["correo", "email", "mail"]):
+        return _compact_contact_text(value)
+    if any(token in field_norm for token in ["telefono", "teléfono", "celular"]):
+        return only_digits(value)
+    return normalize_text(value)
+
+
+def _clean_contact_cell_info(field: str, cell_info: Dict[str, Any]) -> Dict[str, Any]:
+    cleaned = dict(cell_info or {})
+    if "value" in cleaned:
+        cleaned["value"] = _clean_contact_value(field, cleaned.get("value"))
+    return cleaned
+
+
+def _clean_contact_record(record: Dict[str, str]) -> Dict[str, str]:
+    cleaned = dict(record or {})
+    for key, value in list(cleaned.items()):
+        cleaned[key] = _clean_contact_value(key, value)
+    return cleaned
 
 
 def _is_strict_numeric_value(value: Any) -> bool:
@@ -4909,10 +4936,12 @@ def _extract_worker_records_from_rows(rows: List[tuple[Any, ...]]) -> tuple[List
                         if any(parts):
                             record["fecha_de_nacimiento"] = "/".join(part for part in parts if part)
                     record["_row"] = str(row_offset)
+                    record = _clean_contact_record(record)
                     records.append(record)
                 elif not document_value and name_value:
                     record["_raw_numero_de_identificacion"] = normalize_text(document_value)
                     record["_row"] = str(row_offset)
+                    record = _clean_contact_record(record)
                     records.append(record)
     return records, header_index
 
@@ -4957,14 +4986,14 @@ def _extract_sede_info_from_sheet(sheet_obj: Any, sede_num: int) -> Dict[str, An
             "zona": sv(r, 18),
             "direccion": sv(r, 19),
             "telefono": only_digits(sv(r, 21)),
-            "correo": sv(r, 22),
+            "correo": _clean_contact_value("correo", sv(r, 22)),
             "responsable_apellido1": sv(r, 25),
             "responsable_apellido2": sv(r, 26),
             "responsable_nombre1": sv(r, 27),
             "responsable_nombre2": sv(r, 28),
             "responsable_tipo_doc": sv(r, 29),
             "responsable_num_doc": only_digits(sv(r, 30)),
-            "responsable_correo": sv(r, 31),
+            "responsable_correo": _clean_contact_value("responsable_correo", sv(r, 31)),
             "novedades": sv(r, 34),
             "cantidad_trabajadores": sv(r, 36),
             "monto_cotizacion": monto_fmt,
@@ -4977,7 +5006,7 @@ def _extract_sede_info_from_sheet(sheet_obj: Any, sede_num: int) -> Dict[str, An
         f"{prefix}_direccion": sv(14, 6),
         f"{prefix}_zona": sv(14, 9),
         f"{prefix}_telefono": next((only_digits(p) for p in re.split(r"[-/,;\s]+", str(sv(15, 6) or "")) if len(only_digits(p)) in {7,10} and not only_digits(p).startswith("0")), only_digits(str(sv(15, 6) or ""))),
-        f"{prefix}_correo": sv(16, 6),
+        f"{prefix}_correo": _clean_contact_value(f"{prefix}_correo", sv(16, 6)),
         f"responsable_{prefix}_nombre_completo": " ".join(filter(None, [sv(12,13), sv(12,17), sv(13,13), sv(13,17)])).strip(),
         f"responsable_{prefix}_tipo_documento": sv(14,13),
         f"responsable_{prefix}_numero_documento": only_digits(sv(14,17)),
@@ -5119,12 +5148,12 @@ def _extract_form_fields_from_sheet(sheet: Any) -> Dict[str, str]:
         ).strip(),
         "rep_legal_numero_documento": only_digits(_sheet_value(sheet, 18, 16)),
         "rep_legal_tipo_documento": _sheet_value(sheet, 18, 8),
-        "rep_legal_correo": _sheet_value(sheet, 18, 27),
+        "rep_legal_correo": _clean_contact_value("rep_legal_correo", _sheet_value(sheet, 18, 27)),
         "sede_principal_codigo": _sheet_value(sheet, 21, 8),
         "sede_principal_nombre": _sheet_value(sheet, 21, 13),
         "sede_principal_direccion": _sheet_value(sheet, 20, 21),
         "sede_principal_telefono": next((only_digits(p) for p in re.split(r"[-/,;\s]+", str(_sheet_value(sheet, 20, 40) or _sheet_value(sheet, 20, 31) or _sheet_value(sheet, 21, 40) or _sheet_value(sheet, 21, 31) or "")) if len(only_digits(p)) in {7,10} and not only_digits(p).startswith("0")), only_digits(str(_sheet_value(sheet, 20, 40) or _sheet_value(sheet, 20, 31) or ""))),
-        "sede_principal_correo": _sheet_value(sheet, 24, 27),
+        "sede_principal_correo": _clean_contact_value("sede_principal_correo", _sheet_value(sheet, 24, 27)),
         "sede_principal_municipio_distrito": _sheet_value(sheet, 22, 8),
         "sede_principal_zona": _sheet_value(sheet, 22, 20),
         "sede_principal_as22": _sheet_value(sheet, 22, 45),
@@ -5225,7 +5254,7 @@ def _extract_form_cell_values_from_sheet(sheet: Any) -> Dict[str, Dict[str, Any]
         out[field] = {
             "cell": cell,
             "label": label,
-            "value": _sheet_value(sheet, row, col),
+            "value": _clean_contact_value(field, _sheet_value(sheet, row, col)),
         }
     return out
 
@@ -5256,7 +5285,7 @@ def _extract_sede_sheet_values_from_sheet(sheet: Any) -> Dict[str, Dict[str, Any
         out[field] = {
             "cell": cell,
             "label": label,
-            "value": _sheet_value(sheet, row, col),
+            "value": _clean_contact_value(field, _sheet_value(sheet, row, col)),
         }
     return out
 
@@ -5296,7 +5325,7 @@ def _extract_sede_center_rows_from_sheet(sheet: Any) -> List[Dict[str, Dict[str,
                 "cell": f"{col_letter}{row_number}",
                 "label": label,
                 "row": row_number,
-                "value": _sheet_value(sheet, row_number, col_index),
+                "value": _clean_contact_value(field, _sheet_value(sheet, row_number, col_index)),
             }
         if all(not normalize_text(row_values[field].get("value")) for field in stop_fields):
             break
@@ -5344,7 +5373,7 @@ def _extract_sede_worker_rows_from_sheet(sheet: Any, center_count: int) -> List[
                 "cell": f"{col_letter}{row_number}",
                 "label": label,
                 "row": row_number,
-                "value": _sheet_value(sheet, row_number, col_index),
+                "value": _clean_contact_value(field, _sheet_value(sheet, row_number, col_index)),
             }
         if all(not normalize_text(cell_info.get("value")) for cell_info in row_values.values()):
             break
@@ -5390,7 +5419,7 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
             if len(row) >= 2 and row[0] and row[1]:
                 key = normalize_haystack(normalize_text(row[0])).replace(" ", "_")
                 if key not in flat_pairs:
-                    flat_pairs[key] = row[1]
+                    flat_pairs[key] = _clean_contact_value(key, row[1])
         sheet_records, header_index = _extract_worker_records_from_rows(rows)
         if header_index >= 0:
             worker_sheet_counts[normalized_sheet_name] = len(
@@ -5630,12 +5659,12 @@ def _extract_employer_from_contract_text(contract_text: str) -> Dict[str, str]:
         "rep_legal_nombre_completo": rep_name,
         "rep_legal_numero_documento": only_digits(by_label("6. Número de documento")),
         "rep_legal_tipo_documento": by_label("5. Tipo de documento"),
-        "rep_legal_correo": by_label("7. Correo electrónico"),
+        "rep_legal_correo": _clean_contact_value("rep_legal_correo", by_label("7. Correo electrónico")),
         "sede_principal_codigo": by_label("Código de la sede", "codigo de la sede"),
         "sede_principal_nombre": by_label("Nombre de la sede"),
         "sede_principal_direccion": by_label("Dirección de la sede principal", "direccion de la sede"),
         "sede_principal_telefono": next((only_digits(p) for p in re.split(r"[-/,;\s]+", str(by_label("Teléfono fijo/celular", "telefono fijo/celular") or "")) if len(only_digits(p)) in {7,10} and not only_digits(p).startswith("0")), only_digits(str(by_label("Teléfono fijo/celular", "telefono fijo/celular") or ""))),
-        "sede_principal_correo": by_label("Correo electrónico de la sede", "correo electrónico"),
+        "sede_principal_correo": _clean_contact_value("sede_principal_correo", by_label("Correo electrónico de la sede", "correo electrónico")),
         "sede_principal_municipio_distrito": by_label("Municipio/Distrito", "municipio distrito"),
         "sede_principal_zona": by_label("Zona sede", "Zona"),
         "sede_principal_localidad_comuna": by_label("Localidad/Comuna", "localidad comuna"),
@@ -5670,7 +5699,7 @@ def _extract_employer_from_contract_text(contract_text: str) -> Dict[str, str]:
         "telefono_empleador": only_digits(by_label("Teléfono fijo/celular")),
         "ciudad_empleador": only_digits(by_label("Municipio/Distrito", "ciudad")),
         "zona_empleador": by_label("Zona"),
-        "correo_empleador": by_label("Correo electrónico"),
+        "correo_empleador": _clean_contact_value("correo_empleador", by_label("Correo electrónico")),
         "numero_sedes": only_digits(by_label("Número de sedes")),
         "numero_trabajadores": only_digits(by_label("Número total de trabajadores o estudiantes", "Cantidad de trabajadores y estudiantes")),
     }

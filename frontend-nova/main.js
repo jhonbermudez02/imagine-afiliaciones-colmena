@@ -2426,11 +2426,27 @@ function formFieldLabel(key) {
         empleador_razon_social: 'Razón social',
         empleador_tipo_documento: 'Tipo documento empleador',
         empleador_numero_documento_nit: 'Documento / NIT',
+        empleador_documento: 'Documento / NIT',
+        fecha_radicacion: 'Fecha radicación',
+        fecha_inicio_cobertura: 'Inicio cobertura',
+        numero_radicacion: 'Número radicación',
+        tipo_tramite: 'Tipo trámite',
+        lugar_afiliacion: 'Lugar afiliación',
+        codigo_lugar: 'Código lugar',
+        nombre_lugar: 'Nombre lugar',
+        naturaleza_juridica_empleador: 'Naturaleza jurídica',
+        naturaleza_juridica_codigo_tramite: 'Cód. naturaleza',
+        naturaleza_juridica_nombre: 'Naturaleza',
+        tipo_aportante: 'Tipo aportante',
+        tipo_aportante_codigo: 'Cód. aportante',
+        tipo_aportante_nombre: 'Aportante',
+        tipo_persona: 'Tipo persona',
         rep_legal_nombre_completo: 'Nombre completo',
         rep_legal_primer_apellido: 'Primer apellido',
         rep_legal_primer_nombre: 'Primer nombre',
         rep_legal_tipo_documento: 'Tipo documento',
         rep_legal_numero_documento: 'Número documento',
+        rep_legal_documento: 'Documento representante',
         rep_legal_correo: 'Correo',
         rep_legal_correo_electronico: 'Correo electrónico',
         sede_principal_codigo: 'Código',
@@ -2442,6 +2458,11 @@ function formFieldLabel(key) {
         sede_principal_zona: 'Zona',
         sede_principal_departamento: 'Departamento',
         sede_principal_localidad_comuna: 'Localidad / comuna',
+        sede_principal_as22: 'Dato adicional sede',
+        responsable_sede_principal_nombre_completo: 'Responsable sede',
+        responsable_sede_principal_tipo_documento: 'Tipo doc. resp.',
+        responsable_sede_principal_numero_documento: 'Documento resp.',
+        responsable_sede_principal_documento: 'Documento responsable',
         a_codigo_actividad_economica_principal: 'Código actividad económica',
         a_clase_riesgo: 'Clase de riesgo',
         a_numero_sedes: 'Número de sedes',
@@ -2456,6 +2477,8 @@ function formFieldLabel(key) {
         b_numero_total_trabajadores_estudiantes: 'Trabajadores / estudiantes',
         b_monto_total_cotizacion: 'Monto total cotización',
         estado_cuenta_empleador: 'Estado cuenta empleador',
+        numero_contrato: 'Contrato',
+        fecha_actualizacion: 'Actualizado',
     };
     if (custom[key]) return custom[key];
     return String(key || '')
@@ -2487,6 +2510,10 @@ function formatFormValue(key, value) {
     return text;
 }
 
+function joinDocumentParts(type, number) {
+    return [type, number].filter(value => !isBlankFormValue(value)).join(' ');
+}
+
 function renderFormFieldGrid(entries) {
     const items = entries.filter(([, value]) => !isBlankFormValue(value));
     if (!items.length) return '<div class="form-empty">Sin información recuperada.</div>';
@@ -2499,6 +2526,32 @@ function renderFormFieldGrid(entries) {
                 </div>
             `).join('')}
         </div>
+    `;
+}
+
+function renderCompactInfoTable(entries) {
+    const items = entries.filter(([, value]) => !isBlankFormValue(value));
+    if (!items.length) return '<div class="form-empty">Sin información recuperada.</div>';
+    const rows = [];
+    for (let i = 0; i < items.length; i += 3) rows.push(items.slice(i, i + 3));
+    return `
+        <table class="company-info-table">
+            <tbody>
+                ${rows.map(row => `
+                    <tr>
+                        ${[0, 1, 2].map(index => {
+                            const item = row[index];
+                            if (!item) return '<th></th><td></td>';
+                            const [key, value] = item;
+                            return `
+                                <th>${escapeHtml(formFieldLabel(key))}</th>
+                                <td>${escapeHtml(formatFormValue(key, value))}</td>
+                            `;
+                        }).join('')}
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
     `;
 }
 
@@ -2601,9 +2654,11 @@ function buildFormularioSedes(payload, declaredTotal) {
         const workersSalary = sede.workers.reduce((sum, worker) => sum + (Number(worker.salario) || 0), 0);
         const salary = workersSalary || Number(sede.salaryTotal || 0);
         const responsableNombre = formFields[`responsable_${prefix}_nombre_completo`] || '';
+        const responsableTipoDoc = formFields[`responsable_${prefix}_tipo_documento`] || '';
+        const responsableNumeroDoc = formFields[`responsable_${prefix}_numero_documento`] || '';
         const responsableDoc = [
-            formFields[`responsable_${prefix}_tipo_documento`],
-            formFields[`responsable_${prefix}_numero_documento`],
+            responsableTipoDoc,
+            responsableNumeroDoc,
         ].filter(Boolean).join(' ');
 
         return {
@@ -2617,6 +2672,9 @@ function buildFormularioSedes(payload, declaredTotal) {
             telefono: formFields[`${prefix}_telefono`] || '',
             correo: formFields[`${prefix}_correo`] || '',
             responsable: responsableNombre,
+            responsableTipoDoc,
+            responsableNumeroDoc,
+            responsableCorreo: formFields[`responsable_${prefix}_correo`] || '',
             responsableDoc,
             centros,
             centrosCount: centros.length,
@@ -2685,38 +2743,158 @@ function sumWorkersSalary(workers) {
     return (workers || []).reduce((sum, worker) => sum + (Number(worker.salario) || 0), 0);
 }
 
+function splitPersonName(value) {
+    const parts = String(value || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return {};
+    if (parts.length === 1) return { primerNombre: parts[0] };
+    if (parts.length === 2) return { primerApellido: parts[0], primerNombre: parts[1] };
+    if (parts.length === 3) return { primerApellido: parts[0], segundoApellido: parts[1], primerNombre: parts[2] };
+    return {
+        primerApellido: parts[0],
+        segundoApellido: parts[1],
+        primerNombre: parts[2],
+        segundoNombre: parts.slice(3).join(' '),
+    };
+}
+
+function renderSedeOfficialInfo(sede) {
+    const title = sede?.number === 1 ? 'Información de la sede principal' : `Información de la sede ${String(sede?.number || '').padStart(2, '0')}`;
+    return `
+        <table class="sede-official-table">
+            <thead>
+                <tr><th colspan="6">${escapeHtml(title)}</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <th>Código de la sede:</th>
+                    <td>${escapeHtml(sede?.codigo || '')}</td>
+                    <th>Nombre de la sede:</th>
+                    <td colspan="3">${escapeHtml(sede?.nombre || '')}</td>
+                </tr>
+                <tr>
+                    <th>Municipio:</th>
+                    <td>${escapeHtml(sede?.municipio || '')}</td>
+                    <th>Departamento:</th>
+                    <td>${escapeHtml(sede?.departamento || '')}</td>
+                    <th>Zona sede:</th>
+                    <td>${escapeHtml(sede?.zona || '')}</td>
+                </tr>
+                <tr>
+                    <th>Dirección de la sede:</th>
+                    <td colspan="5">${escapeHtml(sede?.direccion || '')}</td>
+                </tr>
+                <tr>
+                    <th>Teléfono fijo/celular:</th>
+                    <td colspan="2">${escapeHtml(sede?.telefono || '')}</td>
+                    <th>Correo electrónico de la sede:</th>
+                    <td colspan="2">${escapeHtml(sede?.correo || '')}</td>
+                </tr>
+            </tbody>
+        </table>
+    `;
+}
+
+function renderSedeResponsibleOfficialInfo(sede) {
+    if (!sede?.responsable && !sede?.responsableDoc && !sede?.responsableCorreo) return '';
+    const nameParts = splitPersonName(sede.responsable);
+    return `
+        <table class="sede-official-table sede-official-table-responsible">
+            <thead>
+                <tr><th colspan="6">Información del responsable de la sede</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <th>Primer apellido:</th>
+                    <td>${escapeHtml(nameParts.primerApellido || '')}</td>
+                    <th>Segundo apellido:</th>
+                    <td>${escapeHtml(nameParts.segundoApellido || '')}</td>
+                    <th>Primer nombre:</th>
+                    <td>${escapeHtml(nameParts.primerNombre || '')}</td>
+                </tr>
+                <tr>
+                    <th>Segundo nombre:</th>
+                    <td>${escapeHtml(nameParts.segundoNombre || '')}</td>
+                    <th>Tipo de documento:</th>
+                    <td>${escapeHtml(sede.responsableTipoDoc || '')}</td>
+                    <th>Número de documento:</th>
+                    <td>${escapeHtml(sede.responsableNumeroDoc || '')}</td>
+                </tr>
+                <tr>
+                    <th>Correo electrónico:</th>
+                    <td colspan="5">${escapeHtml(sede.responsableCorreo || sede.correo || '')}</td>
+                </tr>
+            </tbody>
+        </table>
+    `;
+}
+
+function renderCentroTrabajoOfficialInfo(centro) {
+    if (!centro) return '';
+    const responsable = [
+        centro.responsable_apellido1,
+        centro.responsable_apellido2,
+        centro.responsable_nombre1,
+        centro.responsable_nombre2,
+    ].filter(Boolean).join(' ');
+    const responsableDoc = [centro.responsable_tipo_doc, centro.responsable_num_doc].filter(Boolean).join(' ');
+    return `
+        <table class="sede-official-table sede-official-table-centro">
+            <thead>
+                <tr><th colspan="6">Información del centro de trabajo</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <th>Código:</th>
+                    <td>${escapeHtml(centro.codigo || centro.codigo_ct || '')}</td>
+                    <th>Nombre:</th>
+                    <td colspan="3">${escapeHtml(centro.nombre || centro.nombre_ct || '')}</td>
+                </tr>
+                <tr>
+                    <th>Actividad:</th>
+                    <td>${escapeHtml(centro.actividad_economica_codigo || centro.actividad_economica || '')}</td>
+                    <th>Riesgo:</th>
+                    <td>${escapeHtml(centro.clase_riesgo || centro.clase_riesgo_ct || '')}</td>
+                    <th>Trabajadores:</th>
+                    <td>${escapeHtml(centro.cantidad_trabajadores || centro.trabajadores || '')}</td>
+                </tr>
+                <tr>
+                    <th>Municipio:</th>
+                    <td>${escapeHtml(centro.municipio || '')}</td>
+                    <th>Departamento:</th>
+                    <td>${escapeHtml(centro.departamento || '')}</td>
+                    <th>Zona:</th>
+                    <td>${escapeHtml(centro.zona || '')}</td>
+                </tr>
+                <tr>
+                    <th>Dirección:</th>
+                    <td colspan="3">${escapeHtml(centro.direccion || centro.direccion_ct || '')}</td>
+                    <th>Teléfono:</th>
+                    <td>${escapeHtml(centro.telefono || '')}</td>
+                </tr>
+                <tr>
+                    <th>Responsable:</th>
+                    <td colspan="2">${escapeHtml(responsable || centro.responsable_nombre || centro.responsable || '')}</td>
+                    <th>Documento:</th>
+                    <td colspan="2">${escapeHtml(responsableDoc)}</td>
+                </tr>
+                <tr>
+                    <th>Correo:</th>
+                    <td colspan="5">${escapeHtml(centro.responsable_correo || centro.correo || '')}</td>
+                </tr>
+            </tbody>
+        </table>
+    `;
+}
+
 function renderFormularioSedeDetalle(sede, centroIndex = 'all') {
     if (!sede) return '<div class="form-empty">Sin información de sede.</div>';
-    const selectedWorkers = filterSedeWorkers(sede, centroIndex);
-    const selectedSalary = centroIndex === 'all' ? sede.salary : sumWorkersSalary(selectedWorkers);
     const centro = centroIndex === 'all' ? null : (sede.centros || [])[Number(centroIndex) || 0];
-    const mainFields = centroIndex === 'all'
-        ? [
-            ['Total nómina', selectedSalary ? formatCurrency(selectedSalary) : 'n/d'],
-            ['Total trabajadores', sede.workerCount || selectedWorkers.length || '0'],
-            ['Total centros de trabajo', sede.centrosCount || '0'],
-            ['Código sede', sede.codigo],
-            ['Nombre sede', sede.nombre],
-            ['Municipio', sede.municipio],
-            ['Departamento', sede.departamento],
-        ]
-        : [
-            ['Trabajadores', selectedWorkers.length || centro?.cantidad_trabajadores || '0'],
-            ['Nómina', selectedSalary ? formatCurrency(selectedSalary) : (centro?.monto_cotizacion || 'n/d')],
-            ['Código sede', sede.codigo],
-            ['Nombre sede', sede.nombre],
-            ['Municipio', sede.municipio],
-            ['Departamento', sede.departamento],
-        ];
-    const visibleFields = mainFields.filter(([, value]) => !isBlankFormValue(value));
-
     return `
-        <div class="sede-info-flow">
-            ${visibleFields.map(([label, value]) => `
-                <span><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(value))}</span>
-            `).join('')}
+        <div class="sede-official-stack">
+            ${renderSedeOfficialInfo(sede)}
+            ${renderSedeResponsibleOfficialInfo(sede)}
+            ${renderCentroTrabajoOfficialInfo(centro)}
         </div>
-        ${renderFormularioCentroDetalle(centro)}
     `;
 }
 
@@ -2807,6 +2985,105 @@ function renderFormularioSedePanels(payload, sede, centroIndex = 'all') {
     `;
 }
 
+function renderFormularioDocumentViewer(docItems) {
+    if (!docItems.length) return '<div class="form-empty">Sin documentos para visualizar.</div>';
+    return `
+        <div class="form-document-tools">
+            <select id="formDocumentSelect" class="field-select sede-select">
+                ${docItems.map((item, index) => `
+                    <option value="${index}">${escapeHtml(item.label || item.displayName || item.file)}</option>
+                `).join('')}
+            </select>
+        </div>
+        <div id="formDocumentPreview" class="form-document-preview">
+            <div class="loading-msg">Cargando documento...</div>
+        </div>
+    `;
+}
+
+function renderEmpresaInfoCollapsible(formFields, profile, resumen, meta = {}) {
+    const tipoTramite = formFields.tipo_tramite || profile.tipo_tramite || profile.tipo_afiliado || '';
+    const tipoPersona = formFields.tipo_persona || profile.tipo_persona || '';
+    const naturalezaJuridica = formFields.naturaleza_juridica_nombre;
+    const tipoAportante = formFields.tipo_aportante_nombre;
+    const empleadorDocumento = joinDocumentParts(
+        formFields.empleador_tipo_documento,
+        formFields.empleador_numero_documento_nit || resumen.nit || profile.nit
+    );
+    const representanteDocumento = joinDocumentParts(
+        formFields.rep_legal_tipo_documento,
+        formFields.rep_legal_numero_documento
+    );
+    const responsableSedeDocumento = joinDocumentParts(
+        formFields.responsable_sede_principal_tipo_documento,
+        formFields.responsable_sede_principal_numero_documento
+    );
+    const empleadorEntries = [
+        ['tipo_tramite', tipoTramite],
+        ['tipo_persona', tipoPersona],
+        ['naturaleza_juridica_empleador', naturalezaJuridica],
+        ['tipo_aportante', tipoAportante],
+        ['empleador_razon_social', formFields.empleador_razon_social || resumen.empresa || profile.empresa],
+        ['empleador_documento', empleadorDocumento],
+        ['numero_contrato', meta.nroAfiliacion],
+        ['fecha_radicacion', formFields.fecha_radicacion],
+        ['fecha_inicio_cobertura', formFields.fecha_inicio_cobertura],
+        ['lugar_afiliacion', formFields.lugar_afiliacion || formFields.nombre_lugar],
+        ['codigo_lugar', formFields.codigo_lugar],
+    ];
+    const afiliacionEntries = [
+        ['a_numero_sedes', formFields.a_numero_sedes || formFields.b_numero_sedes || profile.numero_sedes || resumen.numero_sedes],
+        ['a_numero_centros_trabajo', formFields.a_numero_centros_trabajo || formFields.b_numero_centros_trabajo],
+        ['a_numero_inicial_trabajadores_estudiantes', formFields.a_numero_inicial_trabajadores_estudiantes || formFields.b_numero_total_trabajadores_estudiantes || profile.numero_trabajadores || resumen.numero_trabajadores],
+        ['a_valor_total_nomina', formFields.a_valor_total_nomina || formFields.b_monto_total_cotizacion || profile.nomina_total || resumen.nomina_total],
+        ['a_clase_riesgo', formFields.a_clase_riesgo || formFields.b_clase_riesgo],
+        ['a_codigo_actividad_economica_principal', formFields.a_codigo_actividad_economica_principal || formFields.b_codigo_actividad_economica_principal],
+        ['b_arl_de_la_cual_se_traslada', formFields.b_arl_de_la_cual_se_traslada],
+        ['estado_cuenta_empleador', formFields.estado_cuenta_empleador],
+    ];
+    const representanteEntries = [
+        ['rep_legal_nombre_completo', formFields.rep_legal_nombre_completo],
+        ['rep_legal_primer_nombre', formFields.rep_legal_primer_nombre],
+        ['rep_legal_primer_apellido', formFields.rep_legal_primer_apellido],
+        ['rep_legal_documento', representanteDocumento],
+        ['rep_legal_correo', formFields.rep_legal_correo || formFields.rep_legal_correo_electronico],
+    ];
+    const sedePrincipalEntries = [
+        ['sede_principal_codigo', formFields.sede_principal_codigo],
+        ['sede_principal_nombre', formFields.sede_principal_nombre],
+        ['sede_principal_direccion', formFields.sede_principal_direccion],
+        ['sede_principal_municipio_distrito', formFields.sede_principal_municipio_distrito],
+        ['sede_principal_departamento', formFields.sede_principal_departamento],
+        ['sede_principal_zona', formFields.sede_principal_zona],
+        ['sede_principal_localidad_comuna', formFields.sede_principal_localidad_comuna],
+        ['sede_principal_telefono', formFields.sede_principal_telefono],
+        ['sede_principal_correo', formFields.sede_principal_correo],
+        ['responsable_sede_principal_nombre_completo', formFields.responsable_sede_principal_nombre_completo],
+        ['responsable_sede_principal_documento', responsableSedeDocumento],
+    ];
+    const sections = [
+        ['Datos del empleador', empleadorEntries],
+        ['Afiliación / traslado', afiliacionEntries],
+        ['Representante legal', representanteEntries],
+        ['Sede principal', sedePrincipalEntries],
+    ].filter(([, entries]) => entries.some(([, value]) => !isBlankFormValue(value)));
+
+    if (!sections.length) return '';
+    return `
+        <details class="company-info-collapse" id="companyInfoCollapse">
+            <summary class="company-info-native-summary">Detalles</summary>
+            <div class="company-info-body">
+                ${sections.map(([title, entries]) => `
+                    <section class="company-info-section">
+                        <div class="company-info-section-title">${escapeHtml(title)}</div>
+                        ${renderCompactInfoTable(entries)}
+                    </section>
+                `).join('')}
+            </div>
+        </details>
+    `;
+}
+
 function renderFormularioReporte(container, payload) {
     const a = payload?.analysis || {};
     const wf = a.workflow_run || {};
@@ -2818,7 +3095,6 @@ function renderFormularioReporte(container, payload) {
     const decision = a.decision || {};
 
     const empresa = formFields.empleador_razon_social || resumen.empresa || profile.empresa || payload.label || 'n/d';
-    const nit = formFields.empleador_numero_documento_nit || resumen.nit || profile.nit || 'n/d';
     const nroAfiliacion = resolveContractNumber(a, payload);
     const estado = resumen.estado || decision.recommended_status || wf.status || 'n/d';
     const estadoNorm = normalizeText(estado);
@@ -2828,34 +3104,28 @@ function renderFormularioReporte(container, payload) {
     const stateClass = isNoAprobado ? 'bloqueado' : (isAprobable ? 'aprobado' : 'observado');
     const fecha = resumen.fecha_proceso_human || formatDateTime(payload.updated_at);
 
-    const totalNominaRaw = formFields.a_valor_total_nomina || formFields.b_monto_total_cotizacion || profile.nomina_total || resumen.nomina_total;
     const totalSedes = formFields.a_numero_sedes || formFields.b_numero_sedes || profile.numero_sedes || resumen.numero_sedes || 'n/d';
-    const totalTrabajadores = formFields.a_numero_inicial_trabajadores_estudiantes || formFields.b_numero_total_trabajadores_estudiantes || profile.numero_trabajadores || resumen.numero_trabajadores || 'n/d';
-    const totalNomina = totalNominaRaw ? formatFormValue('nomina_total', totalNominaRaw) : 'n/d';
     const sedesFormulario = buildFormularioSedes(payload, totalSedes);
     const caseId = payload?.id || activeCaseId || '';
+    const docItems = buildDocItems(payload).filter(item => {
+        const type = String(item?.type || '');
+        return type === 'formulario_afiliacion' || type.startsWith('anexo_sedes');
+    });
 
     container.innerHTML = `
-        <div class="report-header report-header-compact">
+        <div class="report-case-summary">
             <span class="report-state-badge ${stateClass}">${escapeHtml(estado)}</span>
-            <div class="report-heading-main">
-                <div class="report-empresa">${escapeHtml(empresa)}</div>
-                <div class="report-header-meta">
-                    <span><strong>NIT:</strong> ${escapeHtml(nit)}</span>
-                    <span><strong>Contrato:</strong> ${escapeHtml(nroAfiliacion || 'n/d')}</span>
-                    <span><strong>Actualizado:</strong> ${escapeHtml(fecha)}</span>
-                    <span><strong>Nómina total:</strong> ${escapeHtml(totalNomina)}</span>
-                    <span><strong>Sedes totales:</strong> ${escapeHtml(String(totalSedes))}</span>
-                    <span><strong>Trabajadores totales:</strong> ${escapeHtml(String(totalTrabajadores))}</span>
-                </div>
-            </div>
+            <div class="report-empresa">${escapeHtml(empresa)}</div>
             <div class="report-header-actions">
+                <button class="btn-secondary" id="companyInfoToggle" type="button" aria-expanded="false" aria-controls="companyInfoCollapse">Detalles</button>
                 <button class="btn-secondary" data-action="clasificacion" data-case="${escapeHtml(caseId)}" type="button">Ver documentos</button>
             </div>
         </div>
+        ${renderEmpresaInfoCollapsible(formFields, profile, resumen, { nroAfiliacion, fecha })}
         <div class="report-body report-body-form">
-            <div class="sede-selector-layout">
-                <div class="sede-selector-panel">
+            <div class="form-review-split">
+                <section class="form-review-pane form-review-info">
+                    <div class="sede-selector-panel form-review-selectors">
                     <select id="formSedeSelect" class="field-select sede-select" ${sedesFormulario.length ? '' : 'disabled'}>
                         ${sedesFormulario.length
                             ? sedesFormulario.map((sede, index) => `<option value="${index}">${escapeHtml(sede.label)}</option>`).join('')
@@ -2866,13 +3136,17 @@ function renderFormularioReporte(container, payload) {
                             ? `<option value="all">Todos</option>${sedesFormulario[0].centros.map((centro, index) => `<option value="${index}">${escapeHtml(centroTrabajoLabel(centro, index))}</option>`).join('')}`
                             : '<option>Sin centros</option>'}
                     </select>
-                </div>
-                <div class="sede-detail-panel" id="formSedeDetail">
-                    ${renderFormularioSedeDetalle(sedesFormulario[0])}
-                </div>
-            </div>
-            <div id="formSedePanels">
-                ${renderFormularioSedePanels(payload, sedesFormulario[0], 'all')}
+                    </div>
+                    <div class="sede-detail-panel" id="formSedeDetail">
+                        ${renderFormularioSedeDetalle(sedesFormulario[0])}
+                    </div>
+                    <div class="form-workers-panel" id="formWorkersPanel">
+                        ${renderFormularioTrabajadoresTable(filterSedeWorkers(sedesFormulario[0], 'all'))}
+                    </div>
+                </section>
+                <section class="form-review-pane form-review-documents">
+                    ${renderFormularioDocumentViewer(docItems)}
+                </section>
             </div>
         </div>
     `;
@@ -2880,14 +3154,17 @@ function renderFormularioReporte(container, payload) {
     const sedeSelect = container.querySelector('#formSedeSelect');
     const centroSelect = container.querySelector('#formCentroSelect');
     const sedeDetail = container.querySelector('#formSedeDetail');
-    const sedePanels = container.querySelector('#formSedePanels');
-    const bindPdfSelect = () => {
-        const pdfSelect = container.querySelector('#formPdfSelect');
-        const pdfFrame = container.querySelector('#formPdfFrame');
-        pdfSelect?.addEventListener('change', () => {
-            const option = pdfSelect.options[pdfSelect.selectedIndex];
-            if (pdfFrame && option?.dataset?.url) pdfFrame.src = option.dataset.url;
-        });
+    const workersPanel = container.querySelector('#formWorkersPanel');
+    const bindDocumentViewer = async () => {
+        const documentSelect = container.querySelector('#formDocumentSelect');
+        const documentPreview = container.querySelector('#formDocumentPreview');
+        if (!documentSelect || !documentPreview || !docItems.length) return;
+        const renderSelectedDocument = async () => {
+            const item = docItems[Number(documentSelect.value) || 0];
+            if (item) await renderDocPreview(documentPreview, caseId, item);
+        };
+        documentSelect.addEventListener('change', renderSelectedDocument);
+        await renderSelectedDocument();
     };
     const renderSelectedSede = () => {
         const selectedSede = sedesFormulario[Number(sedeSelect?.value) || 0];
@@ -2899,8 +3176,7 @@ function renderFormularioReporte(container, payload) {
             centroSelect.disabled = !selectedSede;
         }
         if (sedeDetail) sedeDetail.innerHTML = renderFormularioSedeDetalle(selectedSede, 'all');
-        if (sedePanels) sedePanels.innerHTML = renderFormularioSedePanels(payload, selectedSede, 'all');
-        bindPdfSelect();
+        if (workersPanel) workersPanel.innerHTML = renderFormularioTrabajadoresTable(filterSedeWorkers(selectedSede, 'all'));
     };
     sedeSelect?.addEventListener('change', () => {
         renderSelectedSede();
@@ -2909,13 +3185,20 @@ function renderFormularioReporte(container, payload) {
         const selectedSede = sedesFormulario[Number(sedeSelect?.value) || 0];
         const selectedCentro = centroSelect.value === 'all' ? 'all' : Number(centroSelect.value) || 0;
         if (sedeDetail) sedeDetail.innerHTML = renderFormularioSedeDetalle(selectedSede, selectedCentro);
-        if (sedePanels) sedePanels.innerHTML = renderFormularioSedePanels(payload, selectedSede, selectedCentro);
-        bindPdfSelect();
+        if (workersPanel) workersPanel.innerHTML = renderFormularioTrabajadoresTable(filterSedeWorkers(selectedSede, selectedCentro));
     });
     container.querySelectorAll('[data-action]').forEach(btn => {
         btn.addEventListener('click', () => handleCaseAction(btn.dataset.action, btn.dataset.case, btn.dataset.file));
     });
-    bindPdfSelect();
+    const companyInfoToggle = container.querySelector('#companyInfoToggle');
+    const companyInfoCollapse = container.querySelector('#companyInfoCollapse');
+    companyInfoToggle?.addEventListener('click', () => {
+        if (!companyInfoCollapse) return;
+        companyInfoCollapse.open = !companyInfoCollapse.open;
+        companyInfoToggle.setAttribute('aria-expanded', companyInfoCollapse.open ? 'true' : 'false');
+        companyInfoToggle.textContent = companyInfoCollapse.open ? 'Ocultar detalles' : 'Detalles';
+    });
+    bindDocumentViewer();
 }
 
 function renderReporte(container, payload) {

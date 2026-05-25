@@ -24,6 +24,10 @@ def only_digits(value: Any) -> str:
     return re.sub(r"\D+", "", str(value or ""))
 
 
+def _compact_contact_text(value: Any) -> str:
+    return re.sub(r"\s+", "", normalize_text(value))
+
+
 def _is_strict_numeric_value(value: Any) -> bool:
     if isinstance(value, bool):
         return False
@@ -35,6 +39,8 @@ def _is_strict_numeric_value(value: Any) -> bool:
     text = normalize_text(value)
     if not text:
         return False
+    if re.fullmatch(r"[\d\s]+", text):
+        return bool(only_digits(text))
     return bool(re.fullmatch(r"\d+", text))
 
 
@@ -47,7 +53,7 @@ def _is_x_marker(value: Any) -> bool:
 
 
 def _is_email_value(value: Any) -> bool:
-    text = normalize_text(value)
+    text = _compact_contact_text(value)
     if not text:
         return False
     if ".." in text:
