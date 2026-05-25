@@ -1408,7 +1408,6 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
         for sheet_name in sede_sheet_names
         if normalize_text(_sheet_cell_info(sede_sheet_values.get(sheet_name) or {}, "codigo_sede").get("value"))
     }
-    expected_activity = form_raw("b_codigo_actividad_economica_principal") if "traslado" in tipo_tramite else form_raw("a_codigo_actividad_economica_principal")
     expected_centros_value = form_raw("b_numero_centros_trabajo") if "traslado" in tipo_tramite else form_raw("a_numero_centros_trabajo")
     expected_workers_value = form_raw("b_numero_total_trabajadores_estudiantes") if "traslado" in tipo_tramite else form_raw("a_numero_inicial_trabajadores_estudiantes")
     expected_amount_value = form_raw("b_monto_total_cotizacion") if "traslado" in tipo_tramite else form_raw("a_valor_total_nomina")
@@ -1493,27 +1492,6 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                         "cell": center_code_info.get("cell"),
                         "row": center_code_info.get("row"),
                     }
-            activity_info = _center_cell_info(row_values, "codigo_actividad_economica")
-            activity_value = activity_info.get("value")
-            if normalize_text(expected_activity) and normalize_text(activity_value):
-                expected_activity_digits = only_digits(expected_activity)
-                activity_digits = only_digits(activity_value)
-                if expected_activity_digits and activity_digits and expected_activity_digits != activity_digits:
-                    blockers.append(
-                        {
-                            "code": "XLSX_CENTRO_ACTIVITY_MISMATCH",
-                            "severity": "blocker",
-                            "field": "codigo_actividad_economica",
-                            "sheet": sheet_name,
-                            "cell": activity_info.get("cell"),
-                            "row": activity_info.get("row"),
-                            "message": (
-                                f"{sheet_name}, fila {activity_info.get('row')}: el código de actividad económica "
-                                f"({activity_info.get('cell')}) debe coincidir con el formulario. "
-                                f"Centro='{activity_value}' · Formulario='{expected_activity}'."
-                            ),
-                        }
-                    )
             central_info = _center_cell_info(row_values, "centralizada_descentralizada")
             central_value = central_info.get("value")
             if normalize_text(central_value) and not _is_allowed_centralization_value(central_value):
