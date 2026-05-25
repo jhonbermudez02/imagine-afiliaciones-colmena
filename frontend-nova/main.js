@@ -2836,6 +2836,166 @@ function splitPersonName(value) {
     };
 }
 
+function onlyDigits(value) {
+    return String(value ?? '').replace(/\D/g, '');
+}
+
+function humanizeKey(key) {
+    return String(key || '')
+        .replace(/^_+/, '')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function workerValue(worker, keys) {
+    for (const key of keys) {
+        const value = worker?.[key];
+        if (!isBlankFormValue(value)) return value;
+    }
+    return '';
+}
+
+function workerDocumentValue(worker) {
+    const type = workerValue(worker, ['tipo_documento', 'tipo_de_documento', 'tipo_identificacion', 'tipodocumento']);
+    const number = workerValue(worker, [
+        'numero_identificacion',
+        'numero_de_identificacion',
+        'documento',
+        'numero_documento',
+        'num_id_trabajador',
+        '_raw_numero_de_identificacion',
+    ]);
+    return [type, number].filter(value => !isBlankFormValue(value)).join(' ');
+}
+
+function workerFullName(worker) {
+    const parts = [
+        workerValue(worker, ['primer_apellido']),
+        workerValue(worker, ['segundo_apellido']),
+        workerValue(worker, ['primer_nombre']),
+        workerValue(worker, ['segundo_nombre']),
+    ].filter(value => !isBlankFormValue(value));
+    return parts.join(' ') || workerValue(worker, ['nombre', 'nombre_trabajador']);
+}
+
+function workerBirthDate(worker) {
+    const direct = workerValue(worker, ['fecha_de_nacimiento', 'fecha_nacimiento']);
+    if (!isBlankFormValue(direct)) return direct;
+    const day = onlyDigits(workerValue(worker, ['fecha_nacimiento_dia'])).padStart(2, '0');
+    const month = onlyDigits(workerValue(worker, ['fecha_nacimiento_mes'])).padStart(2, '0');
+    const year = onlyDigits(workerValue(worker, ['fecha_nacimiento_anio', 'fecha_nacimiento_ano', 'fecha_nacimiento_año']));
+    if (!day.trim() && !month.trim() && !year.trim()) return '';
+    return [year, month, day].filter(value => value && value !== '00').join('-');
+}
+
+function workerTypeValue(worker) {
+    const code = workerValue(worker, ['codigo_tipo_trabajador', 'codigo_del_tipo_de_trabajador']);
+    const label = workerValue(worker, ['tipo_trabajador', 'tipo_de_trabajador']);
+    return [code, label].filter(value => !isBlankFormValue(value)).join(' · ');
+}
+
+function workerDaysValue(worker) {
+    const labels = [
+        ['dia_l', 'L'],
+        ['dia_m1', 'M'],
+        ['dia_m2', 'M'],
+        ['dia_j', 'J'],
+        ['dia_v', 'V'],
+        ['dia_s', 'S'],
+        ['dia_d', 'D'],
+    ];
+    return labels
+        .filter(([key]) => normalizeText(worker?.[key]).toLowerCase() === 'x' || normalizeText(worker?.[key]).toLowerCase() === 'true')
+        .map(([, label]) => label)
+        .join(', ');
+}
+
+function workerScheduleValue(worker) {
+    const items = Object.keys(worker || {})
+        .filter(key => key.startsWith('horario_') && !isBlankFormValue(worker[key]))
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+        .map(key => `${key.replace('horario_', '')}: ${worker[key]}`);
+    return items.join(' · ');
+}
+
+function workerDetailEntries(worker) {
+    const primary = [
+        ['Documento', workerDocumentValue(worker)],
+        ['Primer apellido', workerValue(worker, ['primer_apellido'])],
+        ['Segundo apellido', workerValue(worker, ['segundo_apellido'])],
+        ['Primer nombre', workerValue(worker, ['primer_nombre'])],
+        ['Segundo nombre', workerValue(worker, ['segundo_nombre'])],
+        ['Fecha nacimiento', workerBirthDate(worker)],
+        ['Sexo', workerValue(worker, ['sexo_identificacion', 'sexo'])],
+        ['Centro de trabajo', workerValue(worker, ['codigo_del_centro_de_trabajo', 'codigo_centro_trabajo'])],
+        ['Cargo', workerValue(worker, ['cargo', 'nombre_del_cargo'])],
+        ['Salario', workerValue(worker, ['salario'])],
+        ['Tipo salario', workerValue(worker, ['tipo_salario', 'tipo_de_salario'])],
+        ['EPS', workerValue(worker, ['eps'])],
+        ['Pensión/AFP', workerValue(worker, ['pension', 'afp'])],
+        ['Dirección', workerValue(worker, ['direccion', 'dirección'])],
+        ['Celular/Teléfono', workerValue(worker, ['celular', 'telefono', 'teléfono'])],
+        ['Correo', workerValue(worker, ['correo', 'correo_electronico', 'correo_electrónico'])],
+        ['Municipio/Distrito', workerValue(worker, ['municipio_distrito', 'municipio'])],
+        ['Departamento', workerValue(worker, ['departamento'])],
+        ['Zona', workerValue(worker, ['zona'])],
+        ['Jornada', workerValue(worker, ['jornada'])],
+        ['Modalidad', workerValue(worker, ['modalidad'])],
+        ['Tipo trabajador', workerTypeValue(worker)],
+        ['Días actividad', workerDaysValue(worker)],
+        ['Horario', workerScheduleValue(worker)],
+        ['Hoja', workerValue(worker, ['_sheet'])],
+        ['Fila', workerValue(worker, ['_row'])],
+    ];
+    const consumed = new Set([
+        'tipo_documento', 'tipo_de_documento', 'tipo_identificacion', 'tipodocumento',
+        'numero_identificacion', 'numero_de_identificacion', 'documento', 'numero_documento', 'num_id_trabajador', '_raw_numero_de_identificacion',
+        'nombre', 'nombre_trabajador', 'primer_apellido', 'segundo_apellido', 'primer_nombre', 'segundo_nombre',
+        'fecha_de_nacimiento', 'fecha_nacimiento', 'fecha_nacimiento_dia', 'fecha_nacimiento_mes', 'fecha_nacimiento_anio', 'fecha_nacimiento_ano', 'fecha_nacimiento_año',
+        'sexo_identificacion', 'sexo', 'codigo_del_centro_de_trabajo', 'codigo_centro_trabajo',
+        'cargo', 'nombre_del_cargo', 'salario', 'tipo_salario', 'tipo_de_salario', 'eps', 'pension', 'afp',
+        'direccion', 'dirección', 'celular', 'telefono', 'teléfono', 'correo', 'correo_electronico', 'correo_electrónico',
+        'municipio_distrito', 'municipio', 'departamento', 'zona', 'jornada', 'modalidad',
+        'codigo_tipo_trabajador', 'codigo_del_tipo_de_trabajador', 'tipo_trabajador', 'tipo_de_trabajador',
+        'dia_l', 'dia_m1', 'dia_m2', 'dia_j', 'dia_v', 'dia_s', 'dia_d', '_sheet', '_row',
+    ]);
+    Object.entries(worker || {}).forEach(([key, value]) => {
+        if (key.startsWith('_raw_') || consumed.has(key) || key.startsWith('horario_') || isBlankFormValue(value)) return;
+        primary.push([humanizeKey(key), value]);
+    });
+    return primary.filter(([, value]) => !isBlankFormValue(value));
+}
+
+function workerTableColumns(workers) {
+    const base = [
+        ['Documento', workerDocumentValue],
+        ['Nombre', workerFullName],
+        ['Nacimiento', workerBirthDate],
+        ['Sexo', worker => workerValue(worker, ['sexo_identificacion', 'sexo'])],
+        ['Centro', worker => workerValue(worker, ['codigo_del_centro_de_trabajo', 'codigo_centro_trabajo'])],
+        ['Cargo', worker => workerValue(worker, ['cargo', 'nombre_del_cargo'])],
+        ['Salario', worker => {
+            const salary = workerValue(worker, ['salario']);
+            return salary ? formatCurrency(salary) : '';
+        }],
+        ['Tipo salario', worker => workerValue(worker, ['tipo_salario', 'tipo_de_salario'])],
+        ['EPS', worker => workerValue(worker, ['eps'])],
+        ['Pensión/AFP', worker => workerValue(worker, ['pension', 'afp'])],
+        ['Dirección', worker => workerValue(worker, ['direccion', 'dirección'])],
+        ['Celular/Teléfono', worker => workerValue(worker, ['celular', 'telefono', 'teléfono'])],
+        ['Correo', worker => workerValue(worker, ['correo', 'correo_electronico', 'correo_electrónico'])],
+        ['Municipio/Distrito', worker => workerValue(worker, ['municipio_distrito', 'municipio'])],
+        ['Departamento', worker => workerValue(worker, ['departamento'])],
+        ['Zona', worker => workerValue(worker, ['zona'])],
+        ['Jornada', worker => workerValue(worker, ['jornada'])],
+        ['Modalidad', worker => workerValue(worker, ['modalidad'])],
+        ['Tipo trabajador', workerTypeValue],
+        ['Días actividad', workerDaysValue],
+        ['Horario', workerScheduleValue],
+    ];
+    return base.filter(([, getter]) => workers.some(worker => !isBlankFormValue(getter(worker))));
+}
+
 function renderSedeOfficialInfo(sede) {
     const title = sede?.number === 1 ? 'Información de la sede principal' : `Información de la sede ${String(sede?.number || '').padStart(2, '0')}`;
     return `
@@ -2979,38 +3139,21 @@ function renderFormularioSedeDetalle(sede, centroIndex = 'all') {
 
 function renderFormularioTrabajadoresTable(workers) {
     if (!workers || !workers.length) return '<div class="form-empty">Sin trabajadores para esta selección.</div>';
+    const columns = workerTableColumns(workers);
     return `
         <div class="sede-workers-table-wrap">
             <table class="sede-workers-table">
                 <thead>
                     <tr>
-                        <th>Documento</th>
-                        <th>Nombre</th>
-                        <th>Centro</th>
-                        <th>Cargo</th>
-                        <th>Salario</th>
-                        <th>EPS</th>
+                        ${columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join('')}
                     </tr>
                 </thead>
                 <tbody>
-                    ${workers.map(worker => {
-                        const name = [
-                            worker.primer_apellido,
-                            worker.segundo_apellido,
-                            worker.primer_nombre,
-                            worker.segundo_nombre,
-                        ].filter(Boolean).join(' ');
-                        return `
-                            <tr>
-                                <td>${escapeHtml(worker.numero_de_identificacion || '')}</td>
-                                <td>${escapeHtml(name || worker.nombre || '')}</td>
-                                <td>${escapeHtml(worker.codigo_del_centro_de_trabajo || worker.codigo_centro_trabajo || '')}</td>
-                                <td>${escapeHtml(worker.cargo || worker.nombre_del_cargo || '')}</td>
-                                <td>${escapeHtml(worker.salario ? formatCurrency(worker.salario) : '')}</td>
-                                <td>${escapeHtml(worker.eps || '')}</td>
-                            </tr>
-                        `;
-                    }).join('')}
+                    ${workers.map(worker => `
+                        <tr>
+                            ${columns.map(([, getter]) => `<td>${escapeHtml(formatFormValue('', getter(worker)))}</td>`).join('')}
+                        </tr>
+                    `).join('')}
                 </tbody>
             </table>
         </div>
@@ -3200,7 +3343,7 @@ function renderFormularioReporte(container, payload) {
             <div class="report-empresa">${escapeHtml(empresa)}</div>
             <div class="report-header-actions">
                 ${isAprobable && !approved ? `<button class="btn-success" id="approveCaseBtn" type="button">Aprobar contrato</button>` : ''}
-                <button class="btn-secondary" id="companyInfoToggle" type="button" aria-expanded="false" aria-controls="companyInfoCollapse">Detalles</button>
+                <button class="btn-secondary" id="companyInfoToggle" type="button" aria-expanded="false" aria-controls="companyInfoCollapse">Información Empresa</button>
                 <button class="btn-secondary" data-action="clasificacion" data-case="${escapeHtml(caseId)}" type="button">Ver documentos</button>
             </div>
         </div>
@@ -3209,16 +3352,17 @@ function renderFormularioReporte(container, payload) {
             <div class="form-review-split">
                 <section class="form-review-pane form-review-info">
                     <div class="sede-selector-panel form-review-selectors">
-                    <select id="formSedeSelect" class="field-select sede-select" ${sedesFormulario.length ? '' : 'disabled'}>
-                        ${sedesFormulario.length
-                            ? sedesFormulario.map((sede, index) => `<option value="${index}">${escapeHtml(sede.label)}</option>`).join('')
-                            : '<option>Sin sedes</option>'}
-                    </select>
-                    <select id="formCentroSelect" class="field-select sede-select" ${sedesFormulario.length ? '' : 'disabled'}>
-                        ${(sedesFormulario[0]?.centros || []).length
-                            ? `<option value="all">Todos</option>${sedesFormulario[0].centros.map((centro, index) => `<option value="${index}">${escapeHtml(centroTrabajoLabel(centro, index))}</option>`).join('')}`
-                            : '<option>Sin centros</option>'}
-                    </select>
+                        <select id="formSedeSelect" class="field-select sede-select" ${sedesFormulario.length ? '' : 'disabled'}>
+                            ${sedesFormulario.length
+                                ? sedesFormulario.map((sede, index) => `<option value="${index}">${escapeHtml(sede.label)}</option>`).join('')
+                                : '<option>Sin sedes</option>'}
+                        </select>
+                        <select id="formCentroSelect" class="field-select sede-select" ${sedesFormulario.length ? '' : 'disabled'}>
+                            ${(sedesFormulario[0]?.centros || []).length
+                                ? `<option value="all">Todos</option>${sedesFormulario[0].centros.map((centro, index) => `<option value="${index}">${escapeHtml(centroTrabajoLabel(centro, index))}</option>`).join('')}`
+                                : '<option>Sin centros</option>'}
+                        </select>
+                        <button class="btn-secondary form-toggle-info-btn" id="toggleSedeInfoBtn" type="button" aria-pressed="false">Ocultar info</button>
                     </div>
                     <div class="sede-detail-panel" id="formSedeDetail">
                         ${renderFormularioSedeDetalle(sedesFormulario[0])}
@@ -3276,11 +3420,19 @@ function renderFormularioReporte(container, payload) {
     container.querySelector('#approveCaseBtn')?.addEventListener('click', () => approveCaseManually(caseId, container));
     const companyInfoToggle = container.querySelector('#companyInfoToggle');
     const companyInfoCollapse = container.querySelector('#companyInfoCollapse');
+    const toggleSedeInfoBtn = container.querySelector('#toggleSedeInfoBtn');
+    const formInfoPane = container.querySelector('.form-review-info');
     companyInfoToggle?.addEventListener('click', () => {
         if (!companyInfoCollapse) return;
         companyInfoCollapse.open = !companyInfoCollapse.open;
         companyInfoToggle.setAttribute('aria-expanded', companyInfoCollapse.open ? 'true' : 'false');
-        companyInfoToggle.textContent = companyInfoCollapse.open ? 'Ocultar detalles' : 'Detalles';
+        companyInfoToggle.textContent = companyInfoCollapse.open ? 'Ocultar información' : 'Información Empresa';
+    });
+    toggleSedeInfoBtn?.addEventListener('click', () => {
+        if (!formInfoPane || !sedeDetail) return;
+        const hidden = formInfoPane.classList.toggle('hide-sede-info');
+        toggleSedeInfoBtn.textContent = hidden ? 'Mostrar info' : 'Ocultar info';
+        toggleSedeInfoBtn.setAttribute('aria-pressed', hidden ? 'true' : 'false');
     });
     bindDocumentViewer();
 }
