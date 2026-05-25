@@ -17,12 +17,14 @@ from pydantic import BaseModel
 
 from .cases import (
     analyze_case,
+    approve_case,
     delete_case,
     export_manual_review_dataset,
     extract_contract_number_from_uploads,
     format_reason_lines,
     get_document_reviews_export_path,
     get_case_file_path,
+    is_case_manually_approved,
     list_cases,
     load_case,
     normalize_operation,
@@ -170,6 +172,12 @@ class CaseValidationExceptionRequest(BaseModel):
     message: str
     fingerprint: Optional[str] = None
     reason: str
+    note: Optional[str] = None
+    operator: Optional[str] = None
+
+
+class CaseApprovalRequest(BaseModel):
+    reason: Optional[str] = None
     note: Optional[str] = None
     operator: Optional[str] = None
 
@@ -761,6 +769,8 @@ class CaseCreateResponse(BaseModel):
     contract_number: Optional[str] = None
     numero_contrato: Optional[str] = None
     nro_afiliacion: Optional[str] = None
+    final_status: Optional[str] = None
+    manual_approval: Optional[Dict[str, Any]] = None
     upload_summary: Optional[Dict[str, Any]] = None
 
 
@@ -2864,8 +2874,9 @@ async def cases_production_summary(operation: str = Query(default="colima")):
         legacy = output_926.get("legacy") or {}
         draft = output_926.get("draft") or {}
         status = str(workflow.get("status") or payload.get("status") or "n/d")
+        manual_approval = payload.get("manual_approval") or analysis.get("manual_approval") or {}
         contract_number = _resolve_case_contract_number(payload)
-        final_status = resumen.get("estado") or report.get("estado_final") or decision_status or status
+        final_status = "APROBADO" if is_case_manually_approved(payload) else "NO APROBADO"
         item = {
             "id": payload.get("id"),
             "label": payload.get("label"),
@@ -2877,6 +2888,7 @@ async def cases_production_summary(operation: str = Query(default="colima")):
             "nro_afiliacion": contract_number,
             "updated_at": payload.get("updated_at"),
             "status": status,
+            "manual_approval": manual_approval if isinstance(manual_approval, dict) else {},
             "empresa": resumen.get("empresa") or profile.get("empresa") or payload.get("label") or payload.get("id"),
             "nit": resumen.get("nit") or profile.get("nit") or "",
             "fecha": resumen.get("fecha_proceso_human") or report.get("fecha_proceso_human") or payload.get("updated_at"),
@@ -3111,6 +3123,10 @@ async def case_detail(case_id: str, operation: Optional[str] = Query(default=Non
         return CaseCreateResponse(**payload)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.delete("/api/cases/{case_id}")
@@ -3262,9 +3278,31 @@ async def case_validation_exception(case_id: str, request: CaseValidationExcepti
         raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         logger.error("Error guardando excepción de validación %s: %s", case_id, exc)
         raise HTTPException(status_code=500, detail=f"No pude guardar excepción de validación: {exc}") from exc
+
+
+@app.post("/api/cases/{case_id}/approve", response_model=CaseCreateResponse)
+async def case_approve(case_id: str, request: CaseApprovalRequest, operation: Optional[str] = Query(default=None)):
+    try:
+        _ensure_case_operation(load_case(case_id), operation)
+        payload = approve_case(
+            case_id=case_id,
+            reason=request.reason or "",
+            note=request.note or "",
+            operator=request.operator or "",
+        )
+        return CaseCreateResponse(**payload)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Error aprobando caso %s: %s", case_id, exc)
+        raise HTTPException(status_code=500, detail=f"No pude aprobar el caso: {exc}") from exc
 
 
 @app.post("/api/cases/{case_id}/document-workspace")
@@ -3285,7 +3323,7 @@ async def case_document_workspace(case_id: str, request: CaseDocumentWorkspaceRe
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/evals/document-reviews/export")
@@ -3488,12 +3526,16 @@ async def case_file(case_id: str, filename: str, download_name: str = Query(defa
 @app.delete("/api/cases/{case_id}/files/{filename:path}")
 async def delete_case_file(case_id: str, filename: str):
     try:
+        payload = load_case(case_id)
+        if is_case_manually_approved(payload):
+            raise HTTPException(status_code=409, detail="El contrato ya está aprobado y no permite edición documental.")
         path = get_case_file_path(case_id, filename)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Archivo no encontrado.")
+    except HTTPException:
+        raise
     try:
         path.unlink()
-        payload = load_case(case_id)
         target_name = path.name
         payload["files"] = [
             item for item in (payload.get("files") or [])
@@ -3535,6 +3577,9 @@ async def delete_case_file(case_id: str, filename: str):
 @app.post("/api/cases/{case_id}/files/{filename:path}/duplicate")
 async def duplicate_case_file(case_id: str, filename: str):
     try:
+        payload = load_case(case_id)
+        if is_case_manually_approved(payload):
+            raise HTTPException(status_code=409, detail="El contrato ya está aprobado y no permite edición documental.")
         payload = save_document_workspace(case_id=case_id, action="duplicate", filename=filename)
         workspace_order = ((payload.get("analysis") or {}).get("document_workspace") or {}).get("order") or []
         original_name = Path(filename).name
@@ -3548,6 +3593,10 @@ async def duplicate_case_file(case_id: str, filename: str):
         return {"ok": True, "filename": new_name, "case": payload}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Archivo no encontrado.")
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

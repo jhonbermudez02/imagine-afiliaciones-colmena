@@ -485,7 +485,7 @@ async function acceptValidationException(caseId, blocker) {
         const labelEl = document.getElementById('classifCaseLabel');
         if (labelEl) {
             labelEl.style.display = '';
-            labelEl.innerHTML = `📋 ${escapeHtml(empresa)}${nit !== 'n/d' ? ` · ${escapeHtml(nit)}` : ''}`;
+            labelEl.innerHTML = `Contrato · ${escapeHtml(empresa)}${nit !== 'n/d' ? ` · ${escapeHtml(nit)}` : ''}`;
         }
         renderClassifBlockers(payload);
         renderClassifDocList(payload);
@@ -523,6 +523,31 @@ function resolveContractNumber(analysis, item = {}) {
         formFields.numero_radicacion || '';
 }
 
+function resolveManualApproval(item) {
+    const approval = item?.manual_approval || item?.analysis?.manual_approval || {};
+    if (approval && approval.approved) return approval;
+    const status = normalizeText(item?.status || item?.analysis?.workflow_run?.status || '');
+    const finalStatus = normalizeText(item?.final_status || '');
+    if (status === 'approved' || finalStatus === 'aprobado') {
+        return { approved: true, status: 'approved', source: 'status' };
+    }
+    return null;
+}
+
+function isCaseManuallyApproved(item) {
+    return Boolean(resolveManualApproval(item));
+}
+
+function getCaseBlockerRecords(payload) {
+    const a = payload?.analysis || {};
+    const decision = a.decision || {};
+    const precheck = a.validacion_resumen?.precheck || {};
+    const records = Array.isArray(decision.blocker_records) ? decision.blocker_records :
+        Array.isArray(precheck.motivos_de_rechazo) ? precheck.motivos_de_rechazo : [];
+    const blockers = Array.isArray(decision.blockers) ? decision.blockers : [];
+    return { records, blockers, hasActiveBlockers: records.length > 0 || blockers.length > 0 };
+}
+
 function resolveCase(item) {
     const a = item?.analysis || {};
     const wf = a.workflow_run || {};
@@ -532,7 +557,9 @@ function resolveCase(item) {
     const empresa = resumen.empresa || profile.empresa || item?.empresa || item?.label || item?.id || 'n/d';
     const nit = resumen.nit || profile.nit || item?.nit || 'n/d';
     const status = wf.status || item?.status || '';
-    const finalStatus = item?.final_status || resumen.estado || '';
+    const approved = isCaseManuallyApproved(item);
+    const rawFinalStatus = item?.final_status || resumen.estado || '';
+    const finalStatus = approved ? 'APROBADO' : 'NO APROBADO';
     const fecha = resumen.fecha_proceso_human || item?.updated_at?.slice(0,10) || 'n/d';
     const has926 = Boolean(item?.has_926 || (wf.output_926||{}).legacy?.ok);
     const filename = (wf.output_926||{}).legacy?.filename || item?.filename || 'archivo_plano.txt';
@@ -540,7 +567,7 @@ function resolveCase(item) {
     const formFields = a.xlsx_profile?.form_fields || {};
     const nroAfiliacion = resolveContractNumber(a, item);
     const nroRadicacion = formFields.numero_radicacion || profile.numero_radicacion || profile.nro_radicacion || a.formulario_profile?.numero_radicacion || '';
-    return { empresa, nit, status, finalStatus, fecha, has926, filename, blockers, nroAfiliacion, nroRadicacion };
+    return { empresa, nit, status, finalStatus, fecha, has926, filename, blockers, nroAfiliacion, nroRadicacion, approved };
 }
 
 function isApprovedCaseStatus(status, finalStatus) {
@@ -555,7 +582,7 @@ function isApprovedCaseStatus(status, finalStatus) {
     ) {
         return false;
     }
-    return f.includes('aprob') || f === 'ok' || (s === 'completed' && (f === 'completed' || !f));
+    return f === 'aprobado' || f === 'ok' || s === 'approved';
 }
 
 function caseStatusClass(status, finalStatus) {
@@ -564,6 +591,34 @@ function caseStatusClass(status, finalStatus) {
 
 function casePillLabel(status, finalStatus) {
     return isApprovedCaseStatus(status, finalStatus) ? 'Aprobado' : 'No aprobado';
+}
+
+async function approveCaseManually(caseId, container) {
+    if (!caseId) return;
+    const reason = prompt('Justificación para aprobar este contrato:', 'Aprobado manualmente por operador');
+    if (!reason || !reason.trim()) return;
+    const tester = readTester();
+    const btn = container?.querySelector('#approveCaseBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Aprobando...'; }
+    try {
+        const r = await fetchWithRetry(caseApiUrl(caseId, '/approve'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                reason: reason.trim(),
+                operator: tester.email || tester.name || '',
+            }),
+        });
+        const payload = await r.json();
+        activeCasePayload = payload;
+        showToast('Contrato aprobado manualmente.', 'ok', 3500);
+        if (container?.id === 'reporteContent') renderFormularioReporte(container, payload);
+        else if (container) renderReporte(container, payload);
+        loadReporteSidebar();
+    } catch(e) {
+        showToast('No pude aprobar el contrato: ' + e.message, 'err', 6000);
+        if (btn) { btn.disabled = false; btn.textContent = 'Aprobar contrato'; }
+    }
 }
 
 // ── LOGIN ────────────────────────────────────────────────────
@@ -1406,12 +1461,13 @@ function renderWorkflowResult(payload) {
     const nroAfiliacion = resolveContractNumber(a, payload);
     const decisionStatus = normalizeText(decision.recommended_status || '');
     const hasActiveBlockers = blockers.length > 0 || blockerRecords.length > 0;
-    const isAprobable = decisionStatus === 'aprobable' || (!hasActiveBlockers && normalizeText(estado).includes('aprob')) || normalizeText(wf.status||'') === 'completed';
+    const approved = isCaseManuallyApproved(payload);
+    const isAprobable = !hasActiveBlockers && (decisionStatus === 'aprobable' || normalizeText(estado).includes('aprob') || normalizeText(wf.status||'') === 'completed');
     const isNoAprobado = !isAprobable && normalizeText(wf.status||'') === 'stopped_prevalidacion';
 
-    const stateClass = isNoAprobado ? 'err' : (isAprobable ? 'ok' : 'warn');
-    const stateLabel = isNoAprobado ? 'No pasó validación' : (isAprobable ? 'Aprobable' : 'Observado');
-    const stateIcon = isNoAprobado ? '✗' : (isAprobable ? '✓' : '⚠');
+    const stateClass = approved ? 'ok' : 'err';
+    const stateLabel = approved ? 'Aprobado' : 'No aprobado';
+    const stateIcon = approved ? '✓' : '✗';
 
     el.innerHTML = `
         <div class="result-header">
@@ -1420,6 +1476,9 @@ function renderWorkflowResult(payload) {
                 <div style="margin-bottom:6px"><span class="pill pill-${stateClass}">${escapeHtml(stateLabel)}</span></div>
                 <div class="result-empresa">${escapeHtml(empresa)}</div>
                 <div class="result-nit">NIT: ${escapeHtml(nit)}${nroAfiliacion ? ` · Contrato ${escapeHtml(nroAfiliacion)}` : ''}</div>
+            </div>
+            <div style="margin-left:auto">
+                ${isAprobable && !approved ? `<button class="btn-success" id="approveCaseBtn" type="button">Aprobar contrato</button>` : ''}
             </div>
         </div>
         <div class="result-body">
@@ -1462,6 +1521,7 @@ function renderWorkflowResult(payload) {
     el.querySelectorAll('[data-action]').forEach(btn => {
         btn.addEventListener('click', () => handleCaseAction(btn.dataset.action, btn.dataset.case, btn.dataset.file));
     });
+    el.querySelector('#approveCaseBtn')?.addEventListener('click', () => approveCaseManually(payload.id || activeCaseId, el));
     el.querySelectorAll('.validation-exception-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
             const records = blockerRecords.length ? blockerRecords : blockers.map((b, i) => ({ message: blockerText(b), code: 'VALIDATION_ALERT', fingerprint: '', index: i }));
@@ -1508,11 +1568,11 @@ async function loadClassifForCase(caseId) {
         activeCasePayload = payload;
 
         // Mostrar nombre del contrato como contexto fijo
-        const { empresa, nit } = resolveCase(payload);
+        const { empresa, nit, approved } = resolveCase(payload);
         const labelEl = document.getElementById('classifCaseLabel');
         if (labelEl) {
             labelEl.style.display = '';
-            labelEl.innerHTML = `📋 ${escapeHtml(empresa)}${nit !== 'n/d' ? ` · ${escapeHtml(nit)}` : ''}`;
+            labelEl.innerHTML = `Contrato · ${escapeHtml(empresa)}${nit !== 'n/d' ? ` · ${escapeHtml(nit)}` : ''}${approved ? ' · APROBADO' : ''}`;
         }
 
         renderClassifBlockers(payload);
@@ -1545,6 +1605,7 @@ function renderClassifBlockers(payload) {
     const blockerRecords = getValidationBlockerRecords(payload);
     const records = blockerRecords.length ? blockerRecords : blockers.map((b, i) => ({ message: blockerText(b), code: 'VALIDATION_ALERT', fingerprint: '', index: i }));
     const acceptedExceptions = getAcceptedValidationExceptions(payload);
+    const isApproved = isCaseManuallyApproved(payload);
     if (!records.length && !acceptedExceptions.length) {
         panel.innerHTML = '';
         panel.style.display = 'none';
@@ -1561,7 +1622,7 @@ function renderClassifBlockers(payload) {
                     <div class="classif-blocker-item">
                         <span class="report-blocker-icon">✗</span>
                         <span class="classif-blocker-text">${escapeHtml(b.message || blockerText(b))}</span>
-                        ${validationExceptionButtonHtml(b, i, 'margin-left:auto')}
+                        ${isApproved ? '' : validationExceptionButtonHtml(b, i, 'margin-left:auto')}
                     </div>
                 `).join('')}
             </div>
@@ -1693,6 +1754,7 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
     const el = document.getElementById('classifDocList');
     const preview = document.getElementById('classifPreviewBody');
     if (!el) return;
+    const isApproved = isCaseManuallyApproved(payload);
     let items = buildDocItems(payload);
     if (!items.length) {
         el.innerHTML = '<div class="empty-state">No hay documentos en este contrato</div>';
@@ -1709,11 +1771,13 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
     header.style.cssText = 'padding:6px 8px 2px;font-size:11px;color:var(--c-text-2);border-bottom:1px solid var(--c-border);margin-bottom:2px';
     header.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-            <span>${items.length} documentos</span><span style="font-size:10px;opacity:0.7">↕ scroll</span>
+            <span>${items.length} documentos</span>
+            <button class="classif-sort-btn" id="btnBackToCaseInfo" type="button">Volver a información</button>
         </div>
         <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
             <span style="font-size:10px;opacity:0.6;margin-right:2px">Orden:</span>
             <span class="classif-sort-btn active" style="cursor:default">Prioridad documental</span>
+            ${isApproved ? '<span class="classif-readonly-pill">Aprobado · solo lectura</span>' : ''}
             <button class="classif-sort-btn" id="btnGalleryMode" type="button" style="margin-left:auto;color:var(--c-blue)">🖼 Galería</button>
         </div>
     `;
@@ -1723,18 +1787,19 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
     header.querySelector('#btnGalleryMode')?.addEventListener('click', () => {
         openGallery(items, payload, 0);
     });
+    header.querySelector('#btnBackToCaseInfo')?.addEventListener('click', () => handleCaseAction('reporte', payload.id || activeCaseId));
 
     el.innerHTML = items.map((item, i) => {
         const isRag = item.codeSource === 'rag_classification';
         return `
         <div class="doc-item" data-index="${i}" data-file="${escapeHtml(item.file)}">
             <span class="doc-item-order">
-                <input class="doc-order-input" data-file="${escapeHtml(item.file)}" type="number" min="1" max="${items.length}" value="${i + 1}" title="Cambiar orden" aria-label="Orden del documento">
+                <input class="doc-order-input" data-file="${escapeHtml(item.file)}" type="number" min="1" max="${items.length}" value="${i + 1}" title="${isApproved ? 'Contrato aprobado: orden bloqueado' : 'Cambiar orden'}" aria-label="Orden del documento" ${isApproved ? 'disabled' : ''}>
             </span>
             <span class="doc-item-name" title="${escapeHtml(item.displayName||item.file)}">${escapeHtml(item.label)}</span>
             ${isRag ? '<span class="doc-item-corrected" style="background:var(--c-info-bg);color:var(--c-blue)" title="Clasificado por RAG">🧠</span>' : ''}
             ${item.corrected ? '<span class="doc-item-corrected">corregido</span>' : ''}
-            ${item.kind !== 'xlsx' ? `
+            ${item.kind !== 'xlsx' && !isApproved ? `
             <span class="doc-item-actions">
                 <button class="doc-action-btn doc-duplicate-btn" data-file="${escapeHtml(item.file)}" title="Duplicar imagen" type="button">⧉ Dup</button>
                 <button class="doc-action-btn doc-delete-btn" data-file="${escapeHtml(item.file)}" title="Eliminar imagen" type="button">✕ Elim</button>
@@ -1891,9 +1956,23 @@ function renderClassifActions(item, payload) {
     const el = document.getElementById('classifPreviewActions');
     if (!el) return;
     if (item.kind === 'xlsx') { el.innerHTML = ''; return; }
+    const isApproved = isCaseManuallyApproved(payload);
 
     const currentLabel = item.effectiveTypeLabel || item.label || item.type || 'Sin clasificar';
     const isCorrected = item.corrected;
+
+    if (isApproved) {
+        el.innerHTML = `
+            <div class="reclassify-panel">
+                <div class="reclassify-current">
+                    <span class="reclassify-label">Clasificación actual:</span>
+                    <span class="reclassify-value ${isCorrected ? 'corrected' : ''}">${escapeHtml(currentLabel)}${isCorrected ? ' · corregido manualmente' : ''}</span>
+                </div>
+                <div class="reclassify-status" style="color:var(--c-ok)">Contrato aprobado · edición documental bloqueada</div>
+            </div>
+        `;
+        return;
+    }
 
     el.innerHTML = `
         <div class="reclassify-panel">
@@ -3099,9 +3178,12 @@ function renderFormularioReporte(container, payload) {
     const estado = resumen.estado || decision.recommended_status || wf.status || 'n/d';
     const estadoNorm = normalizeText(estado);
     const decisionStatus = normalizeText(decision.recommended_status || '');
+    const approved = isCaseManuallyApproved(payload);
+    const { hasActiveBlockers } = getCaseBlockerRecords(payload);
     const isNoAprobado = estadoNorm.includes('no aprob') || estadoNorm.includes('rechaz') || normalizeText(wf.status || '') === 'stopped_prevalidacion';
-    const isAprobable = !isNoAprobado && (decisionStatus === 'aprobable' || estadoNorm.includes('aprob') || normalizeText(wf.status || '') === 'completed');
-    const stateClass = isNoAprobado ? 'bloqueado' : (isAprobable ? 'aprobado' : 'observado');
+    const isAprobable = !isNoAprobado && !hasActiveBlockers && (decisionStatus === 'aprobable' || estadoNorm.includes('aprob') || normalizeText(wf.status || '') === 'completed');
+    const stateClass = approved ? 'aprobado' : 'bloqueado';
+    const stateLabel = approved ? 'APROBADO' : 'NO APROBADO';
     const fecha = resumen.fecha_proceso_human || formatDateTime(payload.updated_at);
 
     const totalSedes = formFields.a_numero_sedes || formFields.b_numero_sedes || profile.numero_sedes || resumen.numero_sedes || 'n/d';
@@ -3114,9 +3196,10 @@ function renderFormularioReporte(container, payload) {
 
     container.innerHTML = `
         <div class="report-case-summary">
-            <span class="report-state-badge ${stateClass}">${escapeHtml(estado)}</span>
+            <span class="report-state-badge ${stateClass}">${escapeHtml(stateLabel)}</span>
             <div class="report-empresa">${escapeHtml(empresa)}</div>
             <div class="report-header-actions">
+                ${isAprobable && !approved ? `<button class="btn-success" id="approveCaseBtn" type="button">Aprobar contrato</button>` : ''}
                 <button class="btn-secondary" id="companyInfoToggle" type="button" aria-expanded="false" aria-controls="companyInfoCollapse">Detalles</button>
                 <button class="btn-secondary" data-action="clasificacion" data-case="${escapeHtml(caseId)}" type="button">Ver documentos</button>
             </div>
@@ -3190,6 +3273,7 @@ function renderFormularioReporte(container, payload) {
     container.querySelectorAll('[data-action]').forEach(btn => {
         btn.addEventListener('click', () => handleCaseAction(btn.dataset.action, btn.dataset.case, btn.dataset.file));
     });
+    container.querySelector('#approveCaseBtn')?.addEventListener('click', () => approveCaseManually(caseId, container));
     const companyInfoToggle = container.querySelector('#companyInfoToggle');
     const companyInfoCollapse = container.querySelector('#companyInfoCollapse');
     companyInfoToggle?.addEventListener('click', () => {
@@ -3236,9 +3320,11 @@ function renderReporte(container, payload) {
     const estadoNorm = normalizeText(estado);
     const decisionStatus = normalizeText(decision.recommended_status || '');
     const hasActiveBlockers = blockers.length > 0 || blockerRecords.length > 0;
-    const isAprobable = decisionStatus === 'aprobable' || (!hasActiveBlockers && estadoNorm.includes('aprob')) || normalizeText(wf.status||'') === 'completed';
+    const approved = isCaseManuallyApproved(payload);
+    const isAprobable = !hasActiveBlockers && (decisionStatus === 'aprobable' || estadoNorm.includes('aprob') || normalizeText(wf.status||'') === 'completed');
     const isNoAprobado = !isAprobable && (normalizeText(wf.status||'') === 'stopped_prevalidacion' || estadoNorm.includes('no aprob'));
-    const stateClass = isNoAprobado ? 'bloqueado' : (isAprobable ? 'aprobado' : 'observado');
+    const stateClass = approved ? 'aprobado' : 'bloqueado';
+    const stateLabel = approved ? 'APROBADO' : 'NO APROBADO';
 
     // Extraer datos de comparación de razón social
     const vrMatches = (a.validacion_resumen?.matches || a.reporte_ejecutivo?.matches || {});
@@ -3308,7 +3394,7 @@ function renderReporte(container, payload) {
 
     container.innerHTML = `
         <div class="report-header">
-            <span class="report-state-badge ${stateClass}">${escapeHtml(estado)}</span>
+            <span class="report-state-badge ${stateClass}">${escapeHtml(stateLabel)}</span>
             <div>
                 <div class="report-empresa">${escapeHtml(empresa)}</div>
                 <div class="report-nit">
@@ -3317,6 +3403,7 @@ function renderReporte(container, payload) {
                 </div>
             </div>
             <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+                ${isAprobable && !approved ? `<button class="btn-success" id="approveCaseBtn" type="button">Aprobar contrato</button>` : ''}
                 <button class="btn-secondary" data-action="clasificacion" data-case="${escapeHtml(caseId)}" type="button">Ver documentos</button>
                 <button class="btn-secondary" data-panel="comisiones" id="btnComisiones" type="button">Comisiones</button>
                 ${has926 ? `<button class="btn-primary" data-action="descargar926" data-case="${escapeHtml(caseId)}" data-file="${escapeHtml(filename926)}" type="button">Descargar plano</button>` : ''}
@@ -3432,6 +3519,7 @@ function renderReporte(container, payload) {
     container.querySelectorAll('[data-action]').forEach(btn => {
         btn.addEventListener('click', () => handleCaseAction(btn.dataset.action, btn.dataset.case, btn.dataset.file));
     });
+    container.querySelector('#approveCaseBtn')?.addEventListener('click', () => approveCaseManually(caseId, container));
     container.querySelectorAll('.validation-exception-btn').forEach(btn => {
         btn.addEventListener('click', async (event) => {
             event.stopPropagation();
@@ -4181,7 +4269,7 @@ async function loadProduccion() {
                             <div class="prod-card-meta">${escapeHtml(fecha)}</div>
                         </div>
                         <div class="prod-card-badges">
-                            <span class="pill pill-ok">Aprobable</span>
+                            <span class="pill pill-ok">Aprobado</span>
                             ${has926 ? '<span class="pill pill-info">926 listo</span>' : ''}
                         </div>
                     </div>

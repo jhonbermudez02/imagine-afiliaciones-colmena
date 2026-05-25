@@ -1110,6 +1110,12 @@ def _normalize_case_payload(case_payload: Dict[str, Any]) -> Dict[str, Any]:
     if workflow:
         analysis["workflow_run"] = workflow
         case_payload["analysis"] = analysis
+    manual_approval = case_payload.get("manual_approval") or analysis.get("manual_approval") or {}
+    if isinstance(manual_approval, dict) and manual_approval.get("approved"):
+        case_payload["manual_approval"] = manual_approval
+        analysis["manual_approval"] = manual_approval
+        case_payload["status"] = "approved"
+        case_payload["final_status"] = "APROBADO"
     contract_number = _resolve_case_contract_number(case_payload)
     if contract_number:
         case_payload["contract_number"] = contract_number
@@ -1131,11 +1137,89 @@ def save_case(case_payload: Dict[str, Any]) -> Dict[str, Any]:
     return case_payload
 
 
-def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, expected_type: str = "", comisiones: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+def _clear_manual_approval(payload: Dict[str, Any], reason: str = "") -> None:
+    approval = payload.get("manual_approval")
+    analysis = payload.get("analysis") if isinstance(payload.get("analysis"), dict) else {}
+    analysis_approval = analysis.get("manual_approval") if isinstance(analysis, dict) else None
+    if not approval and not analysis_approval:
+        return
+    previous = approval or analysis_approval or {}
+    now = utc_now()
+    revoked = {
+        **previous,
+        "approved": False,
+        "status": "revoked",
+        "revoked_reason": normalize_text(reason) or "La aprobación se invalidó por cambios o reproceso del caso.",
+        "revoked_at": now,
+        "updated_at": now,
+    }
+    payload["manual_approval"] = revoked
+    payload.pop("final_status", None)
+    if isinstance(analysis, dict):
+        analysis["manual_approval"] = revoked
+
+
+def is_case_manually_approved(payload: Dict[str, Any]) -> bool:
+    analysis = payload.get("analysis") if isinstance(payload.get("analysis"), dict) else {}
+    approval = payload.get("manual_approval") or analysis.get("manual_approval") or {}
+    return isinstance(approval, dict) and bool(approval.get("approved"))
+
+
+def approve_case(case_id: str, reason: str = "", operator: str = "", note: str = "") -> Dict[str, Any]:
     payload = load_case(case_id)
     analysis = payload.setdefault("analysis", {}) or {}
     if payload.get("analysis") is None:
         payload["analysis"] = analysis
+    decision = analysis.get("decision") or {}
+    validation_summary = analysis.get("validacion_resumen") or {}
+    precheck = validation_summary.get("precheck") or {}
+    active_messages: List[str] = []
+    for source in (decision.get("blocker_records"), precheck.get("motivos_de_rechazo")):
+        for item in source or []:
+            if isinstance(item, dict):
+                message = normalize_text(item.get("message") or item.get("mensaje") or "")
+            else:
+                message = normalize_text(str(item or ""))
+            if message and message not in active_messages:
+                active_messages.append(message)
+    for item in decision.get("blockers") or []:
+        message = normalize_text(item.get("message") if isinstance(item, dict) else str(item or ""))
+        if message and message not in active_messages:
+            active_messages.append(message)
+    if active_messages:
+        raise ValueError("El contrato aún tiene bloqueantes activos y no se puede aprobar manualmente.")
+
+    now = utc_now()
+    approval = {
+        "approved": True,
+        "status": "approved",
+        "reason": normalize_text(reason) or "Aprobado manualmente por operador",
+        "operator": normalize_text(operator),
+        "note": normalize_text(note),
+        "scope": "case_only",
+        "approved_at": now,
+        "updated_at": now,
+    }
+    payload["manual_approval"] = approval
+    payload["final_status"] = "APROBADO"
+    payload["status"] = "approved"
+    analysis["manual_approval"] = approval
+    report = analysis.get("reporte_ejecutivo") or {}
+    resumen = report.get("resumen_ejecutivo") if isinstance(report, dict) else None
+    if isinstance(resumen, dict):
+        resumen["estado"] = "APROBADO"
+    payload["updated_at"] = now
+    return save_case(payload)
+
+
+def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, expected_type: str = "", comisiones: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    payload = load_case(case_id)
+    if is_case_manually_approved(payload):
+        raise ValueError("El contrato ya está aprobado y no permite edición documental.")
+    analysis = payload.setdefault("analysis", {}) or {}
+    if payload.get("analysis") is None:
+        payload["analysis"] = analysis
+    _clear_manual_approval(payload, "Revisión manual de documentos o comisiones.")
     review_store = analysis.setdefault("manual_review", {})
 
     # Cuando el operador corrige una clasificacion, RAG aprende
@@ -1199,9 +1283,12 @@ def save_validation_exception(
     fingerprint: str = "",
 ) -> Dict[str, Any]:
     payload = load_case(case_id)
+    if is_case_manually_approved(payload):
+        raise ValueError("El contrato ya está aprobado y no permite aceptar nuevos bloqueantes.")
     analysis = payload.setdefault("analysis", {}) or {}
     if payload.get("analysis") is None:
         payload["analysis"] = analysis
+    _clear_manual_approval(payload, "Aceptación manual de bloqueantes.")
     review_store = analysis.setdefault("manual_review", {})
     exceptions = review_store.setdefault("validation_exceptions", [])
     code_text = normalize_text(code) or "VALIDATION_ALERT"
@@ -1496,6 +1583,8 @@ def _clean_document_order(files: List[Dict[str, Any]], order: Optional[List[str]
 
 def save_document_workspace(case_id: str, action: str, filename: str = "", order: Optional[List[str]] = None, target_position: Optional[int] = None) -> Dict[str, Any]:
     payload = load_case(case_id)
+    if is_case_manually_approved(payload):
+        raise ValueError("El contrato ya está aprobado y no permite edición documental.")
     existing_workspace = ((payload.get("analysis") or {}).get("document_workspace") or {})
     had_manual_order = bool(existing_workspace.get("manual_order"))
     workspace = _sync_document_workspace(payload)
@@ -9398,6 +9487,7 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
     payload["status"] = "completed" if decision_status == "aprobable" else "analyzed"
     payload["updated_at"] = utc_now()
     payload["analysis"] = analysis
+    _clear_manual_approval(payload, "Reproceso de validaciones del caso.")
     save_case(payload)
     rebuild_document_registry()
     return payload
