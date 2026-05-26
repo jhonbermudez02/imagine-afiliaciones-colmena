@@ -682,8 +682,12 @@ function bootApp() {
     updateSidebarUser();
     updateOperationChrome();
     showNavColmena();
-    switchView('bandeja');
-    loadBandeja();
+    if (readProfile() === 'colmena') {
+        switchView('produccion');
+    } else {
+        switchView('bandeja');
+        loadBandeja();
+    }
 }
 
 function updateSidebarUser() {
@@ -736,7 +740,7 @@ function showNavColmena() {
     const p = readProfile();
     const isColmena = p === 'colmena';
     // Grupos solo para Imagine
-    ['navOperacion', 'navRevision', 'navSistema'].forEach(id => {
+    ['navOperacion', 'navSistema'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = isColmena ? 'none' : '';
     });
