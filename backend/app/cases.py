@@ -3428,8 +3428,6 @@ def _looks_like_comision_document(haystack: str) -> bool:
 
 
 def _looks_like_beneficiario_final_document(haystack: str) -> bool:
-    if not re.search(r"\brub\b", haystack, flags=re.IGNORECASE):
-        return False
     generic_markers = [
         "beneficiario final",
         "beneficiarios finales",
@@ -3450,10 +3448,29 @@ def _looks_like_beneficiario_final_document(haystack: str) -> bool:
     ]
     generic_hits = sum(1 for marker in generic_markers if marker in haystack)
     strong_hits = sum(1 for marker in strong_markers if marker in haystack)
+    rub_marker = bool(re.search(r"\brub\b", haystack, flags=re.IGNORECASE))
+    cps_261_marker = "cps-f-261" in haystack or "cps f 261" in haystack
+    company_beneficiary_markers = [
+        "conformacion de la sociedad - beneficiario",
+        "conformación de la sociedad - beneficiario",
+        "conformacion de la sociedad beneficiario",
+        "conformación de la sociedad beneficiario",
+    ]
+    company_beneficiary_hit = any(marker in haystack for marker in company_beneficiary_markers)
+    shareholder_form_hit = (
+        cps_261_marker
+        and company_beneficiary_hit
+        and "accionista" in haystack
+        and "participacion" in haystack
+    )
     if _looks_like_rut_document(haystack) and not any(
         marker in haystack
         for marker in ["registro unico de beneficiarios finales", "registro único de beneficiarios finales"]
     ):
+        return False
+    if shareholder_form_hit:
+        return True
+    if not rub_marker:
         return False
     return generic_hits >= 1 and strong_hits >= 1
 
@@ -6625,6 +6642,8 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
             )
     for index, record in enumerate(records[:200], start=1):
         row_excel = int(record.get("_row") or index + 1)  # fila real en el Excel
+        sheet_name = normalize_text(record.get("_sheet", ""))
+        row_location = f"{sheet_name}, fila {row_excel}" if sheet_name else f"fila {row_excel}"
         raw_document = _worker_document_raw(record)
         row_document = only_digits(raw_document)
         full_name = normalize_text(
@@ -6692,8 +6711,9 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
         if birth_year_raw and len(birth_year_raw) == 4 and int(birth_year_raw) < 1905:
             row_errors.append({
                 "row": row_excel,
+                "sheet": sheet_name,
                 "code": "FECHA_NACIMIENTO_ANTIGUA_INVALIDA",
-                "message": f"El año de nacimiento no puede ser inferior a 1905 en fila {row_excel} ({birth_year_raw}).",
+                "message": f"El año de nacimiento no puede ser inferior a 1905 en {row_location} ({birth_year_raw}).",
                 "documento": row_document,
             })
         if birthdate:
@@ -6701,8 +6721,9 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
             if age < 17:
                 row_errors.append({
                     "row": row_excel,
+                    "sheet": sheet_name,
                     "code": "EDAD_MINIMA_INVALIDA",
-                    "message": f"La fecha de nacimiento en fila {row_excel} deja una edad menor a 17 años ({birthdate.strftime('%d/%m/%Y')}).",
+                    "message": f"La fecha de nacimiento en {row_location} deja una edad menor a 17 años ({birthdate.strftime('%d/%m/%Y')}).",
                     "documento": row_document,
                 })
 
