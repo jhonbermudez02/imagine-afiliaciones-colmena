@@ -449,7 +449,8 @@ def _append_center_cell_validation(
             }
         )
         return
-    if require_numeric and not _is_strict_numeric_value(raw_value):
+    accepts_roman_risk = field == "clase_riesgo" and _is_valid_roman_risk(raw_value)
+    if require_numeric and not _is_strict_numeric_value(raw_value) and not accepts_roman_risk:
         blockers.append(
             {
                 "code": "XLSX_CENTRO_REQUIRED_CELL_NOT_NUMERIC",
@@ -458,7 +459,7 @@ def _append_center_cell_validation(
                 "sheet": sheet_name,
                 "cell": cell,
                 "row": row_number,
-                "message": f"{message_prefix} debe ser numérico. Valor recibido: {raw_value}.",
+                "message": f"{message_prefix} debe ser numérico o un número romano entre I y V. Valor recibido: {raw_value}.",
             }
         )
     if require_email and not _is_email_value(raw_value):

@@ -6746,12 +6746,20 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
             })
         if birthdate:
             age = _age_years(birthdate, today)
-            if age < 17:
+            if age < 15:
                 row_errors.append({
                     "row": row_excel,
                     "sheet": sheet_name,
                     "code": "EDAD_MINIMA_INVALIDA",
-                    "message": f"La fecha de nacimiento en {row_location} deja una edad menor a 17 años ({birthdate.strftime('%d/%m/%Y')}).",
+                    "message": f"La fecha de nacimiento en {row_location} deja una edad menor a 15 años ({birthdate.strftime('%d/%m/%Y')}).",
+                    "documento": row_document,
+                })
+            elif age > 80:
+                row_errors.append({
+                    "row": row_excel,
+                    "sheet": sheet_name,
+                    "code": "EDAD_MAXIMA_INVALIDA",
+                    "message": f"La fecha de nacimiento en {row_location} deja una edad mayor a 80 años ({birthdate.strftime('%d/%m/%Y')}).",
                     "documento": row_document,
                 })
 

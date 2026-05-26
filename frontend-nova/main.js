@@ -2679,9 +2679,23 @@ function parseSedeNumber(value, fallback = 1) {
     return Number(match[1] || match[2] || fallback) || fallback;
 }
 
-function sedePrefixFromNumber(number) {
-    const num = Number(number) || 1;
+function sedeCodeFromValue(value, fallback = '') {
+    const text = String(value || '');
+    const match = text.match(/sede[_\s-]*(principal|0*\d+)|Sede\s*0*(\d+)\s*[-–]\s*Trabajadores/i);
+    const raw = match ? (match[1] || match[2] || '') : fallback;
+    if (/principal/i.test(raw)) return '1';
+    const digits = String(raw || '').replace(/[^\d]/g, '');
+    if (!digits) return String(fallback || '').trim();
+    return String(Number(digits) || digits);
+}
+
+function sedePrefixFromCode(code) {
+    const num = Number(String(code || '').replace(/[^\d]/g, '')) || 1;
     return num === 1 ? 'sede_principal' : `sede_${String(num).padStart(2, '0')}`;
+}
+
+function sedeSheetCellValue(sedeSheetValues, sheetName, field) {
+    return (sedeSheetValues?.[sheetName]?.[field] || {}).value || '';
 }
 
 function buildFormularioSedes(payload, declaredTotal) {
@@ -2691,33 +2705,53 @@ function buildFormularioSedes(payload, declaredTotal) {
     const records = xlsxProfile.records || [];
     const workerCounts = xlsxProfile.worker_sheet_counts || {};
     const salaryCounts = xlsxProfile.worker_sheet_salary_totals || {};
-    const bySedeNumber = new Map();
+    const sedeSheetValues = xlsxProfile.sede_sheet_values || {};
+    const activeSheets = Array.isArray(xlsxProfile.active_sede_worker_sheet_names)
+        ? xlsxProfile.active_sede_worker_sheet_names
+        : [];
+    const bySedeCode = new Map();
     const declaredCount = Number(String(declaredTotal || '').replace(/[^\d]/g, '')) || 0;
-    const canIncludeSede = number => !declaredCount || (Number(number) || 1) <= declaredCount;
-    const ensureSede = number => {
-        const num = Number(number) || 1;
-        if (!canIncludeSede(num)) return null;
-        if (!bySedeNumber.has(num)) {
-            bySedeNumber.set(num, { number: num, label: `Sede ${String(num).padStart(2, '0')}`, workers: [] });
+    const ensureSede = (code, sourceName = '', order = bySedeCode.size + 1) => {
+        const normalizedCode = sedeCodeFromValue(code, code) || String(order);
+        if (!bySedeCode.has(normalizedCode)) {
+            bySedeCode.set(normalizedCode, {
+                code: normalizedCode,
+                number: order,
+                label: `Sede ${normalizedCode}`,
+                sourceName,
+                workers: [],
+            });
         }
-        return bySedeNumber.get(num);
+        const sede = bySedeCode.get(normalizedCode);
+        if (sourceName && !sede.sourceName) sede.sourceName = sourceName;
+        return sede;
     };
 
-    for (let i = 1; i <= declaredCount; i++) ensureSede(i);
+    const orderedSheets = activeSheets.length
+        ? activeSheets
+        : Object.keys(workerCounts).length
+            ? Object.keys(workerCounts)
+            : Object.keys(sedeSheetValues);
+    const sheetsToRender = declaredCount ? orderedSheets.slice(0, declaredCount) : orderedSheets;
+    sheetsToRender.forEach((name, index) => {
+        const code = sedeSheetCellValue(sedeSheetValues, name, 'codigo_sede') || sedeCodeFromValue(name, String(index + 1));
+        ensureSede(code, name, index + 1);
+    });
 
     Object.keys(formFields).forEach(key => {
-        const match = key.match(/^sede_(principal|\d{2})_/);
-        if (match) ensureSede(match[1] === 'principal' ? 1 : Number(match[1]));
+        const match = key.match(/^sede_(principal|\d+)_/);
+        if (match && !sheetsToRender.length) ensureSede(match[1] === 'principal' ? '1' : match[1]);
     });
 
     records.forEach(record => {
-        const num = parseSedeNumber(record._sheet, bySedeNumber.size + 1);
-        const sede = ensureSede(num);
+        const code = sedeSheetCellValue(sedeSheetValues, record._sheet, 'codigo_sede') || sedeCodeFromValue(record._sheet, String(bySedeCode.size + 1));
+        const sede = ensureSede(code, record._sheet);
         if (sede) sede.workers.push(record);
     });
 
     Object.entries(workerCounts).forEach(([name, count]) => {
-        const sede = ensureSede(parseSedeNumber(name, bySedeNumber.size + 1));
+        const code = sedeSheetCellValue(sedeSheetValues, name, 'codigo_sede') || sedeCodeFromValue(name, String(bySedeCode.size + 1));
+        const sede = ensureSede(code, name);
         if (sede) {
             sede.workerCount = count;
             sede.sourceName = name;
@@ -2725,12 +2759,13 @@ function buildFormularioSedes(payload, declaredTotal) {
     });
 
     Object.entries(salaryCounts).forEach(([name, amount]) => {
-        const sede = ensureSede(parseSedeNumber(name, bySedeNumber.size + 1));
+        const code = sedeSheetCellValue(sedeSheetValues, name, 'codigo_sede') || sedeCodeFromValue(name, String(bySedeCode.size + 1));
+        const sede = ensureSede(code, name);
         if (sede) sede.salaryTotal = amount;
     });
 
-    return [...bySedeNumber.values()].sort((a, b) => a.number - b.number).map(sede => {
-        const prefix = sedePrefixFromNumber(sede.number);
+    return [...bySedeCode.values()].sort((a, b) => a.number - b.number).map(sede => {
+        const prefix = sedePrefixFromCode(sede.code);
         const centros = Array.isArray(formFields[`${prefix}_centros_de_trabajo`])
             ? formFields[`${prefix}_centros_de_trabajo`]
             : [];
@@ -2746,7 +2781,8 @@ function buildFormularioSedes(payload, declaredTotal) {
 
         return {
             ...sede,
-            codigo: formFields[`${prefix}_codigo`] || '',
+            codigo: formFields[`${prefix}_codigo`] || sede.code || '',
+            label: `Sede ${formFields[`${prefix}_codigo`] || sede.code || sede.number}`,
             nombre: formFields[`${prefix}_nombre`] || '',
             direccion: formFields[`${prefix}_direccion`] || '',
             municipio: formFields[`${prefix}_municipio_distrito`] || '',
@@ -2768,7 +2804,8 @@ function buildFormularioSedes(payload, declaredTotal) {
 }
 
 function centroTrabajoLabel(centro, index) {
-    return `C. Trabajo ${String(index + 1).padStart(2, '0')}`;
+    const code = centroTrabajoCode(centro);
+    return `C. Trabajo ${code || String(index + 1).padStart(2, '0')}`;
 }
 
 function renderFormularioCentroDetalle(centro) {
