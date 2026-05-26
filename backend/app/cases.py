@@ -5119,6 +5119,11 @@ def _extract_sede_info_from_sheet(sheet_obj: Any, sede_num: int) -> Dict[str, An
         f"{prefix}_centros_de_trabajo": centros,
     }
 
+
+def _is_numbered_sede_worker_sheet(sheet_name: Any) -> bool:
+    return bool(re.search(r"\bsede\s*0*\d+\s*-\s*trabajadores\b", normalize_haystack(sheet_name)))
+
+
 def _extract_worker_sheet_control_totals(rows: List[tuple[Any, ...]]) -> Dict[str, int]:
     reported_workers = 0
     reported_salary_total = 0
@@ -5497,6 +5502,7 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
     sede_sheet_values: Dict[str, Dict[str, Dict[str, Any]]] = {}
     sede_center_rows: Dict[str, List[Dict[str, Dict[str, Any]]]] = {}
     sede_worker_rows: Dict[str, List[Dict[str, Dict[str, Any]]]] = {}
+    all_sede_worker_sheet_names: List[str] = []
     form_fields: Dict[str, str] = {}
     form_cell_values: Dict[str, Dict[str, Any]] = {}
     activity_catalog_codes: List[str] = []
@@ -5516,7 +5522,8 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
         if "formulario de afili" in norm_sheet_name:
             form_fields = _extract_form_fields_from_sheet(sheet)
             form_cell_values = _extract_form_cell_values_from_sheet(sheet)
-        if "sede" in norm_sheet_name and "trabajador" in norm_sheet_name:
+        if _is_numbered_sede_worker_sheet(normalized_sheet_name):
+            all_sede_worker_sheet_names.append(normalized_sheet_name)
             sede_sheet_values[normalized_sheet_name] = _extract_sede_sheet_values_from_sheet(sheet)
             center_rows = _extract_sede_center_rows_from_sheet(sheet)
             sede_center_rows[normalized_sheet_name] = center_rows
@@ -5558,13 +5565,29 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
         or only_digits(form_fields.get("b_numero_sedes", ""))
         or profile.get("numero_sedes", "")
     )
+    expected_sedes_count = int(profile["numero_sedes"]) if str(profile.get("numero_sedes") or "").isdigit() else 0
+    active_sede_worker_sheet_names = (
+        all_sede_worker_sheet_names[:expected_sedes_count]
+        if expected_sedes_count > 0
+        else list(all_sede_worker_sheet_names)
+    )
+    if expected_sedes_count > 0:
+        active_sede_worker_sheet_set = set(active_sede_worker_sheet_names)
+        sede_sheet_values = {name: values for name, values in sede_sheet_values.items() if name in active_sede_worker_sheet_set}
+        sede_center_rows = {name: rows for name, rows in sede_center_rows.items() if name in active_sede_worker_sheet_set}
+        sede_worker_rows = {name: rows for name, rows in sede_worker_rows.items() if name in active_sede_worker_sheet_set}
+        worker_sheet_counts = {name: count for name, count in worker_sheet_counts.items() if name in active_sede_worker_sheet_set}
+        worker_sheet_salary_totals = {
+            name: total for name, total in worker_sheet_salary_totals.items() if name in active_sede_worker_sheet_set
+        }
+        records = [record for record in records if normalize_text(record.get("_sheet", "")) in active_sede_worker_sheet_set]
     profile["nomina_total"] = (
         only_digits(form_fields.get("a_valor_total_nomina", ""))
         or only_digits(form_fields.get("b_monto_total_cotizacion", ""))
         or profile.get("nomina_total", "")
     )
 
-    clean_preview = _generate_clean_from_workbook(workbook, path.name)
+    clean_preview = _generate_clean_from_workbook(workbook, path.name, expected_sedes_count=expected_sedes_count)
     contract_fields = _extract_employer_from_contract_text((clean_preview.get("contrato_clean") or {}).get("content", ""))
     company_name = normalize_text(contract_fields.get("empresa", ""))
     nit_value = only_digits(contract_fields.get("nit", ""))
@@ -5589,6 +5612,8 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
         "records": records,
         "worker_sheet_counts": worker_sheet_counts,
         "worker_sheet_salary_totals": worker_sheet_salary_totals,
+        "all_sede_worker_sheet_names": all_sede_worker_sheet_names,
+        "active_sede_worker_sheet_names": active_sede_worker_sheet_names,
         "sede_sheet_values": sede_sheet_values,
         "sede_center_rows": sede_center_rows,
         "sede_worker_rows": sede_worker_rows,
@@ -5631,7 +5656,7 @@ def _sheet_to_clean_lines(sheet: Any, force_int_float: bool = False) -> List[str
     return lines
 
 
-def _generate_clean_from_workbook(workbook: Any, excel_filename: str) -> Dict[str, Any]:
+def _generate_clean_from_workbook(workbook: Any, excel_filename: str, expected_sedes_count: int = 0) -> Dict[str, Any]:
     def _norm(value: str) -> str:
         return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
@@ -5652,10 +5677,13 @@ def _generate_clean_from_workbook(workbook: Any, excel_filename: str) -> Dict[st
     indep_sheet = ""
     for name in sheet_names:
         norm_name = _norm(name)
-        if "sede" in norm_name and "trabajador" in norm_name:
+        if _is_numbered_sede_worker_sheet(name):
             worker_sheets.append(name)
         if ("independiente" in norm_name and "723" in norm_name) or norm_name == "independientes 723":
             indep_sheet = name
+    all_worker_sheets = list(worker_sheets)
+    if expected_sedes_count > 0:
+        worker_sheets = worker_sheets[:expected_sedes_count]
 
     contrato_lines = _sheet_to_clean_lines(workbook[main_sheet], force_int_float=False)
     workers_multi: List[Dict[str, Any]] = []
@@ -5705,7 +5733,7 @@ def _generate_clean_from_workbook(workbook: Any, excel_filename: str) -> Dict[st
 
     return {
         "ok": bool(contrato_lines),
-        "source_sheets": {"main_sheet": main_sheet, "worker_sheets": worker_sheets},
+        "source_sheets": {"main_sheet": main_sheet, "worker_sheets": worker_sheets, "all_worker_sheets": all_worker_sheets},
         "sede_info_extra": sede_info_extra,
         "contrato_clean": {
             "filename": f"contrato_{safe_name}_clean.txt",

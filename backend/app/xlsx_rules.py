@@ -618,7 +618,7 @@ def _same_date_value(left: Any, right: Any) -> bool:
 
 
 def _sede_sheet_number(sheet_name: str) -> int | None:
-    match = re.search(r"sede\s+0*(\d+)", normalize_haystack(sheet_name))
+    match = re.search(r"\bsede\s*0*(\d+)\s*-\s*trabajadores\b", normalize_haystack(sheet_name))
     if not match:
         return None
     try:
@@ -965,6 +965,8 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
     sede_sheet_values = dict((xlsx_profile or {}).get("sede_sheet_values") or {})
     sede_center_rows = dict((xlsx_profile or {}).get("sede_center_rows") or {})
     sede_worker_rows = dict((xlsx_profile or {}).get("sede_worker_rows") or {})
+    all_sede_worker_sheet_names = list((xlsx_profile or {}).get("all_sede_worker_sheet_names") or [])
+    active_sede_worker_sheet_names = list((xlsx_profile or {}).get("active_sede_worker_sheet_names") or [])
     has_independientes_723 = bool((xlsx_profile or {}).get("has_independientes_723"))
 
     blockers: List[Dict[str, Any]] = []
@@ -1279,17 +1281,14 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
 
     expected_sedes_value = form_raw("b_numero_sedes") if "traslado" in tipo_tramite else form_raw("a_numero_sedes")
     expected_sedes = _parse_amount(expected_sedes_value)
-    sede_sheet_names = sorted(
-        sede_sheet_values.keys(),
-        key=lambda name: (_sede_sheet_number(name) is None, _sede_sheet_number(name) or 0, name),
-    )
+    sede_sheet_names = active_sede_worker_sheet_names or list(sede_sheet_values.keys())
     if expected_sedes > 0:
         numbered_sheet_names = [
             name
-            for name in sede_sheet_names
+            for name in (all_sede_worker_sheet_names or sede_sheet_names)
             if _sede_sheet_number(name) is not None
         ]
-        if len(numbered_sheet_names) != expected_sedes:
+        if len(numbered_sheet_names) < expected_sedes:
             blockers.append(
                 {
                     "code": "XLSX_SEDE_SHEET_COUNT_MISSING",
@@ -1301,7 +1300,7 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                     ),
                 }
             )
-        sede_sheet_names = numbered_sheet_names
+        sede_sheet_names = numbered_sheet_names[:expected_sedes]
 
     sede_required_fields = [
         ("numero_radicacion", False, False, False),
