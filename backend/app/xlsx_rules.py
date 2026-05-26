@@ -1287,30 +1287,18 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
         numbered_sheet_names = [
             name
             for name in sede_sheet_names
-            if (_sede_sheet_number(name) or 0) <= expected_sedes
+            if _sede_sheet_number(name) is not None
         ]
-        if len(numbered_sheet_names) < expected_sedes:
+        if len(numbered_sheet_names) != expected_sedes:
             blockers.append(
                 {
                     "code": "XLSX_SEDE_SHEET_COUNT_MISSING",
                     "severity": "blocker",
                     "message": (
                         f"El formulario declara {expected_sedes} sede(s), pero el XLSX trae "
-                        f"{len(numbered_sheet_names)} hoja(s) de sede dentro de esa cantidad: {', '.join(numbered_sheet_names) or 'ninguna'}."
+                        f"{len(numbered_sheet_names)} hoja(s) que coinciden con 'Sede [número] - Trabajadores': "
+                        f"{', '.join(numbered_sheet_names) or 'ninguna'}."
                     ),
-                }
-            )
-        actual_numbers = {number for number in (_sede_sheet_number(name) for name in sede_sheet_names) if number is not None}
-        expected_numbers = set(range(1, expected_sedes + 1))
-        missing_numbers = sorted(expected_numbers - actual_numbers)
-        if missing_numbers:
-            blockers.append(
-                {
-                    "code": "XLSX_SEDE_SHEET_SEQUENCE_MISSING",
-                    "severity": "blocker",
-                    "message": "Faltan hojas de sede esperadas por el formulario: "
-                    + ", ".join(f"Sede {number:02d} - Trabajadores" for number in missing_numbers)
-                    + ".",
                 }
             )
         sede_sheet_names = numbered_sheet_names
