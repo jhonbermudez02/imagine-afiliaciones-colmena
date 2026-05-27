@@ -7931,6 +7931,24 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
 
     entrega_porcentaje_issue = None
     for doc in docs:
+        manual_comisiones = doc.get("_manual_comisiones") or []
+        if not manual_comisiones:
+            continue
+        errores_participacion = _validate_participacion_por_tipo(manual_comisiones)
+        for err in errores_participacion:
+            filename = str(doc.get("filename") or "")
+            message = f"{err} Archivo: {filename}." if filename else err
+            validations.append(
+                {
+                    "code": "COMISION_MANUAL_PARTICIPACION_SUMA",
+                    "status": "ALERTA",
+                    "severity": "blocker",
+                    "message": message,
+                }
+            )
+            alerts.append(validations[-1])
+
+    for doc in docs:
         if str(doc.get("document_type") or "") != "entrega_documentos":
             continue
         # Extraer todos los intermediarios y validar suma por tipo
@@ -8157,19 +8175,21 @@ def _push_comisiones_to_legacy(lote: str, docs: List[Dict[str, Any]], base: str 
     base_url = str(settings.legacy_backend_url or "").strip().rstrip("/")
     if not base_url:
         return False
+    comision_docs = [d for d in docs if str(d.get("document_type") or "") == "comision"]
     entrega_docs = [d for d in docs if str(d.get("document_type") or "") == "entrega_documentos"]
-    if not entrega_docs:
+    source_docs = comision_docs or entrega_docs
+    if not source_docs:
         return False
     # Buscar correcciones manuales de comisiones en el payload
     manual_comisiones: Dict[str, List[Dict[str, str]]] = {}
-    for doc in entrega_docs:
+    for doc in source_docs:
         fname = str(doc.get("filename") or "")
         mc = doc.get("_manual_comisiones") or []
         if mc:
             manual_comisiones[fname] = mc
     comision_rows = []
     linea = 0
-    for doc in entrega_docs:
+    for doc in source_docs:
         fname = str(doc.get("filename") or "")
         # Preferir correcciones manuales del operador sobre OCR
         if fname in manual_comisiones:
@@ -8311,27 +8331,72 @@ def _extract_todos_intermediarios(doc: Dict[str, Any]) -> List[Dict[str, str]]:
         })
     return results
 
+
+def _extract_comisiones_participacion_keyword(doc: Dict[str, Any]) -> List[Dict[str, str]]:
+    text = normalize_text(doc.get("ocr_text") or doc.get("text_preview") or "")
+    if not text:
+        return []
+    results: List[Dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    keyword_pattern = re.compile(r"%\s*de\s+participaci[oó]n", flags=re.IGNORECASE)
+    stop_pattern = re.compile(r"\b(?:recimient\w*|documentos\s+anexos)\b", flags=re.IGNORECASE)
+    row_pattern = re.compile(
+        r"\b(0?[1-4])\s+(\d[\d.]{4,15}\d(?:-\d)?)\s+(.{2,140}?)\s+(\d{1,3}(?:[.,]\d{1,2})?)\s*%",
+        flags=re.IGNORECASE,
+    )
+    for keyword_match in keyword_pattern.finditer(text):
+        block = text[keyword_match.end():]
+        stop_match = stop_pattern.search(block)
+        if stop_match:
+            block = block[:stop_match.start()]
+        for row_match in row_pattern.finditer(block):
+            codigo = only_digits(row_match.group(1)).lstrip("0") or "0"
+            cedula = only_digits(row_match.group(2))
+            porcentaje = normalize_text(row_match.group(4)).replace(",", ".")
+            if not codigo or not cedula:
+                continue
+            key = (codigo, cedula, porcentaje)
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append(
+                {
+                    "codigo": codigo,
+                    "cedula": cedula,
+                    "porcentaje": porcentaje,
+                    "source": "ocr_participacion_keyword",
+                }
+            )
+    return results
+
+
 def _validate_participacion_por_tipo(intermediarios: List[Dict[str, str]]) -> List[str]:
     """Valida que la suma de participación por tipo de código sea 100%."""
     errores = []
     from collections import defaultdict
     por_tipo: dict = defaultdict(list)
     for interm in intermediarios:
-        codigo = interm.get("codigo_intermediario", "")
-        pct = interm.get("porcentaje_venta", "0")
+        codigo = only_digits(str(
+            interm.get("codigo_intermediario")
+            or interm.get("codigo")
+            or interm.get("codigo_vendedor")
+            or ""
+        )).lstrip("0") or ""
+        pct = str(interm.get("porcentaje_venta") or interm.get("porcentaje") or "0")
+        if not codigo:
+            continue
         try:
             por_tipo[codigo].append(float(pct.replace(",", ".").replace("%", "").strip()))
         except ValueError:
             pass
     for codigo, porcentajes in por_tipo.items():
-        if len(porcentajes) > 1:
-            total = sum(porcentajes)
-            if abs(total - 100.0) > 0.5:
-                tipo_nombre = {"1": "Consultor", "3": "Corredor/Agencia", "4": "Convenio"}.get(codigo, f"Tipo {codigo}")
-                errores.append(
-                    f"Comisiones intermediario: la suma de participación para {tipo_nombre} "
-                    f"(código {codigo}) es {total:.0f}%, debe ser 100%."
-                )
+        total = sum(porcentajes)
+        if abs(total - 100.0) > 0.5:
+            tipo_nombre = {"1": "Consultor", "3": "Corredor/Agencia", "4": "Convenio"}.get(codigo, f"Tipo {codigo}")
+            errores.append(
+                f"Comisiones intermediario: la suma de participación para {tipo_nombre} "
+                f"(código {codigo}) es {total:g}%, debe ser 100%."
+            )
     return errores
 
 
@@ -9390,6 +9455,22 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
                 doc["code_source"] = "manual_review_override"
 
     _ensure_entrega_comision_duplicate(case_id, payload, docs)
+
+    auto_comisiones = previous_manual_review.get("comisiones") or {}
+    for doc in docs:
+        if str(doc.get("document_type") or "") != "comision":
+            continue
+        fname = str(doc.get("filename") or "")
+        if not fname:
+            continue
+        if fname in auto_comisiones:
+            doc["_manual_comisiones"] = auto_comisiones[fname]
+            continue
+        extracted_comisiones = _extract_comisiones_participacion_keyword(doc)
+        if extracted_comisiones:
+            previous_manual_review.setdefault("comisiones", auto_comisiones)
+            auto_comisiones[fname] = extracted_comisiones
+            doc["_manual_comisiones"] = extracted_comisiones
 
     for doc in docs:
         fields = doc.get("fields") or {}
