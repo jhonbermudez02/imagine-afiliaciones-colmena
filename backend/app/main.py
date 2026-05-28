@@ -39,6 +39,7 @@ from .cases import (
     save_document_workspace,
     save_manual_review,
     save_validation_exception,
+    refresh_case_validations,
     search_cases,
     search_document_registry,
     store_case_files,
@@ -3157,6 +3158,19 @@ async def case_analyze(case_id: str, operation: Optional[str] = Query(default=No
         raise HTTPException(status_code=500, detail=f"No pude analizar el caso: {exc}") from exc
 
 
+@app.post("/api/cases/{case_id}/refresh-validations", response_model=CaseCreateResponse)
+async def case_refresh_validations(case_id: str, operation: Optional[str] = Query(default=None)):
+    try:
+        _ensure_case_operation(load_case(case_id), operation)
+        payload = refresh_case_validations(case_id)
+        return CaseCreateResponse(**payload)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
+    except Exception as exc:
+        logger.error("Error refrescando validaciones del caso %s: %s", case_id, exc)
+        raise HTTPException(status_code=500, detail=f"No pude refrescar validaciones del caso: {exc}") from exc
+
+
 @app.post("/api/cases/{case_id}/run-workflow", response_model=CaseCreateResponse)
 async def case_run_workflow(case_id: str, operation: Optional[str] = Query(default=None)):
     try:
@@ -3318,7 +3332,6 @@ async def case_document_workspace(case_id: str, request: CaseDocumentWorkspaceRe
         return {
             "case_id": case_id,
             "document_workspace": (payload.get("analysis") or {}).get("document_workspace") or {},
-            "case": payload,
         }
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc

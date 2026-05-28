@@ -33,7 +33,7 @@ const REVIEW_TYPE_OPTIONS = [
     ['anexo_sedes_10',        'Sedes ·10',         '01'],
     ['listado_trabajadores',  'Listados',           '03'],
     ['comision',              'Comisión',           '02'],
-    ['carta',                 'Carta',              '04'],
+    ['carta',                 'Carta',              '29'],
     ['camara_comercio',       'Cámara de comercio', '05'],
     ['cedula',                'Cédula',             '06'],
     ['inspector',             'Inspector',          '17'],
@@ -68,7 +68,6 @@ const DOCUMENT_DISPLAY_PRIORITY = [
     'comision',
     'carta',
     'beneficiario_final',
-    'constancia_afiliacion',
 ];
 const DOCUMENT_DISPLAY_PRIORITY_MAP = new Map(DOCUMENT_DISPLAY_PRIORITY.map((type, index) => [type, index]));
 
@@ -107,7 +106,7 @@ function setClassifDocListBusy(loading, message = 'Procesando cambios...') {
 
 async function refreshClassifAfterManualChange(caseId) {
     if (!caseId) return null;
-    const r = await fetchWithRetry(caseApiUrl(caseId, '/analyze'), { method: 'POST' });
+    const r = await fetchWithRetry(caseApiUrl(caseId, '/refresh-validations'), { method: 'POST' });
     const payload = await r.json();
     activeCaseId = caseId;
     activeCasePayload = payload;
@@ -116,6 +115,32 @@ async function refreshClassifAfterManualChange(caseId) {
         renderClassifDocList(payload);
     }
     return payload;
+}
+
+async function runFullCaseAnalyzeFromClassif(caseId) {
+    if (!caseId) return null;
+    if (!confirm('¿Ejecutar análisis completo? Se volverán a leer Excel y documentos, y puede tardar más.')) return null;
+    setClassifDocListBusy(true, 'Ejecutando análisis completo...');
+    try {
+        showToast('Ejecutando análisis completo del contrato...', 'info', 3000);
+        const r = await fetchWithRetry(caseApiUrl(caseId, '/analyze'), { method: 'POST' });
+        const payload = await r.json();
+        activeCaseId = caseId;
+        activeCasePayload = payload;
+        renderClassifBlockers(payload);
+        renderClassifDocList(payload);
+        const preview = document.getElementById('classifPreviewBody');
+        if (preview) preview.innerHTML = '<div class="empty-state">Selecciona un documento</div>';
+        const actions = document.getElementById('classifPreviewActions');
+        if (actions) actions.innerHTML = '';
+        showToast('Análisis completo finalizado.', 'ok', 3500);
+        return payload;
+    } catch(e) {
+        showToast('No se pudo ejecutar /analyze: ' + e.message, 'err', 6000);
+        return null;
+    } finally {
+        setClassifDocListBusy(false);
+    }
 }
 
 function normalizeOperation(value = '') {
@@ -493,9 +518,9 @@ async function acceptValidationException(caseId, blocker) {
             operator: tester.email || tester.name || '',
         }),
     });
-    showToast('Excepción guardada. Reprocesando contrato...', 'info', 3500);
-    const r = await fetchWithRetry(caseApiUrl(caseId, '/analyze'), { method: 'POST' });
-    const payload = await r.json();
+    showToast('Excepción guardada. Actualizando validaciones...', 'info', 2500);
+    const payload = await refreshClassifAfterManualChange(caseId);
+    if (!payload) return;
     activeCasePayload = payload;
     const reportEl = document.getElementById('reporteContent');
     if (reportEl && currentView === 'reporte') renderReporte(reportEl, payload);
@@ -1928,10 +1953,24 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
             <span style="font-size:10px;opacity:0.6;margin-right:2px">Orden:</span>
             <span class="classif-sort-btn active" style="cursor:default">Prioridad documental</span>
             ${isApproved ? '<span class="classif-readonly-pill">Aprobado · solo lectura</span>' : ''}
-            <button class="classif-sort-btn" id="btnGalleryMode" type="button" style="margin-left:auto;color:var(--c-blue)">🖼 Galería</button>
+            <button class="classif-sort-btn" id="btnFullAnalyze" type="button" style="margin-left:auto;color:var(--c-warn)">Análisis completo</button>
+            <button class="classif-sort-btn" id="btnGalleryMode" type="button" style="color:var(--c-blue)">🖼 Galería</button>
         </div>
     `;
     el.parentElement?.insertBefore(header, el);
+
+    header.querySelector('#btnFullAnalyze')?.addEventListener('click', async () => {
+        const btn = header.querySelector('#btnFullAnalyze');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Analizando...';
+        }
+        await runFullCaseAnalyzeFromClassif(payload.id || activeCaseId);
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Análisis completo';
+        }
+    });
 
     // Listener galería
     header.querySelector('#btnGalleryMode')?.addEventListener('click', () => {

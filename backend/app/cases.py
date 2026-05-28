@@ -35,7 +35,6 @@ LEGACY_CODE_TO_TYPE = {
     1: "anexo_sedes",
     2: "listado_trabajadores",
     3: "comision",
-    4: "carta",
     5: "camara_comercio",
     6: "cedula",
     7: "constancia_afiliacion",
@@ -58,6 +57,7 @@ LEGACY_CODE_TO_TYPE = {
     26: "siarl",
     27: "beneficiario_final",
     28: "sat",
+    29: "carta",
     98: "autorizacion",
     99: "imagen",
 }
@@ -99,7 +99,6 @@ DOCUMENT_DISPLAY_PRIORITY = [
     "comision",
     "carta",
     "beneficiario_final",
-    "constancia_afiliacion",
 ]
 DOCUMENT_DISPLAY_PRIORITY_MAP = {
     document_type: index for index, document_type in enumerate(DOCUMENT_DISPLAY_PRIORITY)
@@ -970,6 +969,59 @@ def _get_rag_client():
             pass
     return _rag_client
 
+
+def _looks_like_payment_support_text(text: str) -> bool:
+    haystack = normalize_haystack(text)
+    planilla_markers = [
+        "informe consolidado de pagos por empresas",
+        "resumen de pago a salud",
+        "aportes planilla resumen",
+        "planilla resumen en linea",
+        "planilla resumen en línea",
+        "resumen general de pago en inea",
+        "planilla resumen",
+        "resumen general de pago en linea",
+        "resumen general de pago en línea",
+        "aportes resumen general de pago en linea",
+        "aportes resumen general de pago en línea",
+        "aportes resumen general de pago en inea",
+        "resumen de pago riesgo",
+        "datos generales del aportante",
+        "centro de trabajo:",
+        "afiliados)",
+        "valor liquidado",
+        "valor a pagar",
+        "datos generales de la liquidacion",
+        "datos generales de la liquidación",
+        "entidad recaudo pagada",
+        "ibc salud",
+        "ibc pension",
+        "ibc pensión",
+        "valor pago",
+        "estado planilla",
+        "periodo salud",
+        "periodo pensión",
+        "periodo pension",
+        "referencia de pago",
+        "f. presentacion unica",
+        "f. presentación única",
+    ]
+    planilla_negative_markers = [
+        "enviado el:",
+        "datos adjuntos:",
+        "asunto:",
+        "formulario de afiliacion",
+        "a. afiliacion",
+        "a. afiliación",
+        "b. traslado",
+        "c. terminacion",
+    ]
+    return (
+        sum(1 for token in planilla_markers if token in haystack) >= 2
+        and not any(token in haystack for token in planilla_negative_markers)
+    )
+
+
 def _rag_classify_document(ocr_text: str, min_score: float = 0.82) -> Optional[Dict[str, Any]]:
     """Busca en RAG el tipo de documento mas similar al OCR dado.
     Retorna el tipo si la similitud supera min_score, None si no."""
@@ -1000,6 +1052,9 @@ def _rag_classify_document(ocr_text: str, min_score: float = 0.82) -> Optional[D
             return None
         best_type, count = tipos.most_common(1)[0]
         best_score = results[0].score
+        if best_type in {"soporte_ingresos", "soporte_pagos"} and not _looks_like_payment_support_text(ocr_text):
+            import logging as _logging; _logging.getLogger("afi.rag").info("RAG sugirio '%s' pero se descarta por falta de señales de pago/planilla", best_type)
+            return None
         import logging as _logging; _logging.getLogger("afi.rag").info("RAG clasifico documento como '%s' (score=%.3f, votos=%d)", best_type, best_score, count)
         return {
             "document_type": best_type,
@@ -1267,6 +1322,8 @@ def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, exp
         "updated_at": utc_now(),
     }
     _apply_manual_document_review_overrides(analysis)
+    if bucket_name == "documents" and normalized_expected_type:
+        _reorder_document_workspace_by_document_priority(payload, moved_filename=str(filename))
     payload["updated_at"] = utc_now()
     save_case(payload)
     _refresh_learning_artifacts()
@@ -1541,6 +1598,50 @@ def _ensure_document_workspace(payload: Dict[str, Any]) -> Dict[str, Any]:
     return workspace
 
 
+def _reorder_document_workspace_by_document_priority(payload: Dict[str, Any], moved_filename: str = "") -> Dict[str, Any]:
+    workspace = _ensure_document_workspace(payload)
+    files = payload.get("files") or []
+    available = [str(item.get("filename") or "").strip() for item in files if str(item.get("filename") or "").strip()]
+    docs = [
+        item
+        for item in ((payload.get("analysis") or {}).get("documents") or [])
+        if isinstance(item, dict) and str(item.get("filename") or "").strip()
+    ]
+
+    indexed_docs = list(enumerate(docs))
+    moved_filename = str(moved_filename or "").strip()
+    moved_doc = next((item for item in docs if str(item.get("filename") or "").strip() == moved_filename), None)
+    moved_type = _canonical_document_display_type((moved_doc or {}).get("document_type")) if moved_doc else ""
+
+    def order_key(pair: tuple[int, Dict[str, Any]]) -> tuple[tuple[int, str], int, int]:
+        index, item = pair
+        doc_type = _canonical_document_display_type(item.get("document_type"))
+        moved_after_similar = 1 if moved_filename and moved_type and doc_type == moved_type and str(item.get("filename") or "").strip() == moved_filename else 0
+        return _document_display_sort_key(item.get("document_type")), moved_after_similar, index
+
+    ordered = [
+        str(item.get("filename") or "").strip()
+        for _, item in sorted(indexed_docs, key=order_key)
+    ]
+    seen = set(ordered)
+    xlsx_files: List[str] = []
+    other_files: List[str] = []
+    for item in files:
+        name = str(item.get("filename") or "").strip()
+        if not name or name in seen:
+            continue
+        suffix = Path(name).suffix.lower()
+        if suffix in {".xlsx", ".xlsm", ".xls"}:
+            xlsx_files.append(name)
+        else:
+            other_files.append(name)
+        seen.add(name)
+
+    workspace["order"] = [name for name in ordered + other_files + xlsx_files if name in available]
+    workspace["manual_order"] = True
+    return workspace
+
+
 def _sync_document_workspace(payload: Dict[str, Any]) -> Dict[str, Any]:
     workspace = _ensure_document_workspace(payload)
     available = [str(item.get("filename") or "").strip() for item in (payload.get("files") or []) if str(item.get("filename") or "").strip()]
@@ -1683,6 +1784,124 @@ def save_document_workspace(case_id: str, action: str, filename: str = "", order
     _sync_document_workspace(payload)
     payload["updated_at"] = utc_now()
     save_case(payload)
+    return payload
+
+
+def refresh_case_validations(case_id: str) -> Dict[str, Any]:
+    payload = load_case(case_id)
+    previous_analysis = payload.get("analysis") or {}
+    if not previous_analysis:
+        return analyze_case(case_id)
+
+    analysis = dict(previous_analysis)
+    xlsx_profile = analysis.get("xlsx_profile") or {}
+    docs = analysis.get("documents") or []
+    if not isinstance(docs, list):
+        docs = []
+    manual_review = analysis.get("manual_review") or {}
+
+    validation_started = perf_counter()
+    _apply_manual_document_review_overrides(analysis)
+    docs = analysis.get("documents") or docs
+
+    required_docs = _apply_conditional_required_documents(_build_required_documents(xlsx_profile), docs)
+    received_types = {item.get("document_type") for item in docs if isinstance(item, dict) and item.get("document_type")}
+    required_profile = dict(xlsx_profile.get("profile", {}) or {})
+    required_form_fields = dict(xlsx_profile.get("form_fields", {}) or {})
+    required_form_cells = dict(xlsx_profile.get("form_cell_values", {}) or {})
+    required_representative_document = (
+        (required_form_cells.get("rep_legal_numero_documento") or {}).get("value")
+        or required_form_fields.get("rep_legal_numero_documento")
+        or required_profile.get("documento")
+        or ""
+    )
+    required_employer_document = (
+        (required_form_cells.get("empleador_numero_documento_nit") or {}).get("value")
+        or required_form_fields.get("empleador_numero_documento_nit")
+        or required_profile.get("documento_empleador")
+        or required_profile.get("nit")
+        or required_profile.get("documento")
+        or ""
+    )
+    if required_representative_document:
+        required_profile["documento"] = only_digits(required_representative_document)
+    if required_employer_document:
+        required_profile["nit"] = _normalize_company_nit(required_employer_document, docs)
+
+    required_evidence = _infer_required_document_satisfaction(required_docs, docs, required_profile)
+    missing_docs = [doc for doc in required_docs if not (required_evidence.get(doc) or {}).get("satisfied")]
+    matched_docs = _unique_preserve(
+        str(item.get("filename") or "")
+        for item in required_evidence.values()
+        if isinstance(item, dict) and item.get("satisfied") and item.get("filename")
+    )
+    validation_summary = _build_validation_summary(xlsx_profile, docs, missing_docs)
+    validation_summary = _apply_validation_exceptions(validation_summary, manual_review)
+    blocker_records = [
+        dict(item)
+        for item in validation_summary.get("precheck", {}).get("motivos_de_rechazo", [])
+        if isinstance(item, dict)
+    ]
+    blockers: List[str] = []
+    blockers.extend(
+        item["message"]
+        for item in blocker_records
+        if item.get("message") and item["message"] not in blockers
+    )
+    non_blocking_alerts = [
+        item["message"]
+        for item in validation_summary.get("alerts", [])
+        if normalize_haystack(item.get("severity", "")).lower() == "alert" and item.get("message")
+    ]
+    blockers.extend(
+        item["message"]
+        for item in validation_summary.get("alerts", [])
+        if normalize_haystack(item.get("severity", "")).lower() != "alert" and item.get("message") and item["message"] not in blockers
+    )
+
+    decision_status = "aprobable" if not blockers else "observado"
+    decision = {
+        "flow": "afiliacion_documental",
+        "recommended_status": decision_status,
+        "summary": "Contrato listo para radicacion." if decision_status == "aprobable" else "Contrato con faltantes o inconsistencias.",
+        "blockers": blockers,
+        "blocker_records": blocker_records,
+        "alerts": non_blocking_alerts,
+        "next_step": "Validar contrato final y radicar afiliacion." if decision_status == "aprobable" else "Solicitar faltantes o corregir inconsistencias antes de radicar.",
+    }
+    checklist = {
+        "required": required_docs,
+        "received": sorted(received_types),
+        "missing": missing_docs,
+        "required_evidence": required_evidence,
+        "matched_documents": matched_docs,
+        "mismatches": [],
+        "received_summary": _summarize_received_documents(docs),
+    }
+    analysis.update(
+        {
+            "updated_at": utc_now(),
+            "documents": docs,
+            "checklist": checklist,
+            "validacion_resumen": validation_summary,
+            "decision": decision,
+            "reporte_ejecutivo": _build_executive_report(payload.get("label", case_id), xlsx_profile, checklist, decision, validation_summary),
+            "output_926": _build_926_output(case_id, xlsx_profile, checklist, decision, docs=docs),
+            "manual_review": manual_review,
+        }
+    )
+    analysis["draft_926"] = (analysis.get("output_926") or {}).get("draft")
+    timings = dict(analysis.get("timings") or {})
+    timings["validation_duration_ms"] = int((perf_counter() - validation_started) * 1000)
+    timings["refresh_validations_only"] = True
+    analysis["timings"] = timings
+
+    payload["status"] = "completed" if decision_status == "aprobable" else "analyzed"
+    payload["updated_at"] = utc_now()
+    payload["analysis"] = analysis
+    _clear_manual_approval(payload, "Recalculo ligero de validaciones del caso.")
+    save_case(payload)
+    rebuild_document_registry()
     return payload
 
 
@@ -3510,8 +3729,8 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
 
             if doc_type == "rut" and _looks_like_carta_document(haystack):
                 doc["document_type"] = "carta"
-                doc["legacy_code"] = 4
-                doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(4, "")
+                doc["legacy_code"] = 29
+                doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(29, "")
                 doc["code_source"] = "post_carta_from_rut"
                 continue
 
@@ -3531,8 +3750,8 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
 
             if doc_type == "pdf" and _looks_like_carta_document(haystack):
                 doc["document_type"] = "carta"
-                doc["legacy_code"] = 4
-                doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(4, "")
+                doc["legacy_code"] = 29
+                doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(29, "")
                 doc["code_source"] = "post_carta_from_pdf"
                 continue
 
@@ -3730,8 +3949,8 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
             continue
         if _looks_like_carta_document(haystack):
             doc["document_type"] = "carta"
-            doc["legacy_code"] = 4
-            doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(4, "")
+            doc["legacy_code"] = 29
+            doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(29, "")
             doc["code_source"] = "post_carta_from_false_cedula"
             continue
 
@@ -3765,8 +3984,8 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
                 doc["code_source"] = "post_single_cedula_constancia"
             elif _looks_like_carta_document(haystack):
                 doc["document_type"] = "carta"
-                doc["legacy_code"] = 4
-                doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(4, "")
+                doc["legacy_code"] = 29
+                doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(29, "")
                 doc["code_source"] = "post_single_cedula_carta"
             elif any(token in haystack for token in ["resumen general de pago", "informe consolidado de pagos", "datos generales del aportante", "valor a pagar"]):
                 doc["document_type"] = "soporte_ingresos"
@@ -3850,55 +4069,10 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
     if _looks_like_constancia_afiliacion(haystack):
         return {"document_type": "constancia_afiliacion", "legacy_code": 7, "code_source": "ocr_constancia"}
     if _looks_like_comision_document(haystack):
-        return {"document_type": "carta", "legacy_code": 4, "code_source": "ocr_carta_intermediacion"}
+        return {"document_type": "carta", "legacy_code": 29, "code_source": "ocr_carta_intermediacion"}
     if _looks_like_carta_document(haystack):
-        return {"document_type": "carta", "legacy_code": 4, "code_source": "ocr_carta"}
-    planilla_markers = [
-        "informe consolidado de pagos por empresas",
-        "resumen de pago a salud",
-        "aportes planilla resumen",
-        "planilla resumen en linea",
-        "planilla resumen en línea",
-        "resumen general de pago en inea",
-        "planilla resumen",
-        "resumen general de pago en linea",
-        "resumen general de pago en línea",
-        "aportes resumen general de pago en linea",
-        "aportes resumen general de pago en línea",
-        "aportes resumen general de pago en inea",
-        "resumen de pago riesgo",
-        "datos generales del aportante",
-        "centro de trabajo:",
-        "afiliados)",
-        "valor liquidado",
-        "valor a pagar",
-        "datos generales de la liquidacion",
-        "datos generales de la liquidación",
-        "entidad recaudo pagada",
-        "ibc salud",
-        "ibc pension",
-        "ibc pensión",
-        "valor pago",
-        "estado planilla",
-        "periodo salud",
-        "periodo pensión",
-        "periodo pension",
-        "referencia de pago",
-        "f. presentacion unica",
-        "f. presentación única",
-    ]
-    planilla_negative_markers = [
-        "enviado el:",
-        "datos adjuntos:",
-        "asunto:",
-        "formulario de afiliacion",
-        "a. afiliacion",
-        "a. afiliación",
-        "b. traslado",
-        "c. terminacion",
-    ]
-    planilla_hits = sum(1 for token in planilla_markers if token in haystack)
-    if planilla_hits >= 2 and not any(token in haystack for token in planilla_negative_markers):
+        return {"document_type": "carta", "legacy_code": 29, "code_source": "ocr_carta"}
+    if _looks_like_payment_support_text(haystack):
         return {"document_type": "soporte_ingresos", "legacy_code": 11, "code_source": "ocr_planilla_precise"}
 
     strong_rules: List[tuple[int, str, List[str], str]] = [
@@ -3922,9 +4096,6 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
             continue
         if any(key in haystack for key in keys):
             return {"document_type": doc_type, "legacy_code": code, "code_source": label}
-
-    if any(token in haystack for token in ["declaracion de renta", "declaracion renta", "honorarios", "ingresos", "desprendible de pago"]):
-        return {"document_type": "soporte_ingresos", "legacy_code": 11, "code_source": "ocr_ingresos"}
 
     if lower_name.endswith((".xlsx", ".xlsm", ".xls")):
         return {"document_type": "xlsx", "legacy_code": -1, "code_source": "file_xlsx"}
