@@ -1267,7 +1267,7 @@ def approve_case(case_id: str, reason: str = "", operator: str = "", note: str =
     return save_case(payload)
 
 
-def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, expected_type: str = "", comisiones: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, expected_type: str = "", comisiones: Optional[List[Dict[str, Any]]] = None, tipo_negocio_detectado: Optional[str] = None) -> Dict[str, Any]:
     payload = load_case(case_id)
     if is_case_manually_approved(payload):
         raise ValueError("El contrato ya está aprobado y no permite edición documental.")
@@ -1276,6 +1276,19 @@ def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, exp
         payload["analysis"] = analysis
     _clear_manual_approval(payload, "Revisión manual de documentos o comisiones.")
     review_store = analysis.setdefault("manual_review", {})
+
+    if normalize_haystack(kind) == "tipo_negocio_detectado":
+        if not tipo_negocio_detectado:
+            raise ValueError("El tipo de negocio es requerido.")
+        if tipo_negocio_detectado not in ["Micro", "Pequeña", "Mediana", "Grande"]:
+            raise ValueError("El tipo de negocio no es válido.")
+
+        review_store["tipo_negocio_detectado"] = tipo_negocio_detectado
+        profile = analysis.setdefault("xlsx_profile", {}).setdefault("profile", {})
+        profile["tipo_negocio_detectado"] = tipo_negocio_detectado
+        payload["updated_at"] = utc_now()
+        save_case(payload)
+        return review_store
 
     # Cuando el operador corrige una clasificacion, RAG aprende
     if normalize_haystack(kind) != "comisiones" and normalize_haystack(verdict) == "no" and expected_type:

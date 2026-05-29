@@ -1727,14 +1727,38 @@ function renderComisionManualPanelHtml() {
     `;
 }
 
+function renderTipoNegocioPanelHtml() {
+    return `
+        <div class="reclassify-panel tipo-negocio-panel">
+            <div class="comision-panel-title">Corrección manual de tipo de negocio</div>
+            <div class="comision-actions-grid">
+                <select id="tipoNegocioSelect" class="field-select">
+                    <option value="">Selecciona el tipo de negocio...</option>
+                    <option value="Micro">Micro</option>
+                    <option value="Pequeña">Pequeña</option>
+                    <option value="Mediana">Mediana</option>
+                    <option value="Grande">Grande</option>
+                </select>
+                <button class="btn-primary" id="saveTipoNegocio" type="button">Guardar tipo de negocio</button>
+            </div>
+            <span id="tipoNegocioStatus"></span>
+        </div>
+    `;
+}
+
 function bindComisionManualPanel(item, payload, root = document) {
     const comisionRows = root.querySelector('#comisionRows');
     const addBtn = root.querySelector('#addComisionRow');
     const saveBtn = root.querySelector('#saveComisiones');
+    const saveTipoNegocioBtn = root.querySelector('#saveTipoNegocio');
     const comisionStatus = root.querySelector('#comisionStatus');
-    if (!comisionRows || !saveBtn) return;
+    const tipoNegocioSelect = root.querySelector('#tipoNegocioSelect');
+    const tipoNegocioStatus = root.querySelector('#tipoNegocioStatus');
+    
+    if (!comisionRows || !saveBtn || !saveTipoNegocioBtn) return;
 
     const existingComisiones = payload?.analysis?.manual_review?.comisiones?.[item.file] || [];
+    const rawTipoNegocio = payload?.analysis?.xlsx_profile?.profile?.tipo_negocio_detectado || '';
 
     function renderComisionRow(data = {}) {
         const div = document.createElement('div');
@@ -1755,7 +1779,56 @@ function bindComisionManualPanel(item, payload, root = document) {
     if (existingComisiones.length) existingComisiones.forEach(c => renderComisionRow(c));
     else renderComisionRow();
 
+    if (tipoNegocioSelect && rawTipoNegocio) {
+        const opciones = [...tipoNegocioSelect.options].map(o => o.value);
+        const match = opciones.find(
+            o => o.toLowerCase().trim() === rawTipoNegocio.toLowerCase().trim()
+        );
+        if (match) tipoNegocioSelect.value = match;
+    }
+
     addBtn?.addEventListener('click', () => renderComisionRow());
+
+    saveTipoNegocioBtn.addEventListener('click', async () => {
+        const tipoNegocio = tipoNegocioSelect?.value?.trim() || '';
+        if (!tipoNegocio) {
+            if (tipoNegocioStatus) {
+                tipoNegocioStatus.style.color = 'var(--c-err)';
+                tipoNegocioStatus.textContent = 'Selecciona un tipo de negocio antes de guardar.';
+            }
+            return;
+        }
+        try {
+            saveTipoNegocioBtn.disabled = true;
+            saveTipoNegocioBtn.textContent = 'Guardando...';
+            const r = await fetchWithRetry(caseApiUrl(payload.id, '/manual-review'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    kind: 'tipo_negocio_detectado',
+                    filename: item.file || '',
+                    verdict: 'si',
+                    tipo_negocio_detectado: tipoNegocio,
+                }),
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            if (tipoNegocioStatus) {
+                tipoNegocioStatus.style.color = 'var(--c-ok)';
+                tipoNegocioStatus.textContent = `✓ Tipo de negocio guardado: ${tipoNegocio}`;
+            }
+            if (payload?.analysis?.xlsx_profile?.profile) {
+                payload.analysis.xlsx_profile.profile.tipo_negocio = tipoNegocio;
+            }
+        } catch (e) {
+            if (tipoNegocioStatus) {
+                tipoNegocioStatus.style.color = 'var(--c-err)';
+                tipoNegocioStatus.textContent = 'Error: ' + (e.message || e);
+            }
+        } finally {
+            saveTipoNegocioBtn.disabled = false;
+            saveTipoNegocioBtn.textContent = 'Guardar tipo de negocio';
+        }
+    });
 
     saveBtn.addEventListener('click', async () => {
         const rows = [...comisionRows.querySelectorAll('.comision-row')].map(row => ({
@@ -1787,10 +1860,18 @@ function bindComisionManualPanel(item, payload, root = document) {
                 comisionStatus.style.color = 'var(--c-ok)';
                 comisionStatus.textContent = `✓ ${rows.length} intermediario(s) guardados`;
             }
+            if (tipoNegocioSelect) {
+                tipoNegocioSelect.style.color = 'var(--c-ok)';
+                tipoNegocioStatus.textContent = `✓ Tipo de negocio: ${tipoNegocioSelect.value}`;
+            }
         } catch(e) {
             if (comisionStatus) {
                 comisionStatus.style.color = 'var(--c-err)';
                 comisionStatus.textContent = 'Error: ' + e.message;
+            }
+            if (tipoNegocioStatus && !tipoNegocioSelect?.value) {
+                tipoNegocioStatus.style.color = 'var(--c-err)';
+                tipoNegocioStatus.textContent = 'Error: ' + e.message;
             }
         } finally {
             saveBtn.disabled = false;
@@ -1823,9 +1904,7 @@ function renderClassifComisionWorkspace(item, payload) {
     workspace.innerHTML = `
         <div class="classif-comision-grid">
             ${renderComisionManualPanelHtml()}
-            <div class="reclassify-panel classif-comision-pending-panel">
-                <div class="comision-panel-title">Pendiente</div>
-            </div>
+            ${renderTipoNegocioPanelHtml()}
         </div>
     `;
     bindComisionManualPanel(item, payload, workspace);
@@ -1974,6 +2053,7 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
 
     // Listener galería
     header.querySelector('#btnGalleryMode')?.addEventListener('click', () => {
+        console.log(payload);
         openGallery(items, payload, 0);
     });
     header.querySelector('#btnBackToCaseInfo')?.addEventListener('click', () => handleCaseAction('reporte', payload.id || activeCaseId));
@@ -3475,6 +3555,8 @@ function renderFormularioReporte(container, payload) {
 
     const empresa = formFields.empleador_razon_social || resumen.empresa || profile.empresa || payload.label || 'n/d';
     const nroAfiliacion = resolveContractNumber(a, payload);
+    const nroNit = formFields.empleador_numero_documento_nit || resumen.nit || profile.nit || '';
+    const tipoNegocio = profile.tipo_negocio_detectado || '';
     const estado = resumen.estado || decision.recommended_status || wf.status || 'n/d';
     const estadoNorm = normalizeText(estado);
     const decisionStatus = normalizeText(decision.recommended_status || '');
@@ -3497,7 +3579,14 @@ function renderFormularioReporte(container, payload) {
     container.innerHTML = `
         <div class="report-case-summary">
             <span class="report-state-badge ${stateClass}">${escapeHtml(stateLabel)}</span>
-            <div class="report-empresa">${escapeHtml(empresa)}</div>
+            <div class="report-empresa">
+                <div class="report-empresa-name">${escapeHtml(empresa)}</div>
+                <small class="report-empresa-meta">
+                    ${nroAfiliacion ? `Contrato: <strong>${escapeHtml(nroAfiliacion)}</strong>` : ''}
+                    ${nroNit ? `NIT: <strong>${escapeHtml(Number(nroNit).toLocaleString('es-CO'))}</strong>` : ''}
+                    ${tipoNegocio ? `Tipo de negocio: <strong>${escapeHtml(tipoNegocio)}</strong>` : ''}
+                </small>
+            </div>
             <div class="report-header-actions">
                 ${isAprobable && !approved ? `<button class="btn-success" id="approveCaseBtn" type="button">Aprobar contrato</button>` : ''}
                 <button class="btn-secondary" id="companyInfoToggle" type="button" aria-expanded="false" aria-controls="companyInfoCollapse">Información Empresa</button>

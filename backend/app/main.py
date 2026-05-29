@@ -166,6 +166,7 @@ class CaseManualReviewRequest(BaseModel):
     verdict: str
     expected_type: Optional[str] = None
     comisiones: Optional[List[Dict[str, Any]]] = None
+    tipo_negocio_detectado: Optional[str] = None
 
 
 class CaseValidationExceptionRequest(BaseModel):
@@ -3260,6 +3261,7 @@ async def case_manual_review(case_id: str, request: CaseManualReviewRequest, ope
             verdict=request.verdict,
             expected_type=request.expected_type or "",
             comisiones=request.comisiones,
+            tipo_negocio_detectado=request.tipo_negocio_detectado,
         )
         return {"case_id": case_id, "manual_review": review_store}
     except FileNotFoundError as exc:
