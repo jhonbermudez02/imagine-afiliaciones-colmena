@@ -104,6 +104,38 @@ DOCUMENT_DISPLAY_PRIORITY_MAP = {
     document_type: index for index, document_type in enumerate(DOCUMENT_DISPLAY_PRIORITY)
 }
 
+DOCUMENT_TYPE_ALIASES = {
+    "soporte_ingresos": "soporte_pagos",
+}
+
+
+def _canonical_document_type(document_type: Any) -> str:
+    key = normalize_haystack(document_type).replace(" ", "_")
+    if key.startswith("anexo_sedes"):
+        return key
+    return DOCUMENT_TYPE_ALIASES.get(key, key)
+
+
+def _canonicalize_document_types(docs: List[Dict[str, Any]]) -> bool:
+    changed = False
+    for doc in docs or []:
+        if not isinstance(doc, dict):
+            continue
+        original_type = str(doc.get("document_type") or "")
+        canonical_type = _canonical_document_type(original_type)
+        if canonical_type and canonical_type != original_type:
+            doc["document_type"] = canonical_type
+            changed = True
+        if canonical_type == "soporte_pagos":
+            if doc.get("legacy_code") != 11:
+                doc["legacy_code"] = 11
+                changed = True
+            expected_label = LEGACY_CODE_TO_TYPE.get(11, "")
+            if doc.get("legacy_label") != expected_label:
+                doc["legacy_label"] = expected_label
+                changed = True
+    return changed
+
 DOC_TYPE_TO_PRIMARY_CODE: Dict[str, int] = {}
 for _legacy_code, _doc_type in LEGACY_CODE_TO_TYPE.items():
     DOC_TYPE_TO_PRIMARY_CODE.setdefault(_doc_type, _legacy_code)
@@ -1016,10 +1048,31 @@ def _looks_like_payment_support_text(text: str) -> bool:
         "b. traslado",
         "c. terminacion",
     ]
-    return (
-        sum(1 for token in planilla_markers if token in haystack) >= 2
-        and not any(token in haystack for token in planilla_negative_markers)
-    )
+    if any(token in haystack for token in planilla_negative_markers):
+        return False
+
+    marker_hits = sum(1 for token in planilla_markers if token in haystack)
+    if marker_hits >= 2:
+        return True
+
+    has_planilla_header = "planilla resumen" in haystack
+    if not has_planilla_header:
+        return False
+
+    tabular_hits = 0
+    if len(re.findall(r"\bcc\s+\d{6,12}\b", haystack)) >= 3:
+        tabular_hits += 1
+    if len(re.findall(r"\beps\w{0,4}\b", haystack)) >= 2:
+        tabular_hits += 1
+    if len(re.findall(r"\bccf\w{0,4}\b", haystack)) >= 2:
+        tabular_hits += 1
+    if len(re.findall(r"\b14\s*-\s*11\b", haystack)) >= 2:
+        tabular_hits += 1
+    if len(re.findall(r"\$\s*[\d.,]+", haystack)) >= 6:
+        tabular_hits += 1
+    if re.search(r"\b\d+(?:[.,]\d+)?\s*%", haystack):
+        tabular_hits += 1
+    return tabular_hits >= 3
 
 
 def _rag_classify_document(ocr_text: str, min_score: float = 0.82) -> Optional[Dict[str, Any]]:
@@ -1267,7 +1320,16 @@ def approve_case(case_id: str, reason: str = "", operator: str = "", note: str =
     return save_case(payload)
 
 
-def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, expected_type: str = "", comisiones: Optional[List[Dict[str, Any]]] = None, tipo_negocio_detectado: Optional[str] = None) -> Dict[str, Any]:
+def save_manual_review(
+    case_id: str,
+    kind: str,
+    filename: str,
+    verdict: str,
+    expected_type: str = "",
+    comisiones: Optional[List[Dict[str, Any]]] = None,
+    tipo_negocio_detectado: Optional[str] = None,
+    sede_key: Optional[str] = None,
+) -> Dict[str, Any]:
     payload = load_case(case_id)
     if is_case_manually_approved(payload):
         raise ValueError("El contrato ya está aprobado y no permite edición documental.")
@@ -1323,10 +1385,12 @@ def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, exp
 
     bucket_name = "xlsx" if normalize_haystack(kind) == "xlsx" else "documents"
     bucket = review_store.setdefault(bucket_name, {})
-    normalized_expected_type = normalize_haystack(expected_type).replace(" ", "_")
+    normalized_expected_type = _canonical_document_type(expected_type)
     if normalized_expected_type not in DOC_TYPE_LABELS and normalized_expected_type != "xlsx" and not normalized_expected_type.startswith("anexo_sedes"):
         normalized_expected_type = ""
+    existing_review = bucket.get(str(filename)) if isinstance(bucket.get(str(filename)), dict) else {}
     bucket[str(filename)] = {
+        **existing_review,
         "kind": bucket_name,
         "filename": str(filename),
         "verdict": "si" if normalize_haystack(verdict) == "si" else "no",
@@ -1334,6 +1398,8 @@ def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, exp
         "expected_code": DOC_TYPE_TO_PRIMARY_CODE.get(normalized_expected_type) if normalized_expected_type else None,
         "updated_at": utc_now(),
     }
+    if sede_key is not None:
+        bucket[str(filename)]["sede_key"] = normalize_text(sede_key)
     _apply_manual_document_review_overrides(analysis)
     if bucket_name == "documents" and normalized_expected_type:
         _reorder_document_workspace_by_document_priority(payload, moved_filename=str(filename))
@@ -1816,6 +1882,7 @@ def refresh_case_validations(case_id: str) -> Dict[str, Any]:
     validation_started = perf_counter()
     _apply_manual_document_review_overrides(analysis)
     docs = analysis.get("documents") or docs
+    _canonicalize_document_types(docs)
 
     required_docs = _apply_conditional_required_documents(_build_required_documents(xlsx_profile), docs)
     received_types = {item.get("document_type") for item in docs if isinstance(item, dict) and item.get("document_type")}
@@ -3581,6 +3648,11 @@ def _apply_manual_document_review_overrides(analysis: Dict[str, Any]) -> bool:
         override = manual_docs.get(filename)
         if not isinstance(override, dict):
             continue
+        if "sede_key" in override:
+            sede_key = normalize_text(override.get("sede_key"))
+            if doc.get("sede_key") != sede_key:
+                doc["sede_key"] = sede_key
+                changed = True
         if str(override.get("verdict") or "") != "no" or not override.get("expected_type"):
             continue
         expected_type = str(override.get("expected_type") or "")
@@ -4086,7 +4158,7 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
     if _looks_like_carta_document(haystack):
         return {"document_type": "carta", "legacy_code": 29, "code_source": "ocr_carta"}
     if _looks_like_payment_support_text(haystack):
-        return {"document_type": "soporte_ingresos", "legacy_code": 11, "code_source": "ocr_planilla_precise"}
+        return {"document_type": "soporte_pagos", "legacy_code": 11, "code_source": "ocr_planilla_precise"}
 
     strong_rules: List[tuple[int, str, List[str], str]] = [
         (8, "rut", ["registro unico tributario", "r.u.t", " rut ", "direccion de impuestos y aduanas"], "ocr_rut"),
@@ -6467,7 +6539,7 @@ def _doc_by_type(docs: List[Dict[str, Any]], document_type: str) -> List[Dict[st
 
 
 def _canonical_document_display_type(document_type: Any) -> str:
-    value = str(document_type or "").strip()
+    value = _canonical_document_type(document_type)
     if value.startswith("anexo_sedes"):
         return "anexo_sedes"
     return value
@@ -6519,7 +6591,7 @@ def _parse_nomina_value(value: Any) -> int:
 def _summarize_received_documents(docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     summary: Dict[str, Dict[str, Any]] = {}
     for doc in docs:
-        key = doc.get("document_type", "otro")
+        key = _canonical_document_type(doc.get("document_type", "otro")) or "otro"
         bucket = summary.setdefault(
             key,
             {
@@ -9620,6 +9692,7 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
 
     _apply_document_classification_overrides(docs)
     _number_anexo_sedes(docs)
+    _canonicalize_document_types(docs)
 
     # Aplicar correcciones manuales del operador (sobreescriben el clasificador OCR)
     manual_docs = (previous_manual_review or {}).get("documents") or {}
@@ -9637,6 +9710,7 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
                 doc["document_type"] = str(override["expected_type"])
                 doc["legacy_code"] = override.get("expected_code") or DOC_TYPE_TO_PRIMARY_CODE.get(str(override["expected_type"]), 99)
                 doc["code_source"] = "manual_review_override"
+    _canonicalize_document_types(docs)
 
     _ensure_entrega_comision_duplicate(case_id, payload, docs)
 

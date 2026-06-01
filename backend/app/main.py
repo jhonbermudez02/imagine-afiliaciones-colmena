@@ -167,6 +167,7 @@ class CaseManualReviewRequest(BaseModel):
     expected_type: Optional[str] = None
     comisiones: Optional[List[Dict[str, Any]]] = None
     tipo_negocio_detectado: Optional[str] = None
+    sede_key: Optional[str] = None
 
 
 class CaseValidationExceptionRequest(BaseModel):
@@ -1319,8 +1320,8 @@ def build_document_consulta_response(query: str, results: List[Dict]) -> Optiona
         preferred_types.append("formulario_afiliacion")
     if "entrega" in query_norm:
         preferred_types.append("entrega_documentos")
-    if "soporte" in query_norm or "ingreso" in query_norm:
-        preferred_types.append("soporte_ingresos")
+    if "soporte" in query_norm or "ingreso" in query_norm or "pago" in query_norm:
+        preferred_types.append("soporte_pagos")
     if "sede" in query_norm:
         preferred_types.append("anexo_sedes")
     if preferred_types:
@@ -2875,10 +2876,11 @@ async def cases_production_summary(operation: str = Query(default="colima")):
         output_926 = workflow.get("output_926") or analysis.get("output_926") or {}
         legacy = output_926.get("legacy") or {}
         draft = output_926.get("draft") or {}
-        status = str(workflow.get("status") or payload.get("status") or "n/d")
         manual_approval = payload.get("manual_approval") or analysis.get("manual_approval") or {}
+        approved = is_case_manually_approved(payload)
+        status = "approved" if approved else str(workflow.get("status") or payload.get("status") or "n/d")
         contract_number = _resolve_case_contract_number(payload)
-        final_status = "APROBADO" if is_case_manually_approved(payload) else "NO APROBADO"
+        final_status = "APROBADO" if approved else "NO APROBADO"
         item = {
             "id": payload.get("id"),
             "label": payload.get("label"),
@@ -3262,6 +3264,7 @@ async def case_manual_review(case_id: str, request: CaseManualReviewRequest, ope
             expected_type=request.expected_type or "",
             comisiones=request.comisiones,
             tipo_negocio_detectado=request.tipo_negocio_detectado,
+            sede_key=request.sede_key,
         )
         return {"case_id": case_id, "manual_review": review_store}
     except FileNotFoundError as exc:

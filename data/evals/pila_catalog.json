@@ -1,5 +1,71 @@
 [
   {
+    "subsistema": "EPS",
+    "codigo_pila": "123654",
+    "nombre_oficial": "FOSYGA",
+    "alias": [
+      "FOSYGA"
+    ],
+    "activo": true,
+    "fuente": "manual",
+    "fecha_fuente": "2026-06"
+  },
+  {
+    "subsistema": "AFP",
+    "codigo_pila": "230901",
+    "nombre_oficial": "SKANDIA FONDO DE PENSIONES OBLIGATORIAS-MODERADO",
+    "alias": [
+      "SKANDIA FONDO"
+    ],
+    "activo": true,
+    "fuente": "manual",
+    "fecha_fuente": "2026-06"
+  },
+  {
+    "subsistema": "AFP",
+    "codigo_pila": "231001",
+    "nombre_oficial": "COLFONDOS AFP/CES",
+    "alias": [
+      "COLFONDOS"
+    ],
+    "activo": true,
+    "fuente": "manual",
+    "fecha_fuente": "2026-06"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPSC34",
+    "nombre_oficial": "CAPITAL SALUD EPSS S.A.S.",
+    "alias": [
+      "CAPITAL SALUD"
+    ],
+    "activo": true,
+    "fuente": "manual",
+    "fecha_fuente": "2026-06"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPSIC6",
+    "nombre_oficial": "PIJAOSALUD EPSI",
+    "alias": [
+      "PIJAOSALUD"
+    ],
+    "activo": true,
+    "fuente": "manual",
+    "fecha_fuente": "2026-06"
+  },
+  {
+    "subsistema": "EPS",
+    "codigo_pila": "EPS017",
+    "nombre_oficial": "FAMISANAR LIMITADA CAFAM-COLSUBSIDIO",
+    "alias": [
+      "FAMISANAR"
+    ],
+    "activo": true,
+    "fuente": "manual",
+    "fecha_fuente": "2026-06"
+  },
+  {
     "subsistema": "AFP",
     "codigo_pila": "230201",
     "nombre_oficial": "AFP PROTECCION",

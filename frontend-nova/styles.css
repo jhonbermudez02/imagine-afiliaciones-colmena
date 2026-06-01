@@ -462,7 +462,7 @@ html, body { height: 100%; font-family: var(--font); font-size: 14px; color: var
 .case-card-empresa { font-size: 13px; font-weight: 600; color: var(--c-text); margin-bottom: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .case-card-meta { font-size: 11px; color: var(--c-text-3); }
 .case-card-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
-.case-card-actions { display: flex; gap: 4px; }
+.case-card-actions { display: flex; justify-content: flex-end; gap: 4px; min-height: 28px; }
 
 /* ============================================================ RECLASIFICACIÓN */
 .reclassify-panel {
@@ -1283,9 +1283,19 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
   flex-direction: column;
 }
 .form-document-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
   padding: 8px;
   border-bottom: 1px solid var(--c-border);
   background: var(--c-surface);
+}
+.form-document-reset-btn {
+  min-width: 0;
+  padding: 7px 9px;
+  font-size: 11px;
+  white-space: nowrap;
 }
 .form-document-preview {
   flex: 1;
@@ -1816,6 +1826,15 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
 .table-action-link:hover { background: var(--c-info-bg); }
 .table-action-danger { color: var(--c-err) !important; }
 .table-action-danger:hover { background: var(--c-err-bg) !important; }
+.table-action-delete {
+  border: 1px solid color-mix(in srgb, var(--c-err) 40%, transparent) !important;
+  background: transparent;
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+}
 .classif-sort-btn {
   font-size: 10px; padding: 2px 7px; border-radius: 3px;
   border: 1px solid var(--c-border); background: none;

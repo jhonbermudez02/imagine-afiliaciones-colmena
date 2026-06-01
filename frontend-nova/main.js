@@ -22,15 +22,6 @@ const OPERATION_OPTIONS = {
 const REVIEW_TYPE_OPTIONS = [
     ['formulario_afiliacion', 'Afiliación',        '01'],
     ['anexo_sedes',           'Sedes ·01',         '01'],
-    ['anexo_sedes_02',        'Sedes ·02',         '01'],
-    ['anexo_sedes_03',        'Sedes ·03',         '01'],
-    ['anexo_sedes_04',        'Sedes ·04',         '01'],
-    ['anexo_sedes_05',        'Sedes ·05',         '01'],
-    ['anexo_sedes_06',        'Sedes ·06',         '01'],
-    ['anexo_sedes_07',        'Sedes ·07',         '01'],
-    ['anexo_sedes_08',        'Sedes ·08',         '01'],
-    ['anexo_sedes_09',        'Sedes ·09',         '01'],
-    ['anexo_sedes_10',        'Sedes ·10',         '01'],
     ['listado_trabajadores',  'Listados',           '03'],
     ['comision',              'Comisión',           '02'],
     ['carta',                 'Carta',              '29'],
@@ -40,7 +31,6 @@ const REVIEW_TYPE_OPTIONS = [
     ['constancia_afiliacion', 'Verificación',       '07'],
     ['rut',                   'RUT / DIAN',         '08'],
     ['entrega_documentos',    'Entrega Doc',        '10'],
-    ['soporte_ingresos',      'Pagos',              '11'],
     ['soporte_pagos',         'Pagos',              '11'],
     ['contrato',              'Contrato',           '13'],
     ['eps',                   'EPS',                '14'],
@@ -232,12 +222,14 @@ function localizeStatus(v) {
 }
 
 function getReviewTypeLabel(type) {
-    const match = REVIEW_TYPE_OPTIONS.find(([v]) => v === type);
+    const normalizedType = canonicalDocumentType(type);
+    const match = REVIEW_TYPE_OPTIONS.find(([v]) => v === normalizedType);
     return match ? match[1] : String(type||'Sin clasificar').replace(/_/g,' ');
 }
 
 function getReviewTypeCode(type) {
-    const match = REVIEW_TYPE_OPTIONS.find(([v]) => v === type);
+    const normalizedType = canonicalDocumentType(type);
+    const match = REVIEW_TYPE_OPTIONS.find(([v]) => v === normalizedType);
     return match ? match[2] : null;
 }
 
@@ -252,6 +244,7 @@ function getReviewTypeLabelWithCode(type, legacyCode) {
 function canonicalDocumentType(type = '') {
     const key = String(type || '').trim();
     if (key.startsWith('anexo_sedes')) return 'anexo_sedes';
+    if (key === 'soporte_ingresos') return 'soporte_pagos';
     return key;
 }
 
@@ -594,6 +587,21 @@ function getCaseBlockerRecords(payload) {
     return { records, blockers, hasActiveBlockers: records.length > 0 || blockers.length > 0 };
 }
 
+function isCaseAprobableAfterManualExceptions(payload, estado = '', decisionStatus = '') {
+    const a = payload?.analysis || {};
+    const validationOk = Boolean(a.validacion_resumen?.ok || a.validacion_resumen?.precheck?.approved);
+    const currentDecisionStatus = normalizeText(decisionStatus || a.decision?.recommended_status || '');
+    const statusText = normalizeText(estado || a.workflow_run?.status || payload?.status || '');
+    const { hasActiveBlockers } = getCaseBlockerRecords(payload);
+    if (hasActiveBlockers) return false;
+    return (
+        currentDecisionStatus === 'aprobable' ||
+        validationOk ||
+        statusText.includes('aprob') ||
+        statusText === 'completed'
+    );
+}
+
 function resolveCase(item) {
     const a = item?.analysis || {};
     const wf = a.workflow_run || {};
@@ -602,9 +610,9 @@ function resolveCase(item) {
     const resumen = report.resumen_ejecutivo || {};
     const empresa = resumen.empresa || profile.empresa || item?.empresa || item?.label || item?.id || 'n/d';
     const nit = resumen.nit || profile.nit || item?.nit || 'n/d';
-    const status = wf.status || item?.status || '';
+    const rawStatus = wf.status || item?.status || '';
     const approved = isCaseManuallyApproved(item);
-    const rawFinalStatus = item?.final_status || resumen.estado || '';
+    const status = approved ? 'approved' : rawStatus;
     const finalStatus = approved ? 'APROBADO' : 'NO APROBADO';
     const fecha = resumen.fecha_proceso_human || item?.updated_at?.slice(0,10) || 'n/d';
     const has926 = Boolean(item?.has_926 || (wf.output_926||{}).legacy?.ok);
@@ -619,6 +627,9 @@ function resolveCase(item) {
 function isApprovedCaseStatus(status, finalStatus) {
     const s = normalizeText(status);
     const f = normalizeText(finalStatus);
+    if (f === 'aprobado' || f === 'ok' || s === 'approved') {
+        return true;
+    }
     if (
         f.includes('no aprob') ||
         f.includes('rechaz') ||
@@ -628,7 +639,7 @@ function isApprovedCaseStatus(status, finalStatus) {
     ) {
         return false;
     }
-    return f === 'aprobado' || f === 'ok' || s === 'approved';
+    return false;
 }
 
 function caseStatusClass(status, finalStatus) {
@@ -1139,11 +1150,7 @@ function renderCasesTable(cases, tab = 'todos') {
                     <span class="pill pill-${cls}">${escapeHtml(label)}</span>
                     <span class="pill pill-neutral">${escapeHtml((item.operation_label || currentOperation().name))}</span>
                     <div class="case-card-actions" role="group">
-                        <button class="table-action-link" data-action="reporte" data-case="${escapeHtml(id)}" type="button">Reporte</button>
-                        <button class="table-action-link" data-action="clasificacion" data-case="${escapeHtml(id)}" type="button">Docs</button>
-                        <button class="table-action-link" data-action="recuperar" data-case="${escapeHtml(id)}" type="button">Recuperar</button>
-                        ${has926 ? `<button class="table-action-link" data-action="descargar926" data-case="${escapeHtml(id)}" data-file="${escapeHtml(filename)}" type="button">Plano ↓</button>` : ''}
-                        ${readProfile() !== 'colmena' ? `<button class="table-action-link table-action-danger" data-action="eliminar" data-case="${escapeHtml(id)}" data-empresa="${escapeHtml(empresa)}" type="button">✕</button>` : ''}
+                        ${readProfile() !== 'colmena' ? `<button class="table-action-link table-action-danger table-action-delete" data-action="eliminar" data-case="${escapeHtml(id)}" data-empresa="${escapeHtml(empresa)}" type="button">Eliminar</button>` : ''}
                     </div>
                 </div>
             </div>
@@ -1512,7 +1519,7 @@ function renderWorkflowResult(payload) {
     const decisionStatus = normalizeText(decision.recommended_status || '');
     const hasActiveBlockers = blockers.length > 0 || blockerRecords.length > 0;
     const approved = isCaseManuallyApproved(payload);
-    const isAprobable = !hasActiveBlockers && (decisionStatus === 'aprobable' || normalizeText(estado).includes('aprob') || normalizeText(wf.status||'') === 'completed');
+    const isAprobable = isCaseAprobableAfterManualExceptions(payload, estado, decisionStatus);
     const isNoAprobado = !isAprobable && normalizeText(wf.status||'') === 'stopped_prevalidacion';
 
     const stateClass = approved ? 'ok' : 'err';
@@ -1936,12 +1943,12 @@ function buildDocItems(payload) {
             seen.add(f);
             const meta = docMeta[f] || {};
             const reviewEntry = getManualReviewEntry(manualReview, 'document', f);
-            const effectiveType = reviewEntry?.verdict === 'no' && reviewEntry.expected_type
+            const effectiveType = canonicalDocumentType(reviewEntry?.verdict === 'no' && reviewEntry.expected_type
                 ? reviewEntry.expected_type
-                : (meta.document_type || group.label || 'pdf');
+                : (meta.document_type || group.label || 'pdf'));
             const isCorrected = reviewEntry?.verdict === 'no';
             const legacyCode = isCorrected ? null : (meta.legacy_code ?? null);
-            items.push({ file: f, kind: 'document', type: effectiveType, label: getReviewTypeLabelWithCode(effectiveType, legacyCode), displayName: meta.display_name || f, corrected: isCorrected, codeSource: meta.code_source || '', _sourceIndex: sourceIndex++ });
+            items.push({ file: f, kind: 'document', type: effectiveType, label: getReviewTypeLabelWithCode(effectiveType, legacyCode), displayName: meta.display_name || f, corrected: isCorrected, codeSource: meta.code_source || '', sedeKey: reviewEntry?.sede_key || meta.sede_key || '', _sourceIndex: sourceIndex++ });
         }
     }
     // Agregar documentos del análisis que no aparecieron en received_summary
@@ -1949,10 +1956,10 @@ function buildDocItems(payload) {
         if (!f || seen.has(f)) continue;
         seen.add(f);
         const reviewEntry = getManualReviewEntry(manualReview, 'document', f);
-        const effectiveType = reviewEntry?.verdict === 'no' && reviewEntry.expected_type
+        const effectiveType = canonicalDocumentType(reviewEntry?.verdict === 'no' && reviewEntry.expected_type
             ? reviewEntry.expected_type
-            : (meta.document_type || 'pdf');
-        items.push({ file: f, kind: 'document', type: effectiveType, label: getReviewTypeLabel(effectiveType), displayName: meta.display_name || f, corrected: reviewEntry?.verdict === 'no', _sourceIndex: sourceIndex++ });
+            : (meta.document_type || 'pdf'));
+        items.push({ file: f, kind: 'document', type: effectiveType, label: getReviewTypeLabel(effectiveType), displayName: meta.display_name || f, corrected: reviewEntry?.verdict === 'no', sedeKey: reviewEntry?.sede_key || meta.sede_key || '', _sourceIndex: sourceIndex++ });
     }
     // Agregar archivos físicos del caso que no aparecieron en ningún análisis
     const physicalFiles = (payload.files || []).map(f => f.filename || f.file || '').filter(Boolean);
@@ -1983,6 +1990,75 @@ function collectXlsxFiles(payload) {
     return files;
 }
 
+function buildSedeOptions(payload) {
+    const a = payload?.analysis || {};
+    const xlsx = a.xlsx_profile || {};
+    const options = [];
+    const seen = new Set();
+    const add = (name) => {
+        const key = String(name || '').trim();
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        options.push({
+            key,
+            label: key.replace(/\s*-\s*Trabajadores\s*$/i, ''),
+        });
+    };
+
+    Object.keys(xlsx.worker_sheet_counts || {}).forEach(add);
+    for (const record of (xlsx.records || [])) add(record?._sheet);
+
+    if (!options.length) {
+        const profile = xlsx.profile || {};
+        const formFields = xlsx.form_fields || {};
+        const rawCount = profile.numero_sedes || formFields.b_numero_sedes || formFields.a_numero_sedes;
+        const count = Number.parseInt(String(rawCount || '').replace(/\D/g, ''), 10);
+        if (Number.isFinite(count) && count > 0) {
+            for (let i = 1; i <= count; i += 1) add(`Sede ${String(i).padStart(2, '0')} - Trabajadores`);
+        }
+    }
+    return options;
+}
+
+function manualDocumentReviewEntry(payload, filename) {
+    const manualDocs = payload?.analysis?.manual_review?.documents || {};
+    const entry = manualDocs[filename];
+    return entry && typeof entry === 'object' ? entry : {};
+}
+
+function documentSedeKey(payload, docOrItem) {
+    const filename = docOrItem?.filename || docOrItem?.file || '';
+    return String(docOrItem?.sede_key || manualDocumentReviewEntry(payload, filename).sede_key || '').trim();
+}
+
+function groupSedeDocumentsByAssignment(payload, sedeNames = []) {
+    const a = payload?.analysis || {};
+    const manualDocs = a.manual_review?.documents || {};
+    const docs = (a.documents || []).filter(d => String(d.document_type || '').startsWith('anexo_sedes'));
+    const groups = {};
+    const unassignedByOriginal = {};
+
+    docs.forEach(doc => {
+        const assigned = String(doc.sede_key || manualDocs[doc.filename]?.sede_key || '').trim();
+        if (assigned) {
+            if (!groups[assigned]) groups[assigned] = [];
+            groups[assigned].push(doc);
+            return;
+        }
+        const prefix = String(doc.filename || '').replace(/__p\d+\.pdf$/i, '');
+        if (!unassignedByOriginal[prefix]) unassignedByOriginal[prefix] = [];
+        unassignedByOriginal[prefix].push(doc);
+    });
+
+    Object.values(unassignedByOriginal).forEach((docsGroup, index) => {
+        const sedeName = sedeNames[index];
+        if (!sedeName) return;
+        if (!groups[sedeName]) groups[sedeName] = [];
+        groups[sedeName].push(...docsGroup);
+    });
+    return groups;
+}
+
 function buildDocMetaMap(payload) {
     const map = {};
     const a = payload?.analysis || {};
@@ -1998,7 +2074,7 @@ function getManualReviewEntry(manualReview, kind, file) {
     // Formato nuevo: manual_review.documents es un dict por filename
     if (manualReview.documents && typeof manualReview.documents === 'object') {
         const entry = manualReview.documents[file];
-        if (entry) return { file, expected_type: entry.expected_type, verdict: entry.verdict };
+        if (entry) return { file, expected_type: entry.expected_type, verdict: entry.verdict, sede_key: entry.sede_key || '' };
     }
     // Formato legacy: manual_review.reviews es un array
     return (Array.isArray(manualReview.reviews) ? manualReview.reviews : []).find(r => r.file === file) || null;
@@ -2060,6 +2136,9 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
 
     el.innerHTML = items.map((item, i) => {
         const isRag = item.codeSource === 'rag_classification';
+        const sedeLabel = canonicalDocumentType(item.type) === 'anexo_sedes' && item.sedeKey
+            ? (buildSedeOptions(payload).find(s => s.key === item.sedeKey)?.label || item.sedeKey)
+            : '';
         return `
         <div class="doc-item" data-index="${i}" data-file="${escapeHtml(item.file)}">
             <span class="doc-item-order">
@@ -2068,6 +2147,7 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
             <span class="doc-item-name" title="${escapeHtml(item.displayName||item.file)}">${escapeHtml(item.label)}</span>
             ${isRag ? '<span class="doc-item-corrected" style="background:var(--c-info-bg);color:var(--c-blue)" title="Clasificado por RAG">🧠</span>' : ''}
             ${item.corrected ? '<span class="doc-item-corrected">corregido</span>' : ''}
+            ${sedeLabel ? `<span class="doc-item-corrected" title="Sede asignada">${escapeHtml(sedeLabel)}</span>` : ''}
             ${item.kind !== 'xlsx' && !isApproved ? `
             <span class="doc-item-actions">
                 <button class="doc-action-btn doc-duplicate-btn" data-file="${escapeHtml(item.file)}" title="Duplicar imagen" type="button">⧉ Dup</button>
@@ -2233,6 +2313,9 @@ function renderClassifActions(item, payload) {
 
     const currentLabel = item.effectiveTypeLabel || item.label || item.type || 'Sin clasificar';
     const isCorrected = item.corrected;
+    const sedeOptions = buildSedeOptions(payload);
+    const currentSedeKey = item.sedeKey || documentSedeKey(payload, item);
+    const isAnexoSedes = canonicalDocumentType(item.type) === 'anexo_sedes';
 
     if (isApproved) {
         el.innerHTML = `
@@ -2241,6 +2324,10 @@ function renderClassifActions(item, payload) {
                     <span class="reclassify-label">Clasificación actual:</span>
                     <span class="reclassify-value ${isCorrected ? 'corrected' : ''}">${escapeHtml(currentLabel)}${isCorrected ? ' · corregido manualmente' : ''}</span>
                 </div>
+                ${isAnexoSedes && currentSedeKey ? `<div class="reclassify-current">
+                    <span class="reclassify-label">Sede asignada:</span>
+                    <span class="reclassify-value">${escapeHtml(sedeOptions.find(s => s.key === currentSedeKey)?.label || currentSedeKey)}</span>
+                </div>` : ''}
                 <div class="reclassify-status" style="color:var(--c-ok)">Contrato aprobado · edición documental bloqueada</div>
             </div>
         `;
@@ -2257,7 +2344,14 @@ function renderClassifActions(item, payload) {
             <div class="reclassify-form">
                 <select class="field-select" id="reclassifySelect" style="flex:1;min-width:160px">
                     <option value="">— Selecciona nuevo tipo —</option>
-                    ${REVIEW_TYPE_OPTIONS.map(([v,l]) => `<option value="${v}" ${v===item.type?'selected':''}>${escapeHtml(l)}</option>`).join('')}
+                    ${[...REVIEW_TYPE_OPTIONS]
+                        .sort(([, a], [, b]) => a.localeCompare(b, 'es'))
+                        .map(([v,l]) => `<option value="${v}" ${v===item.type?'selected':''}>${escapeHtml(l)}</option>`)
+                        .join('')}
+                </select>
+                <select class="field-select" id="anexoSedeSelect" style="flex:1;min-width:180px;${isAnexoSedes ? '' : 'display:none'}">
+                    <option value="">— Asignar sede —</option>
+                    ${sedeOptions.map(s => `<option value="${escapeHtml(s.key)}" ${s.key === currentSedeKey ? 'selected' : ''}>${escapeHtml(s.label)}</option>`).join('')}
                 </select>
                 <button class="btn-warn" id="reclassifyBtn" type="button">Reclasificar</button>
             </div>
@@ -2285,7 +2379,8 @@ function renderClassifActions(item, payload) {
                     filename: item.file,
                     file: item.file,
                     expected_type: newType, 
-                    verdict: 'no' 
+                    verdict: 'no',
+                    sede_key: document.getElementById('anexoSedeSelect')?.value || item.sedeKey || ''
                 }),
             });
             if (!r.ok) {
@@ -2340,6 +2435,57 @@ function renderClassifActions(item, payload) {
             if (btn) { btn.disabled = false; btn.textContent = 'Reclasificar'; }
         } finally {
             setClassifDocListBusy(false);
+        }
+    });
+
+    const sedeSelect = document.getElementById('anexoSedeSelect');
+    const reclassifySelect = document.getElementById('reclassifySelect');
+    reclassifySelect?.addEventListener('change', () => {
+        if (!sedeSelect) return;
+        sedeSelect.style.display = canonicalDocumentType(reclassifySelect.value || item.type) === 'anexo_sedes' ? '' : 'none';
+    });
+    sedeSelect?.addEventListener('change', async () => {
+        if (!payload?.id) return;
+        const status = document.getElementById('reclassifyStatus');
+        if (status) { status.textContent = ''; status.style.color = ''; }
+        sedeSelect.disabled = true;
+        try {
+            const currentReview = manualDocumentReviewEntry(payload, item.file);
+            const expectedType = currentReview.expected_type || item.type || 'anexo_sedes';
+            const verdict = currentReview.verdict || (item.corrected ? 'no' : 'si');
+            const r = await fetchWithRetry(caseApiUrl(payload.id, '/manual-review'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    kind: item.kind || 'document',
+                    filename: item.file,
+                    file: item.file,
+                    expected_type: expectedType,
+                    verdict,
+                    sede_key: sedeSelect.value,
+                }),
+            });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            item.sedeKey = sedeSelect.value;
+            payload.analysis = payload.analysis || {};
+            payload.analysis.manual_review = payload.analysis.manual_review || {};
+            payload.analysis.manual_review.documents = payload.analysis.manual_review.documents || {};
+            payload.analysis.manual_review.documents[item.file] = {
+                ...currentReview,
+                kind: item.kind || 'document',
+                filename: item.file,
+                expected_type: expectedType,
+                verdict,
+                sede_key: sedeSelect.value,
+            };
+            if (status) {
+                status.style.color = 'var(--c-ok)';
+                status.textContent = sedeSelect.value ? '✓ Sede asignada al documento.' : '✓ Asignación de sede limpiada.';
+            }
+        } catch(e) {
+            if (status) { status.style.color = 'var(--c-err)'; status.textContent = 'Error asignando sede: ' + e.message; }
+        } finally {
+            sedeSelect.disabled = false;
         }
     });
 
@@ -3453,6 +3599,7 @@ function renderFormularioDocumentViewer(docItems) {
                     <option value="${index}">${escapeHtml(item.label || item.displayName || item.file)}</option>
                 `).join('')}
             </select>
+            <button class="btn-secondary form-document-reset-btn" id="resetFormDocumentFilterBtn" type="button" title="Mostrar todos los documentos">Todos</button>
         </div>
         <div id="formDocumentPreview" class="form-document-preview">
             <div class="loading-msg">Cargando documento...</div>
@@ -3562,8 +3709,8 @@ function renderFormularioReporte(container, payload) {
     const decisionStatus = normalizeText(decision.recommended_status || '');
     const approved = isCaseManuallyApproved(payload);
     const { hasActiveBlockers } = getCaseBlockerRecords(payload);
-    const isNoAprobado = estadoNorm.includes('no aprob') || estadoNorm.includes('rechaz') || normalizeText(wf.status || '') === 'stopped_prevalidacion';
-    const isAprobable = !isNoAprobado && !hasActiveBlockers && (decisionStatus === 'aprobable' || estadoNorm.includes('aprob') || normalizeText(wf.status || '') === 'completed');
+    const isNoAprobado = hasActiveBlockers && (estadoNorm.includes('no aprob') || estadoNorm.includes('rechaz') || normalizeText(wf.status || '') === 'stopped_prevalidacion');
+    const isAprobable = isCaseAprobableAfterManualExceptions(payload, estado, decisionStatus);
     const stateClass = approved ? 'aprobado' : 'bloqueado';
     const stateLabel = approved ? 'APROBADO' : 'NO APROBADO';
     const fecha = resumen.fecha_proceso_human || formatDateTime(payload.updated_at);
@@ -3571,10 +3718,12 @@ function renderFormularioReporte(container, payload) {
     const totalSedes = formFields.a_numero_sedes || formFields.b_numero_sedes || profile.numero_sedes || resumen.numero_sedes || 'n/d';
     const sedesFormulario = buildFormularioSedes(payload, totalSedes);
     const caseId = payload?.id || activeCaseId || '';
-    const docItems = buildDocItems(payload).filter(item => {
-        const type = String(item?.type || '');
-        return type === 'formulario_afiliacion' || type.startsWith('anexo_sedes');
-    });
+    const docItems = buildDocItems(payload);
+    let currentFormDocItems = docItems;
+    const sedeGroupNames = sedesFormulario.map((sede, index) => (
+        sede.sourceName || `Sede ${String(sede.number || index + 1).padStart(2, '0')} - Trabajadores`
+    ));
+    const docsBySede = groupSedeDocumentsByAssignment(payload, sedeGroupNames);
 
     container.innerHTML = `
         <div class="report-case-summary">
@@ -3628,15 +3777,48 @@ function renderFormularioReporte(container, payload) {
     const centroSelect = container.querySelector('#formCentroSelect');
     const sedeDetail = container.querySelector('#formSedeDetail');
     const workersPanel = container.querySelector('#formWorkersPanel');
-    const bindDocumentViewer = async () => {
+    const renderDocumentSelectOptions = (items) => {
         const documentSelect = container.querySelector('#formDocumentSelect');
         const documentPreview = container.querySelector('#formDocumentPreview');
-        if (!documentSelect || !documentPreview || !docItems.length) return;
-        const renderSelectedDocument = async () => {
-            const item = docItems[Number(documentSelect.value) || 0];
-            if (item) await renderDocPreview(documentPreview, caseId, item);
-        };
+        if (!documentSelect || !documentPreview) return;
+        currentFormDocItems = items;
+        if (!items.length) {
+            documentSelect.innerHTML = '<option value="">Sin documentos para esta sede</option>';
+            documentSelect.disabled = true;
+            documentPreview.innerHTML = '<div class="form-empty">Sin documentos para esta sede.</div>';
+            return;
+        }
+        documentSelect.disabled = false;
+        documentSelect.innerHTML = items.map((item, index) => `
+            <option value="${index}">${escapeHtml(item.label || item.displayName || item.file)}</option>
+        `).join('');
+        documentSelect.value = '0';
+    };
+    const renderSelectedDocument = async () => {
+        const documentSelect = container.querySelector('#formDocumentSelect');
+        const documentPreview = container.querySelector('#formDocumentPreview');
+        if (!documentSelect || !documentPreview || !currentFormDocItems.length) return;
+        const item = currentFormDocItems[Number(documentSelect.value) || 0];
+        if (item) await renderDocPreview(documentPreview, caseId, item);
+    };
+    const filterDocumentsForSede = async (sede, autoPreview = true) => {
+        if (!sede) return;
+        const groupName = sede.sourceName || `Sede ${String(sede.number || 1).padStart(2, '0')} - Trabajadores`;
+        const filenames = new Set((docsBySede[groupName] || []).map(doc => doc.filename).filter(Boolean));
+        const filteredItems = docItems.filter(item => filenames.has(item.file));
+        renderDocumentSelectOptions(filteredItems);
+        if (autoPreview) await renderSelectedDocument();
+    };
+    const resetDocumentFilter = async () => {
+        renderDocumentSelectOptions(docItems);
+        await renderSelectedDocument();
+    };
+    const bindDocumentViewer = async () => {
+        const documentSelect = container.querySelector('#formDocumentSelect');
+        if (!documentSelect || !docItems.length) return;
         documentSelect.addEventListener('change', renderSelectedDocument);
+        container.querySelector('#resetFormDocumentFilterBtn')?.addEventListener('click', resetDocumentFilter);
+        renderDocumentSelectOptions(docItems);
         await renderSelectedDocument();
     };
     const renderSelectedSede = () => {
@@ -3650,6 +3832,7 @@ function renderFormularioReporte(container, payload) {
         }
         if (sedeDetail) sedeDetail.innerHTML = renderFormularioSedeDetalle(selectedSede, 'all');
         if (workersPanel) workersPanel.innerHTML = renderFormularioTrabajadoresTable(filterSedeWorkers(selectedSede, 'all'));
+        filterDocumentsForSede(selectedSede);
     };
     sedeSelect?.addEventListener('change', () => {
         renderSelectedSede();
@@ -3719,7 +3902,7 @@ function renderReporte(container, payload) {
     const decisionStatus = normalizeText(decision.recommended_status || '');
     const hasActiveBlockers = blockers.length > 0 || blockerRecords.length > 0;
     const approved = isCaseManuallyApproved(payload);
-    const isAprobable = !hasActiveBlockers && (decisionStatus === 'aprobable' || estadoNorm.includes('aprob') || normalizeText(wf.status||'') === 'completed');
+    const isAprobable = isCaseAprobableAfterManualExceptions(payload, estado, decisionStatus);
     const isNoAprobado = !isAprobable && (normalizeText(wf.status||'') === 'stopped_prevalidacion' || estadoNorm.includes('no aprob'));
     const stateClass = approved ? 'aprobado' : 'bloqueado';
     const stateLabel = approved ? 'APROBADO' : 'NO APROBADO';
@@ -4259,16 +4442,7 @@ function renderReporte(container, payload) {
                         </div>`;
                     }
 
-                    // Documentos anexo_sedes agrupados por archivo original
-                    const sedeDocs = (a.documents || []).filter(d => String(d.document_type||'').startsWith('anexo_sedes'));
-                    // Agrupar por prefijo de archivo (antes de __p)
-                    const sedeDocGroups = {};
-                    sedeDocs.forEach(doc => {
-                        const prefix = doc.filename.replace(/__p\d+\.pdf$/i, '');
-                        if (!sedeDocGroups[prefix]) sedeDocGroups[prefix] = [];
-                        sedeDocGroups[prefix].push(doc);
-                    });
-                    const sedeDocGroupList = Object.values(sedeDocGroups);
+                    const sedeDocGroupsBySede = groupSedeDocumentsByAssignment(payload, sedeNames);
 
                     function renderBySede() {
                         let html = '';
@@ -4290,9 +4464,7 @@ function renderReporte(container, payload) {
                             const numCentros = Object.keys(porCentro).length;
                             const infoCard = renderSedeInfoCard(sedeInfo);
 
-                            // PDFs de esta sede — usar el grupo correspondiente por índice
-                            const sedeNum = parseInt(sedeName.match(/\d+/)?.[0] || String(si + 1));
-                            const sedeGroup = sedeDocGroupList[si] || sedeDocGroupList[0] || [];
+                            const sedeGroup = sedeDocGroupsBySede[sedeName] || [];
                             const pdfLinks = sedeGroup.map(doc =>
                                 caseFileUrl(caseId, doc.filename, true)
                             );
@@ -4546,14 +4718,6 @@ function renderReporte(container, payload) {
         const workerCounts = a.xlsx_profile?.worker_sheet_counts || {};
         const salaryCounts = a.xlsx_profile?.worker_sheet_salary_totals || {};
         const formFields = a.xlsx_profile?.form_fields || {};
-        const sedeDocs = (a.documents || []).filter(d => String(d.document_type||'').startsWith('anexo_sedes'));
-        const sedeDocGroups = {};
-        sedeDocs.forEach(doc => {
-            const prefix = doc.filename.replace(/__p\d+\.pdf$/i, '');
-            if (!sedeDocGroups[prefix]) sedeDocGroups[prefix] = [];
-            sedeDocGroups[prefix].push(doc);
-        });
-        const sedeDocGroupList = Object.values(sedeDocGroups);
         const bySede = {};
         for (const r of sedeRecords) {
             const sede = r._sheet || 'Sin sede';
@@ -4562,6 +4726,7 @@ function renderReporte(container, payload) {
         }
         const sedeNames = Object.keys(workerCounts).length ? Object.keys(workerCounts) : Object.keys(bySede);
         if (!sedeNames.length) { sedesInline.innerHTML = ''; return; }
+        const sedeDocGroupsBySede = groupSedeDocumentsByAssignment(payload, sedeNames);
 
         function getSedeInfoInline(sedeName) {
             const num = parseInt(sedeName.match(/\d+/)?.[0] || '1');
@@ -4588,7 +4753,7 @@ function renderReporte(container, payload) {
             const nominaSede = workers.reduce((sum, w) => sum + (Number(w.salario) || 0), 0);
             const sal = nominaSede > 0 ? '$ ' + nominaSede.toLocaleString('es-CO') : '';
             const info = getSedeInfoInline(sedeName);
-            const sedeGroup = sedeDocGroupList[si] || [];
+            const sedeGroup = sedeDocGroupsBySede[sedeName] || [];
             const pdfUrl = sedeGroup[0] ? caseFileUrl(caseId, sedeGroup[0].filename, true) : '';
 
             const infoFields = [
