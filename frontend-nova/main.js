@@ -107,6 +107,20 @@ async function refreshClassifAfterManualChange(caseId) {
     return payload;
 }
 
+async function refreshClassifAfterComisionChange(caseId, filename) {
+    const payload = await refreshClassifAfterManualChange(caseId);
+    if (!payload || currentView !== 'clasificacion' || !filename) return payload;
+    const item = buildDocItems(payload).find(doc => doc.file === filename);
+    if (item) {
+        const docList = document.getElementById('classifDocList');
+        docList?.querySelectorAll('.doc-item').forEach(el => {
+            el.classList.toggle('active', el.dataset.file === filename);
+        });
+        renderClassifActions(item, payload);
+    }
+    return payload;
+}
+
 async function runFullCaseAnalyzeFromClassif(caseId) {
     if (!caseId) return null;
     if (!confirm('¿Ejecutar análisis completo? Se volverán a leer Excel y documentos, y puede tardar más.')) return null;
@@ -1753,6 +1767,36 @@ function renderTipoNegocioPanelHtml() {
     `;
 }
 
+async function saveManualComisiones(caseId, filename, rows) {
+    if (!caseId || !filename) return null;
+    const r = await fetchWithRetry(caseApiUrl(caseId, '/manual-review'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            kind: 'comisiones',
+            filename,
+            verdict: 'no',
+            comisiones: rows,
+        }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json().catch(() => null);
+}
+
+async function deleteManualComision(caseId, filename, rows, index, onDone = null) {
+    const currentRows = Array.isArray(rows) ? rows : [];
+    const row = currentRows[index];
+    if (!caseId || !filename || !row) return;
+    const doc = row.cedula || row.vendedor_documento || row.documento || '';
+    const label = doc ? ` del documento ${doc}` : '';
+    if (!confirm(`¿Eliminar esta comisión${label}?`)) return;
+    const nextRows = currentRows.filter((_, i) => i !== index);
+    await saveManualComisiones(caseId, filename, nextRows);
+    showToast('Comisión eliminada.', 'ok');
+    await refreshClassifAfterComisionChange(caseId, filename);
+    if (typeof onDone === 'function') onDone(nextRows);
+}
+
 function bindComisionManualPanel(item, payload, root = document) {
     const comisionRows = root.querySelector('#comisionRows');
     const addBtn = root.querySelector('#addComisionRow');
@@ -1767,7 +1811,15 @@ function bindComisionManualPanel(item, payload, root = document) {
     const existingComisiones = payload?.analysis?.manual_review?.comisiones?.[item.file] || [];
     const rawTipoNegocio = payload?.analysis?.xlsx_profile?.profile?.tipo_negocio_detectado || '';
 
-    function renderComisionRow(data = {}) {
+    function collectComisionRows() {
+        return [...comisionRows.querySelectorAll('.comision-row')].map(row => ({
+            codigo: row.querySelector('.comision-codigo')?.value || '',
+            cedula: row.querySelector('.comision-cedula')?.value?.trim() || '',
+            porcentaje: row.querySelector('.comision-pct')?.value?.trim() || '100',
+        })).filter(r => r.cedula);
+    }
+
+    function renderComisionRow(data = {}, existingIndex = -1) {
         const div = document.createElement('div');
         div.className = 'comision-row';
         div.innerHTML = `
@@ -1779,11 +1831,35 @@ function bindComisionManualPanel(item, payload, root = document) {
             <input class="field-input comision-pct" placeholder="%" value="${escapeHtml(data.porcentaje||'100')}">
             <button class="btn-icon comision-remove-row" type="button">✕</button>
         `;
-        div.querySelector('.comision-remove-row')?.addEventListener('click', () => div.remove());
+        div.querySelector('.comision-remove-row')?.addEventListener('click', async () => {
+            if (existingIndex < 0) {
+                div.remove();
+                return;
+            }
+            try {
+                const visibleRows = [...comisionRows.querySelectorAll('.comision-row')];
+                const currentIndex = visibleRows.indexOf(div);
+                await deleteManualComision(payload.id, item.file, collectComisionRows(), currentIndex, (nextRows) => {
+                    div.remove();
+                    if (!nextRows.length && comisionRows && !comisionRows.querySelector('.comision-row')) {
+                        renderComisionRow();
+                    }
+                    if (comisionStatus) {
+                        comisionStatus.style.color = 'var(--c-ok)';
+                        comisionStatus.textContent = '✓ Comisión eliminada';
+                    }
+                });
+            } catch(e) {
+                if (comisionStatus) {
+                    comisionStatus.style.color = 'var(--c-err)';
+                    comisionStatus.textContent = 'Error: ' + e.message;
+                }
+            }
+        });
         comisionRows.appendChild(div);
     }
 
-    if (existingComisiones.length) existingComisiones.forEach(c => renderComisionRow(c));
+    if (existingComisiones.length) existingComisiones.forEach((c, idx) => renderComisionRow(c, idx));
     else renderComisionRow();
 
     if (tipoNegocioSelect && rawTipoNegocio) {
@@ -1824,7 +1900,7 @@ function bindComisionManualPanel(item, payload, root = document) {
                 tipoNegocioStatus.textContent = `✓ Tipo de negocio guardado: ${tipoNegocio}`;
             }
             if (payload?.analysis?.xlsx_profile?.profile) {
-                payload.analysis.xlsx_profile.profile.tipo_negocio = tipoNegocio;
+                payload.analysis.xlsx_profile.profile.tipo_negocio_detectado = tipoNegocio;
             }
         } catch (e) {
             if (tipoNegocioStatus) {
@@ -1838,11 +1914,7 @@ function bindComisionManualPanel(item, payload, root = document) {
     });
 
     saveBtn.addEventListener('click', async () => {
-        const rows = [...comisionRows.querySelectorAll('.comision-row')].map(row => ({
-            codigo: row.querySelector('.comision-codigo')?.value || '',
-            cedula: row.querySelector('.comision-cedula')?.value?.trim() || '',
-            porcentaje: row.querySelector('.comision-pct')?.value?.trim() || '100',
-        })).filter(r => r.cedula);
+        const rows = collectComisionRows();
 
         if (!rows.length) {
             if (comisionStatus) comisionStatus.textContent = 'Agrega al menos un intermediario.';
@@ -1852,33 +1924,25 @@ function bindComisionManualPanel(item, payload, root = document) {
         try {
             saveBtn.disabled = true;
             saveBtn.textContent = 'Guardando...';
-            const r = await fetchWithRetry(caseApiUrl(payload.id, '/manual-review'), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    kind: 'comisiones',
-                    filename: item.file,
-                    verdict: 'no',
-                    comisiones: rows,
-                }),
-            });
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const responseData = await saveManualComisiones(payload.id, item.file, rows);
+            const invalidAsesores = responseData?.manual_review?.comisiones_validation?.[item.file]?.invalid || [];
             if (comisionStatus) {
-                comisionStatus.style.color = 'var(--c-ok)';
-                comisionStatus.textContent = `✓ ${rows.length} intermediario(s) guardados`;
+                if (invalidAsesores.length) {
+                    comisionStatus.style.color = 'var(--c-warn)';
+                    comisionStatus.textContent = `Comisiones guardadas. ${invalidAsesores.length} documento(s) no existen en asesores Colmena; se generó bloqueante aceptable.`;
+                } else {
+                    comisionStatus.style.color = 'var(--c-ok)';
+                    comisionStatus.textContent = `✓ ${rows.length} intermediario(s) guardados y validados`;
+                }
             }
-            if (tipoNegocioSelect) {
-                tipoNegocioSelect.style.color = 'var(--c-ok)';
-                tipoNegocioStatus.textContent = `✓ Tipo de negocio: ${tipoNegocioSelect.value}`;
+            if (invalidAsesores.length) {
+                showToast('Hay comisiones con documentos no registrados en asesores Colmena. Revisa el bloqueante.', 'warn', 6000);
             }
+            await refreshClassifAfterComisionChange(payload.id, item.file);
         } catch(e) {
             if (comisionStatus) {
                 comisionStatus.style.color = 'var(--c-err)';
                 comisionStatus.textContent = 'Error: ' + e.message;
-            }
-            if (tipoNegocioStatus && !tipoNegocioSelect?.value) {
-                tipoNegocioStatus.style.color = 'var(--c-err)';
-                tipoNegocioStatus.textContent = 'Error: ' + e.message;
             }
         } finally {
             saveBtn.disabled = false;
@@ -4553,11 +4617,12 @@ function renderReporte(container, payload) {
                     for (const [fname, rows] of Object.entries(comisionesManuales)) {
                         comisionHTML += `<div style="font-size:11px;color:var(--c-text-2);margin-bottom:4px">📄 ${escapeHtml(fname)}</div>`;
                         comisionHTML += `<table class="blocker-table" style="margin-bottom:12px">
-                            <thead><tr><th>Código</th><th>Documento</th><th>Porcentaje</th></tr></thead>
-                            <tbody>${(rows||[]).map(r => `<tr>
+                            <thead><tr><th>Código</th><th>Documento</th><th>Porcentaje</th><th></th></tr></thead>
+                            <tbody>${(rows||[]).map((r, idx) => `<tr>
                                 <td>${escapeHtml(String(r.codigo||''))}</td>
                                 <td>${escapeHtml(String(r.cedula||''))}</td>
                                 <td>${escapeHtml(String(r.porcentaje||''))}%</td>
+                                <td><button class="table-action-link table-action-danger delete-manual-comision" data-file="${escapeHtml(fname)}" data-index="${idx}" type="button">Eliminar</button></td>
                             </tr>`).join('')}</tbody></table>`;
                     }
                 } else if (intermediarios.codigo_intermediario) {
@@ -4592,6 +4657,13 @@ function renderReporte(container, payload) {
                 dataPanel.classList.add('hidden');
                 document.getElementById('btnComisiones')?.classList.remove('active');
             });
+            dataPanel.querySelectorAll('.delete-manual-comision').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const rows = comisionesManuales?.[btn.dataset.file] || [];
+                    try { await deleteManualComision(caseId, btn.dataset.file, rows, Number(btn.dataset.index), () => loadReporteForCase(caseId)); }
+                    catch(e) { showToast('No pude eliminar la comisión: ' + e.message, 'err'); }
+                });
+            });
             dataPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         });
     });
@@ -4622,12 +4694,13 @@ function renderReporte(container, payload) {
             for (const [fname, rows] of Object.entries(comisionesManuales)) {
                 tablaHTML += `<div style="font-size:11px;color:var(--c-text-2);margin-bottom:4px">📄 ${escapeHtml(fname)} (manual)</div>
                     <table class="blocker-table" style="margin-bottom:12px">
-                    <thead><tr><th>Código</th><th>Documento</th><th>Nombre</th><th>% Participación</th></tr></thead>
-                    <tbody>${(rows||[]).map(r => `<tr>
+                    <thead><tr><th>Código</th><th>Documento</th><th>Nombre</th><th>% Participación</th><th></th></tr></thead>
+                    <tbody>${(rows||[]).map((r, idx) => `<tr>
                         <td>${escapeHtml(String(r.codigo||''))}</td>
                         <td>${escapeHtml(String(r.cedula||''))}</td>
                         <td>${escapeHtml(String(r.nombre||''))}</td>
                         <td>${escapeHtml(String(r.porcentaje||''))}%</td>
+                        <td><button class="table-action-link table-action-danger delete-manual-comision" data-file="${escapeHtml(fname)}" data-index="${idx}" type="button">Eliminar</button></td>
                     </tr>`).join('')}</tbody></table>`;
             }
         } else if (todosInterm.length) {
@@ -4677,6 +4750,13 @@ function renderReporte(container, payload) {
         dataPanel.querySelector('#dataPanelClose2')?.addEventListener('click', () => {
             dataPanel.classList.add('hidden');
             document.getElementById('btnComisiones')?.classList.remove('active');
+        });
+        dataPanel.querySelectorAll('.delete-manual-comision').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const rows = comisionesManuales?.[btn.dataset.file] || [];
+                try { await deleteManualComision(caseId, btn.dataset.file, rows, Number(btn.dataset.index), () => loadReporteForCase(caseId)); }
+                catch(e) { showToast('No pude eliminar la comisión: ' + e.message, 'err'); }
+            });
         });
         dataPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });

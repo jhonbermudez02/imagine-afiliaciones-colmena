@@ -1187,6 +1187,58 @@ def _validate_asesor_en_tabla(cedula: str, codigo_intermediario: str) -> bool:
     return True
 
 
+def _asesor_tipo_nombre(codigo_intermediario: Any) -> str:
+    codigo = only_digits(str(codigo_intermediario or ""))
+    return {"1": "Consultor", "01": "Consultor", "3": "Corredor/Agencia", "03": "Corredor/Agencia"}.get(codigo, "Intermediario")
+
+
+def _comision_asesor_no_tabla_validation(row: Dict[str, Any], filename: str = "", source: str = "manual") -> Optional[Dict[str, Any]]:
+    codigo = only_digits(str(row.get("codigo_intermediario") or row.get("codigo") or ""))
+    cedula = only_digits(str(row.get("vendedor_documento") or row.get("cedula") or row.get("documento") or ""))
+    if not codigo or not cedula:
+        return None
+    if _validate_asesor_en_tabla(cedula, codigo):
+        return None
+    tipo_nombre = _asesor_tipo_nombre(codigo)
+    filename_text = f" Archivo: {filename}." if filename else ""
+    source_text = "comisiones manuales" if source == "manual" else "soporte entrega de documentos"
+    return {
+        "code": "ASESOR_NO_EN_TABLA",
+        "status": "ALERTA",
+        "severity": "blocker",
+        "can_accept_exception": True,
+        "message": (
+            f"El {tipo_nombre} con documento {cedula} no se encuentra en la base de comerciales e intermediarios "
+            f"de Colmena ({source_text}).{filename_text}"
+        ),
+        "codigo_intermediario": codigo.zfill(2),
+        "vendedor_documento": cedula,
+        "filename": filename,
+        "source": source,
+    }
+
+
+def _validate_comisiones_asesores_en_tabla(comisiones: List[Dict[str, Any]], filename: str = "", source: str = "manual") -> List[Dict[str, Any]]:
+    invalid: List[Dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for row in comisiones or []:
+        if not isinstance(row, dict):
+            continue
+        validation = _comision_asesor_no_tabla_validation(row, filename=filename, source=source)
+        if not validation:
+            continue
+        key = (
+            str(validation.get("codigo_intermediario") or ""),
+            str(validation.get("vendedor_documento") or ""),
+            str(validation.get("filename") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        invalid.append(validation)
+    return invalid
+
+
 def load_case(case_id: str) -> Dict[str, Any]:
     metadata_path = get_case_metadata_path(case_id)
     if not metadata_path.exists():
@@ -1371,7 +1423,7 @@ def save_manual_review(
     # Corrección manual de comisiones
     if normalize_haystack(kind) == "comisiones" and comisiones is not None:
         comisiones_store = review_store.setdefault("comisiones", {})
-        comisiones_store[str(filename)] = [
+        normalized_comisiones = [
             {
                 "codigo": only_digits(str(c.get("codigo") or "1")),
                 "cedula": only_digits(str(c.get("cedula") or "")),
@@ -1379,6 +1431,21 @@ def save_manual_review(
             }
             for c in comisiones if c.get("cedula")
         ]
+        validation_store = review_store.setdefault("comisiones_validation", {})
+        if not normalized_comisiones:
+            comisiones_store.pop(str(filename), None)
+            validation_store.pop(str(filename), None)
+            payload["updated_at"] = utc_now()
+            save_case(payload)
+            return review_store
+
+        comisiones_store[str(filename)] = normalized_comisiones
+        invalid_asesores = _validate_comisiones_asesores_en_tabla(normalized_comisiones, filename=str(filename), source="manual")
+        validation_store[str(filename)] = {
+            "ok": not invalid_asesores,
+            "invalid": invalid_asesores,
+            "updated_at": utc_now(),
+        }
         payload["updated_at"] = utc_now()
         save_case(payload)
         return review_store
@@ -1882,6 +1949,16 @@ def refresh_case_validations(case_id: str) -> Dict[str, Any]:
     validation_started = perf_counter()
     _apply_manual_document_review_overrides(analysis)
     docs = analysis.get("documents") or docs
+    manual_comisiones = manual_review.get("comisiones") if isinstance(manual_review, dict) else {}
+    if isinstance(manual_comisiones, dict):
+        for doc in docs:
+            if not isinstance(doc, dict):
+                continue
+            fname = str(doc.get("filename") or "")
+            if fname in manual_comisiones and manual_comisiones[fname]:
+                doc["_manual_comisiones"] = manual_comisiones[fname]
+            else:
+                doc.pop("_manual_comisiones", None)
     _canonicalize_document_types(docs)
 
     required_docs = _apply_conditional_required_documents(_build_required_documents(xlsx_profile), docs)
@@ -8190,9 +8267,12 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         manual_comisiones = doc.get("_manual_comisiones") or []
         if not manual_comisiones:
             continue
+        filename = str(doc.get("filename") or "")
+        for invalid_validation in _validate_comisiones_asesores_en_tabla(manual_comisiones, filename=filename, source="manual"):
+            validations.append(invalid_validation)
+            alerts.append(invalid_validation)
         errores_participacion = _validate_participacion_por_tipo(manual_comisiones)
         for err in errores_participacion:
-            filename = str(doc.get("filename") or "")
             message = f"{err} Archivo: {filename}." if filename else err
             validations.append(
                 {
@@ -8250,16 +8330,10 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         # Validar que el asesor esté en la tabla de comerciales/intermediarios
         todos_intermediarios = _extract_todos_intermediarios(doc)
         for interm in todos_intermediarios:
-            cedula_interm = interm.get("vendedor_documento", "")
-            codigo_interm = interm.get("codigo_intermediario", "")
-            if cedula_interm and codigo_interm:
-                en_tabla = _validate_asesor_en_tabla(cedula_interm, codigo_interm)
-                if not en_tabla:
-                    tipo_nombre = {"1": "Consultor", "3": "Corredor/Agencia"}.get(codigo_interm, "Intermediario")
-                    msg = f"El {tipo_nombre} con documento {cedula_interm} no se encuentra en la base de comerciales e intermediarios de Colmena."
-                    v = {"code": "ASESOR_NO_EN_TABLA", "status": "ALERTA", "severity": "blocker", "message": msg}
-                    validations.append(v)
-                    alerts.append(v)
+            invalid_validation = _comision_asesor_no_tabla_validation(interm, filename=str(doc.get("filename") or ""), source="ocr")
+            if invalid_validation:
+                validations.append(invalid_validation)
+                alerts.append(invalid_validation)
         break
 
     precheck = _build_precheck_summary(xlsx_profile, docs, validation_required_docs, missing_docs)
