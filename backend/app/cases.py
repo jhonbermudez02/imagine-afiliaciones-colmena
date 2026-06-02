@@ -1578,6 +1578,13 @@ def is_validation_exception_allowed(code: Any, message: Any = "", reason: Option
     )
     if code_text.startswith(form_prefixes):
         return False
+    legacy_xlsx_codes = {
+        "EDAD_MINIMA_INVALIDA",
+        "EDAD_MAXIMA_INVALIDA",
+        "FECHA_NACIMIENTO_ANTIGUA_INVALIDA",
+    }
+    if code_text in legacy_xlsx_codes:
+        return False
     form_message_prefixes = (
         "el campo ",
         "el correo ",
@@ -1591,6 +1598,8 @@ def is_validation_exception_allowed(code: Any, message: Any = "", reason: Option
     if message_text.startswith(form_message_prefixes):
         return False
     if field_text or cell_text:
+        return False
+    if "trabajadores, fila" in message_text or " en sede " in message_text and ", fila" in message_text:
         return False
     return True
 
@@ -3684,6 +3693,17 @@ def _apply_document_learning_calibration(docs: List[Dict[str, Any]]) -> None:
 def _looks_like_autorizacion_document(haystack: str) -> bool:
     text = _ascii_haystack(haystack)
     compact_text = _compact_ascii_haystack(haystack)
+    beneficiary_markers = [
+        "beneficiario final",
+        "beneficiarios finales",
+        "registro unico de beneficiarios finales",
+        "participacion directa o indirecta mayor al 5",
+        "informacion de la compania",
+        "conformacion de la sociedad",
+        "accionista",
+    ]
+    if sum(1 for marker in beneficiary_markers if marker in text) >= 2:
+        return False
     strong_phrase_markers = [
         "canales y datos de contacto personal que he autorizado",
         "acceso a historia clinica",
@@ -3798,6 +3818,14 @@ def _apply_authorization_phrase_overrides(analysis: Dict[str, Any]) -> None:
                 doc.get("text_preview"),
             ]
         )
+        if _looks_like_beneficiario_final_document(normalize_haystack(text)):
+            if doc.get("document_type") != "beneficiario_final" or doc.get("legacy_code") != 27:
+                doc["document_type"] = "beneficiario_final"
+                doc["legacy_code"] = 27
+                doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(27, "")
+                doc["code_source"] = "post_beneficiario_precise"
+                changed = True
+            continue
         if not _looks_like_autorizacion_document(text):
             continue
         if doc.get("document_type") == "autorizacion" and doc.get("legacy_code") == 98:
@@ -4226,6 +4254,8 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
         return {"document_type": "formulario_afiliacion", "legacy_code": 0, "code_source": "ocr_formulario_precise"}
     if _looks_like_anexo_sedes_document(haystack):
         return {"document_type": "anexo_sedes", "legacy_code": 1, "code_source": "ocr_sedes_precise"}
+    if _looks_like_beneficiario_final_document(haystack):
+        return {"document_type": "beneficiario_final", "legacy_code": 27, "code_source": "ocr_beneficiario_precise"}
     if _looks_like_autorizacion_document(haystack):
         return {"document_type": "autorizacion", "legacy_code": 98, "code_source": "ocr_autorizacion_precise"}
     if _looks_like_entrega_documentos(haystack):
@@ -4239,8 +4269,6 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
         if rag_result:
             return rag_result
     # 2. Fallback a clasificacion por reglas
-    if _looks_like_beneficiario_final_document(haystack):
-        return {"document_type": "beneficiario_final", "legacy_code": 27, "code_source": "ocr_beneficiario_precise"}
     if _looks_like_rut_document(haystack):
         return {"document_type": "rut", "legacy_code": 8, "code_source": "ocr_rut_precise"}
     if _looks_like_cedula_document("", haystack):
@@ -7092,7 +7120,7 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
             row_errors.append({
                 "row": row_excel,
                 "sheet": sheet_name,
-                "code": "FECHA_NACIMIENTO_ANTIGUA_INVALIDA",
+                "code": "XLSX_FECHA_NACIMIENTO_ANTIGUA_INVALIDA",
                 "message": f"El año de nacimiento no puede ser inferior a 1905 en {row_location} ({birth_year_raw}).",
                 "documento": row_document,
             })
@@ -7102,7 +7130,7 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
                 row_errors.append({
                     "row": row_excel,
                     "sheet": sheet_name,
-                    "code": "EDAD_MINIMA_INVALIDA",
+                    "code": "XLSX_EDAD_MINIMA_INVALIDA",
                     "message": f"La fecha de nacimiento en {row_location} deja una edad menor a 15 años ({birthdate.strftime('%d/%m/%Y')}).",
                     "documento": row_document,
                 })
@@ -7110,7 +7138,7 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
                 row_errors.append({
                     "row": row_excel,
                     "sheet": sheet_name,
-                    "code": "EDAD_MAXIMA_INVALIDA",
+                    "code": "XLSX_EDAD_MAXIMA_INVALIDA",
                     "message": f"La fecha de nacimiento en {row_location} deja una edad mayor a 80 años ({birthdate.strftime('%d/%m/%Y')}).",
                     "documento": row_document,
                 })

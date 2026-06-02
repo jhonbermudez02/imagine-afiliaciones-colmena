@@ -415,6 +415,12 @@ function isXlsxOrFormularioBlocker(b) {
     if (b?.can_accept_exception === false || b?.raw?.can_accept_exception === false) return true;
     const field = normalizeText(b?.field || b?.raw?.field || '');
     const cell = normalizeText(b?.cell || b?.raw?.cell || '');
+    const legacyXlsxCodes = new Set([
+        'EDAD_MINIMA_INVALIDA',
+        'EDAD_MAXIMA_INVALIDA',
+        'FECHA_NACIMIENTO_ANTIGUA_INVALIDA',
+    ]);
+    if (legacyXlsxCodes.has(code)) return true;
     const documentValidationCodes = [
         'CEDULA_MATCH',
         'RUT_MATCH',
@@ -443,6 +449,8 @@ function isXlsxOrFormularioBlocker(b) {
            msg.startsWith('el teléfono de la sede principal ') ||
            msg.startsWith('la direccion de la sede principal ') ||
            msg.startsWith('la dirección de la sede principal ') ||
+           msg.includes('trabajadores, fila') ||
+           (msg.includes(' en sede ') && msg.includes(', fila')) ||
            /\b[a-z]{1,3}\d{1,3}\b/i.test(String(b?.message || blockerText(b?.raw || b) || ''));
 }
 
@@ -2215,6 +2223,7 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
 
     el.innerHTML = items.map((item, i) => {
         const isRag = item.codeSource === 'rag_classification';
+        const canDuplicate = item.kind !== 'xlsx' && canonicalDocumentType(item.type) === 'entrega_documentos';
         const sedeLabel = canonicalDocumentType(item.type) === 'anexo_sedes' && item.sedeKey
             ? (buildSedeOptions(payload).find(s => s.key === item.sedeKey)?.label || item.sedeKey)
             : '';
@@ -2229,8 +2238,8 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
             ${sedeLabel ? `<span class="doc-item-corrected" title="Sede asignada">${escapeHtml(sedeLabel)}</span>` : ''}
             ${item.kind !== 'xlsx' && !isApproved ? `
             <span class="doc-item-actions">
-                <button class="doc-action-btn doc-duplicate-btn" data-file="${escapeHtml(item.file)}" title="Duplicar imagen" type="button">⧉ Dup</button>
-                <button class="doc-action-btn doc-delete-btn" data-file="${escapeHtml(item.file)}" title="Eliminar imagen" type="button">✕ Elim</button>
+                ${canDuplicate ? `<button class="doc-action-btn doc-duplicate-btn" data-file="${escapeHtml(item.file)}" title="Duplicar imagen" aria-label="Duplicar imagen" type="button">⧉</button>` : ''}
+                <button class="doc-action-btn doc-delete-btn" data-file="${escapeHtml(item.file)}" title="Eliminar imagen" aria-label="Eliminar imagen" type="button">✕</button>
             </span>` : ''}
         </div>
     `}).join('');
@@ -2351,6 +2360,30 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
     });
     applyClassifDocListBusyState();
 
+}
+
+function navigateClassifDocument(dir) {
+    if (currentView !== 'clasificacion') return false;
+    const list = document.getElementById('classifDocList');
+    if (!list || list.classList.contains('is-busy')) return false;
+    const rows = Array.from(list.querySelectorAll('.doc-item'));
+    if (!rows.length) return false;
+    const activeIndex = rows.findIndex(row => row.classList.contains('active'));
+    const currentIndex = activeIndex >= 0 ? activeIndex : (dir > 0 ? -1 : rows.length);
+    const nextIndex = Math.max(0, Math.min(rows.length - 1, currentIndex + dir));
+    if (nextIndex === activeIndex) return false;
+    rows[nextIndex].scrollIntoView({ block: 'nearest' });
+    rows[nextIndex].click();
+    return true;
+}
+
+function handleClassifDocumentKeyboardNav(e) {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (document.getElementById('galleryOverlay')?.style.display === 'flex') return;
+    const target = e.target;
+    if (target?.closest?.('input, textarea, select, button, [contenteditable="true"]')) return;
+    if (navigateClassifDocument(e.key === 'ArrowRight' ? 1 : -1)) e.preventDefault();
 }
 
 async function renderDocPreview(container, caseId, item) {
@@ -5761,6 +5794,7 @@ function init() {
     document.getElementById('searchInput')?.addEventListener('keydown', e => {
         if (e.key === 'Enter') doSearch(e.target.value);
     });
+    document.addEventListener('keydown', handleClassifDocumentKeyboardNav);
 
     // Modal
     document.getElementById('docModalClose')?.addEventListener('click', closeModal);
