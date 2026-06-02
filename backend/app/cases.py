@@ -1193,9 +1193,28 @@ def _asesor_tipo_nombre(codigo_intermediario: Any) -> str:
 
 
 def _comision_asesor_no_tabla_validation(row: Dict[str, Any], filename: str = "", source: str = "manual") -> Optional[Dict[str, Any]]:
-    codigo = only_digits(str(row.get("codigo_intermediario") or row.get("codigo") or ""))
+    codigo = only_digits(str(row.get("codigo_intermediario") or row.get("codigo") or "")).lstrip("0") or ""
     cedula = only_digits(str(row.get("vendedor_documento") or row.get("cedula") or row.get("documento") or ""))
-    if not codigo or not cedula:
+    if not codigo:
+        return None
+    if codigo not in {"1", "3"}:
+        filename_text = f" Archivo: {filename}." if filename else ""
+        source_text = "comisiones manuales" if source == "manual" else "soporte entrega de documentos"
+        return {
+            "code": "COMISION_CODIGO_INVALIDO",
+            "status": "ALERTA",
+            "severity": "blocker",
+            "can_accept_exception": True,
+            "message": (
+                f"El código de comisión {codigo.zfill(2)} no es válido; solo se aceptan los códigos 01 y 03 "
+                f"({source_text}).{filename_text}"
+            ),
+            "codigo_intermediario": codigo.zfill(2),
+            "vendedor_documento": cedula,
+            "filename": filename,
+            "source": source,
+        }
+    if not cedula:
         return None
     if _validate_asesor_en_tabla(cedula, codigo):
         return None
@@ -8264,6 +8283,8 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
 
     entrega_porcentaje_issue = None
     for doc in docs:
+        if str(doc.get("document_type") or "") != "comision":
+            continue
         manual_comisiones = doc.get("_manual_comisiones") or []
         if not manual_comisiones:
             continue
@@ -8327,13 +8348,6 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         if not ok:
             entrega_porcentaje_issue = validations[-1]
             alerts.append(validations[-1])
-        # Validar que el asesor esté en la tabla de comerciales/intermediarios
-        todos_intermediarios = _extract_todos_intermediarios(doc)
-        for interm in todos_intermediarios:
-            invalid_validation = _comision_asesor_no_tabla_validation(interm, filename=str(doc.get("filename") or ""), source="ocr")
-            if invalid_validation:
-                validations.append(invalid_validation)
-                alerts.append(invalid_validation)
         break
 
     precheck = _build_precheck_summary(xlsx_profile, docs, validation_required_docs, missing_docs)
@@ -8722,7 +8736,7 @@ def _validate_participacion_por_tipo(intermediarios: List[Dict[str, str]]) -> Li
     for codigo, porcentajes in por_tipo.items():
         total = sum(porcentajes)
         if abs(total - 100.0) > 0.5:
-            tipo_nombre = {"1": "Consultor", "3": "Corredor/Agencia", "4": "Convenio"}.get(codigo, f"Tipo {codigo}")
+            tipo_nombre = {"1": "Consultor", "3": "Corredor/Agencia"}.get(codigo, f"Tipo {codigo}")
             errores.append(
                 f"Comisiones intermediario: la suma de participación para {tipo_nombre} "
                 f"(código {codigo}) es {total:g}%, debe ser 100%."

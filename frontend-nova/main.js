@@ -1813,7 +1813,7 @@ function bindComisionManualPanel(item, payload, root = document) {
 
     function collectComisionRows() {
         return [...comisionRows.querySelectorAll('.comision-row')].map(row => ({
-            codigo: row.querySelector('.comision-codigo')?.value || '',
+            codigo: String(row.querySelector('.comision-codigo')?.value || '').replace(/^0+/, '') || '',
             cedula: row.querySelector('.comision-cedula')?.value?.trim() || '',
             porcentaje: row.querySelector('.comision-pct')?.value?.trim() || '100',
         })).filter(r => r.cedula);
@@ -1822,10 +1822,17 @@ function bindComisionManualPanel(item, payload, root = document) {
     function renderComisionRow(data = {}, existingIndex = -1) {
         const div = document.createElement('div');
         div.className = 'comision-row';
+        const codigo = String(data.codigo || data.codigo_intermediario || '').replace(/^0+/, '') || '';
+        const isValidCodigo = ['1', '3'].includes(codigo);
+        const invalidCodigoOption = codigo && !isValidCodigo
+            ? `<option value="${escapeHtml(codigo)}" selected>${escapeHtml(codigo.padStart(2, '0'))} - No válido, selecciona 01 o 03</option>`
+            : '';
         div.innerHTML = `
             <select class="field-select comision-codigo">
-                <option value="1" ${data.codigo==='1'?'selected':''}>01 - Consultor</option>
-                <option value="3" ${data.codigo==='3'?'selected':''}>03 - Corredor</option>
+                <option value="" ${!codigo ? 'selected' : ''}>Seleccionar código</option>
+                ${invalidCodigoOption}
+                <option value="1" ${isValidCodigo && codigo==='1'?'selected':''}>01 - Consultor</option>
+                <option value="3" ${isValidCodigo && codigo==='3'?'selected':''}>03 - Corredor</option>
             </select>
             <input class="field-input comision-cedula" placeholder="Nro. documento" value="${escapeHtml(data.cedula||'')}">
             <input class="field-input comision-pct" placeholder="%" value="${escapeHtml(data.porcentaje||'100')}">
@@ -1918,6 +1925,14 @@ function bindComisionManualPanel(item, payload, root = document) {
 
         if (!rows.length) {
             if (comisionStatus) comisionStatus.textContent = 'Agrega al menos un intermediario.';
+            return;
+        }
+        const invalidCodigoRows = rows.filter(r => !['1', '3'].includes(r.codigo));
+        if (invalidCodigoRows.length) {
+            if (comisionStatus) {
+                comisionStatus.style.color = 'var(--c-err)';
+                comisionStatus.textContent = 'Selecciona un código válido 01 o 03 para cada comisión.';
+            }
             return;
         }
 
