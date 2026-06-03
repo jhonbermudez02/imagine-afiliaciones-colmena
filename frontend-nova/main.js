@@ -586,12 +586,27 @@ function resolveContractNumber(analysis, item = {}) {
 }
 
 function resolveManualApproval(item) {
-    const approval = item?.manual_approval || item?.analysis?.manual_approval || {};
+    const a = item?.analysis || {};
+    const wf = a.workflow_run || {};
+    const decision = a.decision || {};
+    const approval = item?.manual_approval || a.manual_approval || {};
     if (approval && approval.approved) return approval;
-    const status = normalizeText(item?.status || item?.analysis?.workflow_run?.status || '');
+    const status = normalizeText(item?.status || wf.status || '');
     const finalStatus = normalizeText(item?.final_status || '');
     if (status === 'approved' || finalStatus === 'aprobado') {
         return { approved: true, status: 'approved', source: 'status' };
+    }
+    const decisionStatus = normalizeText(decision.recommended_status || '');
+    const validationOk = Boolean(a.validacion_resumen?.ok || a.validacion_resumen?.precheck?.approved);
+    const workflowStatus = normalizeText(wf.status || '');
+    const report = wf.executive_report_final || wf.executive_report_precheck || a.reporte_ejecutivo || {};
+    const estado = normalizeText(report?.resumen_ejecutivo?.estado || '');
+    if (
+        decisionStatus === 'aprobable' ||
+        estado === 'aprobado' ||
+        (validationOk && workflowStatus === 'completed')
+    ) {
+        return { approved: true, status: 'approved', source: 'workflow' };
     }
     return null;
 }
