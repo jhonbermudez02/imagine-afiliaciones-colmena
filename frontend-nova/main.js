@@ -512,13 +512,13 @@ function getAcceptedValidationExceptions(payload) {
 }
 
 async function acceptValidationException(caseId, blocker) {
-    if (!caseId || !blocker) return;
+    if (!caseId || !blocker) return false;
     const shortMsg = String(blocker.message || '').slice(0, 220);
     const reason = prompt(
         `Justificación para aceptar este hallazgo solo en este contrato:\n\n${shortMsg}`,
         'Validado manualmente por operador'
     );
-    if (!reason || !reason.trim()) return;
+    if (!reason || !reason.trim()) return false;
     const note = prompt('Observación adicional opcional:', '') || '';
     const tester = readTester();
     await fetchWithRetry(caseApiUrl(caseId, '/validation-exceptions'), {
@@ -535,7 +535,7 @@ async function acceptValidationException(caseId, blocker) {
     });
     showToast('Excepción guardada. Actualizando validaciones...', 'info', 2500);
     const payload = await refreshClassifAfterManualChange(caseId);
-    if (!payload) return;
+    if (!payload) return false;
     activeCasePayload = payload;
     const reportEl = document.getElementById('reporteContent');
     if (reportEl && currentView === 'reporte') renderReporte(reportEl, payload);
@@ -555,6 +555,7 @@ async function acceptValidationException(caseId, blocker) {
     if (resultCard && resultCard.style.display !== 'none') renderWorkflowResult(payload);
     loadBandeja().catch(() => {});
     showToast('Contrato reprocesado con la excepción aplicada.', 'ok', 4500);
+    return true;
 }
 
 function setValidationExceptionButtonsLoading(root, activeButton, loading = true) {
@@ -674,6 +675,8 @@ function casePillLabel(status, finalStatus) {
 
 async function approveCaseManually(caseId, container) {
     if (!caseId) return;
+    const confirmed = confirm('¿Confirmas que quieres aprobar este contrato?\n\nEsta acción marcará el contrato como aprobado manualmente.');
+    if (!confirmed) return;
     const reason = prompt('Justificación para aprobar este contrato:', 'Aprobado manualmente por operador');
     if (!reason || !reason.trim()) return;
     const tester = readTester();
@@ -690,7 +693,14 @@ async function approveCaseManually(caseId, container) {
         });
         const payload = await r.json();
         activeCasePayload = payload;
-        showToast('Contrato aprobado manualmente.', 'ok', 3500);
+        showToast('Contrato aprobado manualmente. Iniciando generación del plano 926...', 'ok', 4500);
+        try {
+            if (btn) btn.textContent = 'Generando 926...';
+            await fetchWithRetry(caseApiUrl(caseId, '/run-workflow'), { method: 'POST' });
+            showToast('Generación del plano 926 iniciada. Estará disponible para Colmena cuando termine el flujo.', 'info', 6500);
+        } catch(workflowError) {
+            showToast('El contrato quedó aprobado, pero no pude iniciar la generación del 926: ' + workflowError.message, 'warn', 8000);
+        }
         if (container?.id === 'reporteContent') renderFormularioReporte(container, payload);
         else if (container) renderReporte(container, payload);
         loadReporteSidebar();
@@ -1606,7 +1616,10 @@ function renderWorkflowResult(payload) {
             const records = blockerRecords.length ? blockerRecords : blockers.map((b, i) => ({ message: blockerText(b), code: 'VALIDATION_ALERT', fingerprint: '', index: i }));
             const record = records[Number(btn.dataset.blockerIdx || 0)];
             setValidationExceptionButtonsLoading(el, btn, true);
-            try { await acceptValidationException(payload.id || activeCaseId, record); }
+            try {
+                const saved = await acceptValidationException(payload.id || activeCaseId, record);
+                if (!saved) setValidationExceptionButtonsLoading(el, btn, false);
+            }
             catch(e) {
                 showToast('No pude guardar la excepción: ' + e.message, 'err', 6000);
                 setValidationExceptionButtonsLoading(el, btn, false);
@@ -1733,7 +1746,10 @@ function renderClassifBlockers(payload) {
             const availableRecords = latestRecords.length ? latestRecords : records;
             const record = availableRecords[Number(btn.dataset.blockerIdx || 0)] || records[Number(btn.dataset.blockerIdx || 0)];
             setValidationExceptionButtonsLoading(panel, btn, true);
-            try { await acceptValidationException(latestPayload.id || payload.id || activeCaseId, record); }
+            try {
+                const saved = await acceptValidationException(latestPayload.id || payload.id || activeCaseId, record);
+                if (!saved) setValidationExceptionButtonsLoading(panel, btn, false);
+            }
             catch(e) {
                 showToast('No pude guardar la excepción: ' + e.message, 'err', 6000);
                 setValidationExceptionButtonsLoading(panel, btn, false);
@@ -2793,7 +2809,10 @@ function renderValidacionOCR(container, payload) {
         btn.addEventListener('click', async () => {
             const record = blockerRecords[Number(btn.dataset.blockerIdx || 0)];
             setValidationExceptionButtonsLoading(container, btn, true);
-            try { await acceptValidationException(payload.id || activeCaseId, record); }
+            try {
+                const saved = await acceptValidationException(payload.id || activeCaseId, record);
+                if (!saved) setValidationExceptionButtonsLoading(container, btn, false);
+            }
             catch(e) {
                 showToast('No pude guardar la excepción: ' + e.message, 'err', 6000);
                 setValidationExceptionButtonsLoading(container, btn, false);
@@ -3275,7 +3294,7 @@ function renderFormularioCentroDetalle(centro) {
         ['Actividad', centro.actividad_economica_codigo || centro.actividad_economica],
         ['Riesgo', centro.clase_riesgo || centro.clase_riesgo_ct],
         ['Trabajadores', centro.cantidad_trabajadores || centro.trabajadores],
-        ['Cotización', centro.monto_cotizacion],
+        ['Monto total cotización', centroTrabajoMontoCotizacion(centro)],
         ['Municipio', centro.municipio],
         ['Departamento', centro.departamento],
         ['Zona', centro.zona],
@@ -3300,6 +3319,15 @@ function renderFormularioCentroDetalle(centro) {
 
 function centroTrabajoCode(centro) {
     return String(centro?.codigo || centro?.codigo_ct || centro?.centro_trabajo || '').trim();
+}
+
+function centroTrabajoMontoCotizacion(centro) {
+    const value = centro?.monto_total_cotizacion ||
+        centro?.monto_cotizacion ||
+        centro?.monto_total_de_cotizacion ||
+        centro?.valor_total_cotizacion ||
+        '';
+    return isBlankFormValue(value) ? '' : formatFormValue('monto_total_cotizacion', value);
 }
 
 function filterSedeWorkers(sede, centroIndex = 'all') {
@@ -3569,6 +3597,7 @@ function renderCentroTrabajoOfficialInfo(centro) {
         centro.responsable_nombre2,
     ].filter(Boolean).join(' ');
     const responsableDoc = [centro.responsable_tipo_doc, centro.responsable_num_doc].filter(Boolean).join(' ');
+    const montoCotizacion = centroTrabajoMontoCotizacion(centro);
     return `
         <table class="sede-official-table sede-official-table-centro">
             <thead>
@@ -3589,6 +3618,12 @@ function renderCentroTrabajoOfficialInfo(centro) {
                     <th>Trabajadores:</th>
                     <td>${escapeHtml(centro.cantidad_trabajadores || centro.trabajadores || '')}</td>
                 </tr>
+                ${montoCotizacion ? `
+                <tr>
+                    <th>Monto total cotización:</th>
+                    <td colspan="5">${escapeHtml(montoCotizacion)}</td>
+                </tr>
+                ` : ''}
                 <tr>
                     <th>Municipio:</th>
                     <td>${escapeHtml(centro.municipio || '')}</td>
@@ -3719,7 +3754,7 @@ function renderFormularioDocumentViewer(docItems) {
     `;
 }
 
-function renderEmpresaInfoCollapsible(formFields, profile, resumen, meta = {}) {
+function buildEmpresaInfoSections(formFields, profile, resumen, meta = {}) {
     const tipoTramite = formFields.tipo_tramite || profile.tipo_tramite || profile.tipo_afiliado || '';
     const tipoPersona = formFields.tipo_persona || profile.tipo_persona || '';
     const naturalezaJuridica = formFields.naturaleza_juridica_nombre;
@@ -3786,19 +3821,112 @@ function renderEmpresaInfoCollapsible(formFields, profile, resumen, meta = {}) {
         ['Sede principal', sedePrincipalEntries],
     ].filter(([, entries]) => entries.some(([, value]) => !isBlankFormValue(value)));
 
+    return sections;
+}
+
+function renderEmpresaInfoContent(formFields, profile, resumen, meta = {}) {
+    const sections = buildEmpresaInfoSections(formFields, profile, resumen, meta);
     if (!sections.length) return '';
     return `
-        <details class="company-info-collapse" id="companyInfoCollapse">
-            <summary class="company-info-native-summary">Detalles</summary>
-            <div class="company-info-body">
-                ${sections.map(([title, entries]) => `
-                    <section class="company-info-section">
-                        <div class="company-info-section-title">${escapeHtml(title)}</div>
-                        ${renderCompactInfoTable(entries)}
-                    </section>
+        <div class="company-info-body">
+            ${sections.map(([title, entries]) => `
+                <section class="company-info-section">
+                    <div class="company-info-section-title">${escapeHtml(title)}</div>
+                    ${renderCompactInfoTable(entries)}
+                </section>
+            `).join('')}
+        </div>
+    `;
+}
+
+function commissionDocumentPriority(item) {
+    const type = canonicalDocumentType(item?.type || item?.document_type || '');
+    if (type === 'comision') return 1;
+    if (type === 'entrega_documentos') return 2;
+    return 0;
+}
+
+function renderComisionesInfoContent(payload) {
+    const a = payload?.analysis || {};
+    const mr = a.manual_review || {};
+    const comisionesManuales = mr.comisiones || {};
+    const intermediarios = a.validacion_resumen?.matches?.entrega_documentos_intermediario || {};
+    const todosInterm = Array.isArray(intermediarios.todos_intermediarios) ? intermediarios.todos_intermediarios : [];
+    const docs = buildDocItems(payload).filter(item => commissionDocumentPriority(item) > 0)
+        .sort((left, right) => commissionDocumentPriority(left) - commissionDocumentPriority(right));
+
+    let tableHtml = '';
+    if (Object.keys(comisionesManuales).length) {
+        tableHtml = Object.entries(comisionesManuales).map(([fname, rows]) => `
+            <section class="commission-info-section">
+                <div class="company-info-section-title">${escapeHtml(fname)} · Manual</div>
+                <table class="blocker-table commission-info-table">
+                    <thead><tr><th>Código</th><th>Documento</th><th>Nombre</th><th>%</th></tr></thead>
+                    <tbody>${(rows || []).map(row => `
+                        <tr>
+                            <td>${escapeHtml(String(row.codigo || ''))}</td>
+                            <td>${escapeHtml(String(row.cedula || ''))}</td>
+                            <td>${escapeHtml(String(row.nombre || ''))}</td>
+                            <td>${escapeHtml(String(row.porcentaje || ''))}%</td>
+                        </tr>
+                    `).join('')}</tbody>
+                </table>
+            </section>
+        `).join('');
+    } else if (todosInterm.length) {
+        tableHtml = `
+            <section class="commission-info-section">
+                <div class="company-info-section-title">Comisiones leídas del OCR</div>
+                <table class="blocker-table commission-info-table">
+                    <thead><tr><th>Código</th><th>Documento</th><th>Nombre</th><th>%</th></tr></thead>
+                    <tbody>${todosInterm.map(row => `
+                        <tr>
+                            <td>${escapeHtml(String(row.codigo_intermediario || ''))}</td>
+                            <td>${escapeHtml(String(row.vendedor_documento || ''))}</td>
+                            <td>${escapeHtml(String(row.nombre_intermediario || ''))}</td>
+                            <td>${escapeHtml(String(row.porcentaje_venta || ''))}%</td>
+                        </tr>
+                    `).join('')}</tbody>
+                </table>
+            </section>
+        `;
+    } else if (intermediarios.codigo_intermediario) {
+        tableHtml = `
+            <section class="commission-info-section">
+                <div class="company-info-section-title">Comisiones leídas del OCR</div>
+                <table class="blocker-table commission-info-table">
+                    <thead><tr><th>Código</th><th>% Participación</th><th>Archivo</th></tr></thead>
+                    <tbody><tr>
+                        <td>${escapeHtml(String(intermediarios.codigo_intermediario || ''))}</td>
+                        <td>${escapeHtml(String(intermediarios.porcentaje_venta || ''))}%</td>
+                        <td>${escapeHtml(String(intermediarios.filename || ''))}</td>
+                    </tr></tbody>
+                </table>
+            </section>
+        `;
+    } else {
+        tableHtml = '<div class="form-empty">No se encontró información de comisiones. Verifica el documento de entrega de documentos.</div>';
+    }
+
+    const docsHtml = docs.length ? `
+        <section class="commission-info-section">
+            <div class="company-info-section-title">Documentos fuente</div>
+            <div class="commission-doc-list">
+                ${docs.map(item => `
+                    <button class="btn-secondary commission-doc-jump" data-file="${escapeHtml(item.file)}" type="button">
+                        ${escapeHtml(item.label || item.displayName || item.file)}
+                    </button>
                 `).join('')}
             </div>
-        </details>
+        </section>
+    ` : '<div class="form-empty">No hay documento de comisión o entrega de documentos asociado.</div>';
+
+    return `
+        <div class="commission-info-body">
+            <div class="commission-info-title">Comisiones e intermediación</div>
+            ${tableHtml}
+            ${docsHtml}
+        </div>
     `;
 }
 
@@ -3850,32 +3978,40 @@ function renderFormularioReporte(container, payload) {
             </div>
             <div class="report-header-actions">
                 ${isAprobable && !approved ? `<button class="btn-success" id="approveCaseBtn" type="button">Aprobar contrato</button>` : ''}
-                <button class="btn-secondary" id="companyInfoToggle" type="button" aria-expanded="false" aria-controls="companyInfoCollapse">Información Empresa</button>
+                <button class="btn-secondary" id="companyInfoToggle" type="button" aria-expanded="false" aria-controls="formCompanyInfoPanel">Información Empresa</button>
+                <button class="btn-secondary" id="commissionsInfoToggle" type="button" aria-expanded="false" aria-controls="formCommissionsInfoPanel">Comisiones</button>
                 <button class="btn-secondary" data-action="clasificacion" data-case="${escapeHtml(caseId)}" type="button">Ver documentos</button>
             </div>
         </div>
-        ${renderEmpresaInfoCollapsible(formFields, profile, resumen, { nroAfiliacion, fecha })}
         <div class="report-body report-body-form">
             <div class="form-review-split">
                 <section class="form-review-pane form-review-info">
-                    <div class="sede-selector-panel form-review-selectors">
-                        <select id="formSedeSelect" class="field-select sede-select" ${sedesFormulario.length ? '' : 'disabled'}>
-                            ${sedesFormulario.length
-                                ? sedesFormulario.map((sede, index) => `<option value="${index}">${escapeHtml(sede.label)}</option>`).join('')
-                                : '<option>Sin sedes</option>'}
-                        </select>
-                        <select id="formCentroSelect" class="field-select sede-select" ${sedesFormulario.length ? '' : 'disabled'}>
-                            ${(sedesFormulario[0]?.centros || []).length
-                                ? `<option value="all">Todos</option>${sedesFormulario[0].centros.map((centro, index) => `<option value="${index}">${escapeHtml(centroTrabajoLabel(centro, index))}</option>`).join('')}`
-                                : '<option>Sin centros</option>'}
-                        </select>
-                        <button class="btn-secondary form-toggle-info-btn" id="toggleSedeInfoBtn" type="button" aria-pressed="false">Ocultar info</button>
+                    <div id="formSedeInfoContent" class="form-sede-info-content">
+                        <div class="sede-selector-panel form-review-selectors">
+                            <select id="formSedeSelect" class="field-select sede-select" ${sedesFormulario.length ? '' : 'disabled'}>
+                                ${sedesFormulario.length
+                                    ? sedesFormulario.map((sede, index) => `<option value="${index}">${escapeHtml(sede.label)}</option>`).join('')
+                                    : '<option>Sin sedes</option>'}
+                            </select>
+                            <select id="formCentroSelect" class="field-select sede-select" ${sedesFormulario.length ? '' : 'disabled'}>
+                                ${(sedesFormulario[0]?.centros || []).length
+                                    ? `<option value="all">Todos</option>${sedesFormulario[0].centros.map((centro, index) => `<option value="${index}">${escapeHtml(centroTrabajoLabel(centro, index))}</option>`).join('')}`
+                                    : '<option>Sin centros</option>'}
+                            </select>
+                            <button class="btn-secondary form-toggle-info-btn" id="toggleSedeInfoBtn" type="button" aria-pressed="false">Ocultar info</button>
+                        </div>
+                        <div class="sede-detail-panel" id="formSedeDetail">
+                            ${renderFormularioSedeDetalle(sedesFormulario[0])}
+                        </div>
+                        <div class="form-workers-panel" id="formWorkersPanel">
+                            ${renderFormularioTrabajadoresTable(filterSedeWorkers(sedesFormulario[0], 'all'))}
+                        </div>
                     </div>
-                    <div class="sede-detail-panel" id="formSedeDetail">
-                        ${renderFormularioSedeDetalle(sedesFormulario[0])}
+                    <div class="form-company-info-panel" id="formCompanyInfoPanel" hidden>
+                        ${renderEmpresaInfoContent(formFields, profile, resumen, { nroAfiliacion, fecha }) || '<div class="form-empty">Sin información de empresa recuperada.</div>'}
                     </div>
-                    <div class="form-workers-panel" id="formWorkersPanel">
-                        ${renderFormularioTrabajadoresTable(filterSedeWorkers(sedesFormulario[0], 'all'))}
+                    <div class="form-commissions-info-panel" id="formCommissionsInfoPanel" hidden>
+                        ${renderComisionesInfoContent(payload)}
                     </div>
                 </section>
                 <section class="form-review-pane form-review-documents">
@@ -3960,14 +4096,53 @@ function renderFormularioReporte(container, payload) {
     });
     container.querySelector('#approveCaseBtn')?.addEventListener('click', () => approveCaseManually(caseId, container));
     const companyInfoToggle = container.querySelector('#companyInfoToggle');
-    const companyInfoCollapse = container.querySelector('#companyInfoCollapse');
+    const commissionsInfoToggle = container.querySelector('#commissionsInfoToggle');
+    const companyInfoPanel = container.querySelector('#formCompanyInfoPanel');
+    const commissionsInfoPanel = container.querySelector('#formCommissionsInfoPanel');
+    const sedeInfoContent = container.querySelector('#formSedeInfoContent');
     const toggleSedeInfoBtn = container.querySelector('#toggleSedeInfoBtn');
     const formInfoPane = container.querySelector('.form-review-info');
+    const setLeftPanel = (panelName) => {
+        if (!companyInfoPanel || !commissionsInfoPanel || !sedeInfoContent) return;
+        const showCompany = panelName === 'company';
+        const showCommissions = panelName === 'commissions';
+        companyInfoPanel.hidden = !showCompany;
+        commissionsInfoPanel.hidden = !showCommissions;
+        sedeInfoContent.hidden = showCompany || showCommissions;
+        companyInfoToggle?.setAttribute('aria-expanded', showCompany ? 'true' : 'false');
+        commissionsInfoToggle?.setAttribute('aria-expanded', showCommissions ? 'true' : 'false');
+        if (companyInfoToggle) companyInfoToggle.textContent = showCompany ? 'Ocultar información' : 'Información Empresa';
+        if (commissionsInfoToggle) commissionsInfoToggle.textContent = showCommissions ? 'Ocultar comisiones' : 'Comisiones';
+    };
+    const selectDocumentByFile = async (filename) => {
+        if (!filename) return false;
+        renderDocumentSelectOptions(docItems);
+        const documentSelect = container.querySelector('#formDocumentSelect');
+        if (!documentSelect) return false;
+        const index = currentFormDocItems.findIndex(item => item.file === filename);
+        if (index < 0) return false;
+        documentSelect.value = String(index);
+        await renderSelectedDocument();
+        return true;
+    };
+    const selectCommissionsDocument = async () => {
+        const commissionDoc = docItems
+            .filter(item => commissionDocumentPriority(item) > 0)
+            .sort((left, right) => commissionDocumentPriority(left) - commissionDocumentPriority(right))[0];
+        const selected = await selectDocumentByFile(commissionDoc?.file || '');
+        if (!selected) showToast('No encontré un documento de comisiones para mostrar.', 'warn', 3500);
+    };
     companyInfoToggle?.addEventListener('click', () => {
-        if (!companyInfoCollapse) return;
-        companyInfoCollapse.open = !companyInfoCollapse.open;
-        companyInfoToggle.setAttribute('aria-expanded', companyInfoCollapse.open ? 'true' : 'false');
-        companyInfoToggle.textContent = companyInfoCollapse.open ? 'Ocultar información' : 'Información Empresa';
+        const showingCompany = companyInfoPanel && !companyInfoPanel.hidden;
+        setLeftPanel(showingCompany ? 'sede' : 'company');
+    });
+    commissionsInfoToggle?.addEventListener('click', async () => {
+        const showingCommissions = commissionsInfoPanel && !commissionsInfoPanel.hidden;
+        setLeftPanel(showingCommissions ? 'sede' : 'commissions');
+        if (!showingCommissions) await selectCommissionsDocument();
+    });
+    container.querySelectorAll('.commission-doc-jump').forEach(btn => {
+        btn.addEventListener('click', () => selectDocumentByFile(btn.dataset.file || ''));
     });
     toggleSedeInfoBtn?.addEventListener('click', () => {
         if (!formInfoPane || !sedeDetail) return;
@@ -4219,7 +4394,10 @@ function renderReporte(container, payload) {
             const records = blockerRecords.length ? blockerRecords : blockers.map((b, i) => ({ message: blockerText(b), code: 'VALIDATION_ALERT', fingerprint: '', index: i }));
             const record = records[Number(btn.dataset.blockerIdx || 0)];
             setValidationExceptionButtonsLoading(container, btn, true);
-            try { await acceptValidationException(caseId, record); }
+            try {
+                const saved = await acceptValidationException(caseId, record);
+                if (!saved) setValidationExceptionButtonsLoading(container, btn, false);
+            }
             catch(e) {
                 showToast('No pude guardar la excepción: ' + e.message, 'err', 6000);
                 setValidationExceptionButtonsLoading(container, btn, false);
@@ -4532,7 +4710,7 @@ function renderReporte(container, payload) {
                                 <td>${escapeHtml(c.responsable_correo||'')}</td>
                                 <td>${escapeHtml(c.novedades||'')}</td>
                                 <td style="text-align:center">${escapeHtml(c.cantidad_trabajadores||'')}</td>
-                                <td style="text-align:right">${escapeHtml(c.monto_cotizacion||'')}</td>
+                                <td style="text-align:right">${escapeHtml(centroTrabajoMontoCotizacion(c))}</td>
                             </tr>`;}).join('')}</tbody>
                         </table></div>`;
                     }
@@ -4946,6 +5124,8 @@ async function loadProduccion() {
             const { status, finalStatus } = resolveCase(c);
             return isApprovedCaseStatus(status, finalStatus);
         });
+        const selectableCaseIds = new Set(cases.filter(item => resolveCase(item).has926).map(item => item.id).filter(Boolean));
+        selectedColmenaCaseIds = new Set([...selectedColmenaCaseIds].filter(id => selectableCaseIds.has(id)));
         cases.sort((a,b) => String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
         if (!cases.length) { el.innerHTML = `<div class="empty-state">No hay contratos aprobados para ${escapeHtml(currentOperation().name)}</div>`; return; }
         el.innerHTML = `<div class="production-cards">${cases.map(item => {
@@ -4966,8 +5146,8 @@ async function loadProduccion() {
                     </div>
                     <div class="prod-card-actions">
                         <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer">
-                            <input type="checkbox" data-colmena-case="${escapeHtml(id)}" ${selectedColmenaCaseIds.has(id)?'checked':''}>
-                            Incluir en lote
+                            <input type="checkbox" data-colmena-case="${escapeHtml(id)}" ${selectedColmenaCaseIds.has(id)?'checked':''} ${has926 ? '' : 'disabled'}>
+                            ${has926 ? 'Incluir en lote' : 'Sin 926 para lote'}
                         </label>
                         <button class="btn-secondary" data-action="reporte" data-case="${escapeHtml(id)}" type="button">Reporte</button>
                         <button class="btn-secondary" data-action="clasificacion" data-case="${escapeHtml(id)}" type="button">Docs</button>
@@ -5000,12 +5180,11 @@ async function downloadColmenaBatch() {
     const btn = document.getElementById('downloadColmenaBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'Descargando...'; }
     try {
-        const r = await fetch(`${API_URL}/api/926/consolidated`, {
+        const r = await fetchWithRetry(operationApiUrl('/api/926/consolidated'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ case_ids: ids, operation: readOperation() }),
         });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const blob = await r.blob();
         const disposition = r.headers.get('Content-Disposition') || '';
         const match = disposition.match(/filename="?([^"]+)"?/i);

@@ -9167,7 +9167,7 @@ def _workflow_step(
 def run_case_workflow(case_id: str) -> Dict[str, Any]:
     workflow_started = perf_counter()
     analyze_started = perf_counter()
-    payload = analyze_case(case_id)
+    payload = analyze_case(case_id, preserve_manual_approval=True)
     analyze_duration_ms = int((perf_counter() - analyze_started) * 1000)
     analysis = payload.get("analysis") or {}
     profile = (analysis.get("xlsx_profile") or {}).get("profile", {})
@@ -9738,11 +9738,12 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
     return payload
 
 
-def analyze_case(case_id: str) -> Dict[str, Any]:
+def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[str, Any]:
     analyze_started = perf_counter()
     payload = load_case(case_id)
     previous_analysis = payload.get("analysis") or {}
     previous_manual_review = previous_analysis.get("manual_review") or {}
+    previous_manual_approval = payload.get("manual_approval") or previous_analysis.get("manual_approval") or {}
     files = payload.get("files", [])
     xlsx_profile: Dict[str, Any] = {}
     docs: List[Dict[str, Any]] = []
@@ -9999,7 +10000,12 @@ def analyze_case(case_id: str) -> Dict[str, Any]:
     payload["status"] = "completed" if decision_status == "aprobable" else "analyzed"
     payload["updated_at"] = utc_now()
     payload["analysis"] = analysis
-    _clear_manual_approval(payload, "Reproceso de validaciones del caso.")
+    if preserve_manual_approval and isinstance(previous_manual_approval, dict) and previous_manual_approval.get("approved"):
+        payload["manual_approval"] = previous_manual_approval
+        payload["final_status"] = "APROBADO"
+        analysis["manual_approval"] = previous_manual_approval
+    else:
+        _clear_manual_approval(payload, "Reproceso de validaciones del caso.")
     save_case(payload)
     rebuild_document_registry()
     return payload

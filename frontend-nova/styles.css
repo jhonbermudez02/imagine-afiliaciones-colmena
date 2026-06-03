@@ -1254,12 +1254,59 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
-.form-review-selectors {
+.sede-selector-panel.form-review-selectors {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1.35fr) minmax(86px, 0.7fr);
   gap: 6px;
+  align-items: center;
   position: static;
   flex: 0 0 auto;
+}
+.sede-selector-panel.form-review-selectors .form-toggle-info-btn {
+  grid-column: auto;
+  justify-self: stretch;
+}
+.form-sede-info-content,
+.form-company-info-panel,
+.form-commissions-info-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.form-sede-info-content[hidden],
+.form-company-info-panel[hidden],
+.form-commissions-info-panel[hidden] {
+  display: none;
+}
+.commission-info-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.commission-info-title {
+  color: var(--c-text);
+  font-size: 12px;
+  font-weight: 800;
+}
+.commission-info-section {
+  min-width: 0;
+}
+.commission-info-table {
+  font-size: 11px;
+}
+.commission-doc-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.commission-doc-jump {
+  min-width: 0;
+  max-width: 100%;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 .form-toggle-info-btn {
   padding: 7px 10px;

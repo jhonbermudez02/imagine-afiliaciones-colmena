@@ -2878,9 +2878,10 @@ async def cases_production_summary(operation: str = Query(default="colima")):
         draft = output_926.get("draft") or {}
         manual_approval = payload.get("manual_approval") or analysis.get("manual_approval") or {}
         approved = is_case_manually_approved(payload)
-        status = "approved" if approved else str(workflow.get("status") or payload.get("status") or "n/d")
+        effective_approved = approved or _is_aprobable_case(payload)
+        status = "approved" if effective_approved else str(workflow.get("status") or payload.get("status") or "n/d")
         contract_number = _resolve_case_contract_number(payload)
-        final_status = "APROBADO" if approved else "NO APROBADO"
+        final_status = "APROBADO" if effective_approved else "NO APROBADO"
         item = {
             "id": payload.get("id"),
             "label": payload.get("label"),
