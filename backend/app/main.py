@@ -5,44 +5,54 @@ import zipfile
 from difflib import SequenceMatcher
 import json
 import re
+import unicodedata
 from typing import Any, Dict, List, Optional
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, Response
+from openpyxl import load_workbook
 from pydantic import BaseModel
 
 from .cases import (
     analyze_case,
+    commit_generated_radicacion,
     export_manual_review_dataset,
     extract_contract_number_from_uploads,
     format_reason_lines,
     get_document_reviews_export_path,
     get_case_file_path,
+    is_fragment_only_case,
+    is_page_fragment_filename,
     list_cases,
+    load_digitacion_draft,
     load_case,
     normalize_operation,
     normalize_haystack,
+    normalize_text,
     operation_label,
     only_digits,
+    peek_generated_radicacion,
     rebuild_document_registry,
     _resolve_case_contract_number,
     run_case_workflow,
     save_case,
+    save_digitacion_draft,
     save_document_workspace,
     save_manual_review,
     save_validation_exception,
     search_cases,
     search_document_registry,
     store_case_files,
+    validate_digitacion_payload,
 )
 from .config import settings
 from .embeddings import get_embed_dims, get_engine_name, is_local_embed_enabled
 from .notifications import send_case_notification, send_tester_activity_summary
-from .rag import generate_grounded_answer, infer_operational_decision, reindex_knowledge, search_knowledge
+from .rag import generate_grounded_answer, index_knowledge_file, infer_operational_decision, reindex_knowledge, search_knowledge
 from .services import get_eval_summary, get_feed_summary, get_system_health, get_system_status
 
 logging.basicConfig(level=logging.INFO)
@@ -174,6 +184,18 @@ class CaseDocumentWorkspaceRequest(BaseModel):
     action: str
     filename: Optional[str] = None
     order: Optional[List[str]] = None
+
+
+class CaseDigitacionRequest(BaseModel):
+    proyecto: Optional[str] = None
+    formato: Optional[str] = None
+    source_case_id: Optional[str] = None
+    source_entry_type: Optional[str] = None
+    source_label: Optional[str] = None
+    prefill_sources: Optional[Dict[str, Any]] = None
+    values: Dict[str, Any] = {}
+    legacy_mdb: Optional[Dict[str, Any]] = None
+    require_all: Optional[bool] = False
 
 
 class Consolidated926Request(BaseModel):
@@ -712,6 +734,7 @@ class ReindexResponse(BaseModel):
 class CaseCreateResponse(BaseModel):
     id: str
     label: str
+    entry_type: Optional[str] = "empresa"
     operation: Optional[str] = "colima"
     operation_label: Optional[str] = "AFI Colima"
     validation_profile: Optional[str] = "colima"
@@ -1359,6 +1382,142 @@ def _is_generic_operational_query(query: str) -> bool:
     return all(token in GENERIC_OPERATIONAL_TERMS for token in tokens)
 
 
+def _is_format_knowledge_query(query: str) -> bool:
+    query_norm = normalize_haystack(query)
+    format_terms = [
+        "campo",
+        "campos",
+        "columna",
+        "columnas",
+        "estructura",
+        "compone",
+        "formato patron",
+        "formato oficial",
+        "plantilla",
+        "cargue masivo",
+        "resolucion 196",
+        "resolucion 000196",
+    ]
+    target_terms = [
+        "plantilla",
+        "cargue masivo",
+        "formulario",
+        "formatos oficiales",
+        "hoja plantilla",
+        "a be",
+        "resolucion 196",
+        "resolucion 000196",
+    ]
+    return any(term in query_norm for term in format_terms) and any(term in query_norm for term in target_terms)
+
+
+PLANTILLA_CARGUE_FIELDS = [
+    ("A", "No. de Afiliación"),
+    ("B", "Número de sucursal"),
+    ("C", "Número del centro de trabajo"),
+    ("D", "Fecha de Radicación"),
+    ("E", "Fecha de Ingreso Empresa"),
+    ("F", "Fecha Inicio de Cobertura"),
+    ("G", "Tipo de Afiliación"),
+    ("H", "Tipo de Cotizante"),
+    ("I", "Código Tipo de Cotizante"),
+    ("J", "Subtipo de cotizante"),
+    ("K", "Código Subtipo de Cotizante"),
+    ("L", "Tipo de Identificación"),
+    ("M", "No. de identificación"),
+    ("N", "Primer Apellido"),
+    ("O", "Segundo Apellido"),
+    ("P", "Primer Nombre"),
+    ("Q", "Segundo Nombre"),
+    ("R", "Género"),
+    ("S", "Fecha de nacimiento"),
+    ("T", "Departamento Nacimiento"),
+    ("U", "Municipio/Distrito Nacimiento"),
+    ("V", "Estado civil"),
+    ("W", "Entidad Promotora de Salud-EPS"),
+    ("X", "Administradora de Pensiones AFP"),
+    ("Y", "Ingreso Base de Cotización - IBC"),
+    ("Z", "Denominación del cargo o del empleo"),
+    ("AA", "Dirección Residencia del Trabajador"),
+    ("AB", "Teléfono Fijo"),
+    ("AC", "Teléfono Celular"),
+    ("AD", "Correo electrónico"),
+    ("AE", "Departamento de Residencia"),
+    ("AF", "Municipio/Distrito"),
+    ("AG", "Zona de Residencia"),
+    ("AH", "Localidad/Comuna"),
+    ("AI", "Estrato Socio económico"),
+    ("AJ", "Modalidad Laboral"),
+    ("AK", "Jornada establecida"),
+    ("AL", "Fecha Inicio Modalidad Laboral"),
+    ("AM", "Fecha Terminación Modalidad Laboral"),
+    ("AN", "Sitio de trabajo"),
+    ("AO", "Trabajo en altura"),
+    ("AP", "Código Ocupación"),
+    ("AQ", "Tipo de Contrato"),
+    ("AR", "Valor Total Honorarios"),
+    ("AS", "Valor Mensual Honorarios"),
+    ("AT", "Fecha inicial"),
+    ("AU", "Fecha final"),
+    ("AV", "Código Actividad Principal"),
+    ("AW", "Código Actividad Secundaria"),
+    ("AX", "Código Actividad Principal"),
+    ("AY", "Modalidad para Teletrabajo"),
+    ("AZ", "Cargo del Teletrabajo"),
+    ("BA", "Persona con discapacidad"),
+    ("BB", "Departamento Desempeño Laboral"),
+    ("BC", "Municipio/Distrito Laboral"),
+    ("BD", "Dirección Desempeño de Labores"),
+    ("BE", "Código Actividades a ejecutar"),
+]
+
+
+def _build_format_knowledge_answer(query: str) -> Optional[str]:
+    query_norm = normalize_haystack(query)
+    if "plantilla" in query_norm or "cargue masivo" in query_norm or "a be" in query_norm:
+        lines = [
+            "Respuesta ejecutiva:",
+            "",
+            "Formato identificado: plantilla XLSX de cargue masivo de nuevos afiliados ARL.",
+            "Documento operativo AFILEGA: Relación de ingreso de trabajadores.",
+            "Estructura: hoja PLANTILLA, encabezados en fila 4, captura de trabajadores en filas 5 a 52, columnas A a BE.",
+            "",
+            "Campos A-BE:",
+        ]
+        for index, (column, name) in enumerate(PLANTILLA_CARGUE_FIELDS, start=1):
+            lines.append(f"{index}. {column}: {name}")
+        lines.extend(
+            [
+                "",
+                "Validaciones clave:",
+                "- Usar las hojas ANEXOS y Listas para códigos de cotizante, subtipos, EPS, AFP, DIVIPOLA, modalidad, jornada, contrato, teletrabajo, discapacidad, trabajo en altura, CIIU y CUOC.",
+                "- Si aparece como soporte del paquete, clasificarlo como Relación de ingreso de trabajadores.",
+            ]
+        )
+        return "\n".join(lines)
+    if "resolucion 196" in query_norm or "resolucion 000196" in query_norm:
+        return "\n".join(
+            [
+                "Respuesta ejecutiva:",
+                "",
+                "La Resolución 000196 de 2026 es referencia normativa del formulario nuevo SGRL.",
+                "El formato se compone de campos numerados 1 a 71: trámite, responsable de afiliación, afiliado, datos complementarios, sitio de trabajo, condiciones pactadas, novedades, autorizaciones, firmas y anexos.",
+                "",
+                "Campos críticos:",
+                "- 1 a 5: tipo de trámite, tipo de afiliación, tipo de aportante, tipo de afiliado y subtipo.",
+                "- 6 a 11: responsable de la afiliación.",
+                "- 12 a 20: identificación y datos complementarios del afiliado.",
+                "- 21 a 26: modalidad y sitio de ejecución.",
+                "- 27 a 56: condiciones pactadas según tipo de afiliado.",
+                "- 57 a 63: reporte de novedades.",
+                "- 64 a 66: autorizaciones.",
+                "- 67 y 68: firmas.",
+                "- 69 a 71: anexos de independiente.",
+            ]
+        )
+    return None
+
+
 SUPPORTED_CASE_UPLOAD_EXTENSIONS = {
     ".xlsx",
     ".xlsm",
@@ -1372,7 +1531,48 @@ SUPPORTED_CASE_UPLOAD_EXTENSIONS = {
     ".tiff",
     ".bmp",
     ".webp",
+    ".txt",
 }
+SUPPORTED_CASE_ZIP_MEMBER_EXTENSIONS = SUPPORTED_CASE_UPLOAD_EXTENSIONS - {".zip"}
+
+
+def _human_bytes(value: int) -> str:
+    size = float(max(0, value))
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{value} B"
+
+
+def _validate_case_zip_upload(filename: str, content: bytes) -> Optional[str]:
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            members = [item for item in archive.infolist() if not item.is_dir()]
+    except zipfile.BadZipFile:
+        return "El ZIP no se pudo leer o está corrupto."
+    if len(members) > settings.max_zip_members:
+        return f"El ZIP contiene {len(members)} archivos; el máximo permitido es {settings.max_zip_members}."
+    expanded_total = 0
+    for member in members:
+        member_name = member.filename.replace("\\", "/")
+        if member_name.startswith("__MACOSX/"):
+            continue
+        nested_name = member_name.split("/")[-1]
+        if not nested_name:
+            continue
+        suffix = Path(nested_name.lower()).suffix
+        if suffix not in SUPPORTED_CASE_ZIP_MEMBER_EXTENSIONS:
+            return f"El ZIP contiene un archivo no permitido: {nested_name}."
+        if int(member.file_size or 0) > settings.max_upload_file_bytes:
+            return (
+                f"El archivo {nested_name} dentro del ZIP supera "
+                f"{_human_bytes(settings.max_upload_file_bytes)}."
+            )
+        expanded_total += int(member.file_size or 0)
+        if expanded_total > settings.max_zip_expanded_bytes:
+            return f"El ZIP expandido supera {_human_bytes(settings.max_zip_expanded_bytes)}."
+    return None
 
 
 def _is_broad_location_query(query: str) -> bool:
@@ -2604,6 +2804,11 @@ async def eval_status():
     return get_eval_summary()
 
 
+@app.post("/api/radicacion/next")
+async def next_radicacion_number():
+    return {"numero_radicacion": peek_generated_radicacion(), "reserved": False}
+
+
 @app.post("/api/system/reindex", response_model=ReindexResponse)
 async def system_reindex():
     try:
@@ -2612,6 +2817,55 @@ async def system_reindex():
     except Exception as exc:
         logger.error("Error reindexando corpus: %s", exc)
         raise HTTPException(status_code=500, detail=f"Error reindexando corpus: {exc}") from exc
+
+
+@app.post("/api/system/reindex-file")
+async def system_reindex_file(filename: str = Query(..., description="Nombre del archivo .md/.txt en data/knowledge")):
+    try:
+        return await index_knowledge_file(filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Error indexando archivo de conocimiento %s: %s", filename, exc)
+        raise HTTPException(status_code=500, detail=f"Error indexando archivo de conocimiento: {exc}") from exc
+
+
+def _is_case_learning_query(query: str) -> bool:
+    lowered = normalize_haystack(query)
+    return any(
+        token in lowered
+        for token in [
+            "casos reales",
+            "variaciones sinteticas",
+            "variaciones sintéticas",
+            "casos sinteticos",
+            "casos sintéticos",
+            "sintetico",
+            "sintético",
+            "que aprendiste",
+            "qué aprendiste",
+            "aprendizaje",
+            "prellenado ocr",
+            "digitacion ocr",
+            "digitación ocr",
+            "case-colima",
+        ]
+    )
+
+
+def _prefer_case_learning_sources(sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    preferred_files = {
+        "afilega-casos-reales-empresa-contratista-2026-05-10.md",
+        "afilega-aprendizaje-sintetico-variaciones-2026-05-10.md",
+    }
+    case_learning_sources = [
+        source
+        for source in sources
+        if any(str(source.get("source") or "").endswith(filename) for filename in preferred_files)
+    ]
+    if case_learning_sources:
+        return sorted(case_learning_sources, key=lambda source: -float(source.get("relevancia") or 0))[:3]
+    return sources
 
 
 @app.post("/api/afiliacion/consultar", response_model=ConsultaResponse)
@@ -2647,9 +2901,33 @@ async def consultar_afiliacion(request: ConsultaRequest):
             )
         context_case = _resolve_context_case(request_context)
         effective_query = _expand_contextual_query(raw_query, request_context, context_case)
+        if _is_case_learning_query(raw_query):
+            selected_topics = request_context.get("topics") if request_context else None
+            sources = await search_knowledge(f"casos reales AFILEGA OCR digitacion prellenado {raw_query}", selected_topics=selected_topics)
+            sources = _prefer_case_learning_sources(sources)
+            answer = await generate_grounded_answer(raw_query, sources)
+            confidence = round(min(max((source.get("relevancia", 0.0) for source in sources), default=0.0), 1.0), 2)
+            return ConsultaResponse(respuesta=answer, fuentes=sources, confianza=confidence)
         intent = _detect_consulta_intent(effective_query)
         consulta_lower = effective_query.lower()
         document_first = any(token in consulta_lower for token in ["cedula", "cédula", "rut", "camara", "cámara", "pdf", "documento", "soporte", "formulario"])
+        if _is_format_knowledge_query(raw_query):
+            selected_topics = None
+            if request_context:
+                selected_topics = request_context.get("topics")
+                if not selected_topics and request_context.get("topic"):
+                    selected_topics = [request_context.get("topic")]
+            knowledge_query = f"Afilega Formatos Oficiales Campos {raw_query}"
+            sources = await search_knowledge(knowledge_query, selected_topics=selected_topics)
+            sources.sort(
+                key=lambda source: (
+                    0 if str(source.get("source") or "").endswith("afilega-formatos-oficiales-campos.md") else 1,
+                    -float(source.get("relevancia") or 0),
+                )
+            )
+            answer = _build_format_knowledge_answer(raw_query) or await generate_grounded_answer(raw_query, sources)
+            confidence = round(min(max((source.get("relevancia", 0.0) for source in sources), default=0.0), 1.0), 2)
+            return ConsultaResponse(respuesta=answer, fuentes=sources, confianza=confidence)
         operation_key = normalize_operation(request_context.get("operation"))
         case_results = search_cases(effective_query, limit=10, operation=operation_key)
         if _should_prefer_context_case(effective_query, request_context, context_case):
@@ -2813,6 +3091,8 @@ async def cases_production_summary(operation: str = Query(default="colima")):
     operation_key = normalize_operation(operation)
     deduped: Dict[str, Dict[str, Any]] = {}
     for payload in list_cases(operation=operation_key):
+        if is_fragment_only_case(payload):
+            continue
         analysis = payload.get("analysis") or {}
         workflow = analysis.get("workflow_run") or {}
         decision = analysis.get("decision") or {}
@@ -2835,6 +3115,13 @@ async def cases_production_summary(operation: str = Query(default="colima")):
         output_926 = workflow.get("output_926") or analysis.get("output_926") or {}
         legacy = output_926.get("legacy") or {}
         draft = output_926.get("draft") or {}
+        digitacion = analysis.get("digitacion_manual") or {}
+        try:
+            persisted_digitacion = load_digitacion_draft(str(payload.get("id") or ""))
+            if persisted_digitacion.get("values"):
+                digitacion = persisted_digitacion
+        except Exception:
+            persisted_digitacion = {}
         status = str(workflow.get("status") or payload.get("status") or "n/d")
         contract_number = _resolve_case_contract_number(payload)
         final_status = resumen.get("estado") or report.get("estado_final") or decision_status or status
@@ -2854,6 +3141,8 @@ async def cases_production_summary(operation: str = Query(default="colima")):
             "fecha": resumen.get("fecha_proceso_human") or report.get("fecha_proceso_human") or payload.get("updated_at"),
             "final_status": final_status,
             "decision_status": decision_status,
+            "digitacion_values": digitacion.get("values") or {},
+            "digitacion_validation": digitacion.get("validation") or {},
             "summary": decision.get("summary") or "",
             "filename": legacy.get("filename") or draft.get("filename") or "archivo_core.txt",
             "has_926": bool(legacy.get("ok") or legacy.get("available") or draft.get("content")),
@@ -2986,15 +3275,200 @@ async def documents_search(q: str = Query(..., min_length=2), limit: int = Query
     return {"query": q, "results": search_document_registry(q, limit=limit)}
 
 
+RADICACION_CONTRATO_KEYS = {
+    "tipo_tramite",
+    "numero_radicacion",
+    "tipo_afiliacion",
+    "fecha_radicacion",
+    "fecha_inicio_vigencia",
+    "fecha_inicio_cobertura",
+    "fecha_recibido_imagine",
+    "empleador_tipo_documento",
+    "nit",
+    "razon_social",
+    "sucursal",
+    "empresa_arl_anterior",
+}
+
+RADICACION_ARL_TRASLADO_VALUES = {
+    "NO SUMINISTRADO",
+    "DESCONOCIDO",
+    "COLPATRIA",
+    "COLFONDOS",
+    "INVERTIR",
+    "ING",
+    "OLD MUTUAL",
+    "PROTECCION",
+    "CALDAS",
+    "PENSIONAR",
+    "COLPENSIONES",
+    "FONPRENOR",
+    "CAJANAL",
+    "PENSIONADOS",
+    "BONSALUD",
+    "PORVENIR",
+    "SKANDIA",
+    "HORIZONTE",
+    "MUNICIPIO",
+    "GANADERA",
+    "CONSORCIO FIDUFOSYGA",
+    "CAJA DE PREVISION SOCIAL UNIV.DCT",
+    "SERV. DE SALUD DE LA UNIV. DEL CAUCA",
+    "DAVIVIR",
+    "CAJA DE PREVISION SOCIAL STAFE DE BOGOTA",
+    "CAPRECUNDI",
+    "SIN AFP",
+}
+
+
+def _radicacion_next_day(value: str) -> str:
+    try:
+        return (datetime.strptime(str(value or "")[:10], "%Y-%m-%d") + timedelta(days=1)).date().isoformat()
+    except Exception:
+        return ""
+
+
+def _radicacion_month_after_next(value: str) -> str:
+    try:
+        parsed = datetime.strptime(str(value or "")[:10], "%Y-%m-%d").date()
+        month = parsed.month + 2
+        year = parsed.year + ((month - 1) // 12)
+        month = ((month - 1) % 12) + 1
+        return date(year, month, 1).isoformat()
+    except Exception:
+        return ""
+
+
+def _parse_case_radicacion_json(raw: str = "") -> Dict[str, str]:
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    values: Dict[str, str] = {}
+    for key in RADICACION_CONTRATO_KEYS:
+        value = payload.get(key)
+        if value is None:
+            continue
+        clean = re.sub(r"\s+", " ", str(value)).strip()
+        if key == "nit":
+            clean = only_digits(clean)
+        if key == "razon_social":
+            clean = clean.upper()
+        if clean:
+            values[key] = clean
+    values["tipo_tramite"] = "afiliacion"
+    values["empleador_tipo_documento"] = (values.get("empleador_tipo_documento") or "NIT").upper()
+    is_traslado = "traslado" in normalize_haystack(values.get("tipo_afiliacion"))
+    if is_traslado and values.get("fecha_radicacion"):
+        values["fecha_inicio_vigencia"] = _radicacion_month_after_next(values["fecha_radicacion"])
+    if values.get("fecha_radicacion") and not values.get("fecha_inicio_cobertura"):
+        values["fecha_inicio_cobertura"] = values.get("fecha_inicio_vigencia") if is_traslado else _radicacion_next_day(values["fecha_radicacion"])
+    return values
+
+
+def _parse_iso_date(value: str) -> Optional[date]:
+    try:
+        return datetime.strptime(str(value or "")[:10], "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def _validate_case_radicacion_values(values: Dict[str, str]) -> List[Dict[str, str]]:
+    errors: List[Dict[str, str]] = []
+    today = datetime.now(timezone.utc).date()
+    radicacion = _parse_iso_date(values.get("fecha_radicacion", ""))
+    inicio_vigencia = _parse_iso_date(values.get("fecha_inicio_vigencia", ""))
+    recibido = _parse_iso_date(values.get("fecha_recibido_imagine", ""))
+    is_traslado = "traslado" in normalize_haystack(values.get("tipo_afiliacion"))
+    required = {
+        "numero_radicacion": "Consecutivo Radicación",
+        "tipo_afiliacion": "Clase afiliación",
+        "fecha_radicacion": "Fecha radicación Alfa",
+        "fecha_inicio_vigencia": "Fecha inicio vigencia",
+        "fecha_recibido_imagine": "Fecha recibido Imagine",
+        "empleador_tipo_documento": "Tipo documento",
+        "nit": "No. de identificación",
+        "razon_social": "Razón social",
+        "sucursal": "Sucursal ARL",
+    }
+    if is_traslado:
+        required["empresa_arl_anterior"] = "ARL traslado"
+    for key, label in required.items():
+        if not str(values.get(key) or "").strip():
+            errors.append({
+                "field": key,
+                "message": f"En el formulario Radicación del contrato, campo {label}: es obligatorio para radicar el contrato.",
+            })
+    if recibido and radicacion and recibido < radicacion:
+        errors.append({
+            "field": "fecha_recibido_imagine",
+            "message": "En el formulario Radicación del contrato, campo Fecha recibido Imagine: debe ser mayor o igual al campo Fecha radicación Alfa.",
+        })
+    if recibido and recibido > today:
+        errors.append({
+            "field": "fecha_recibido_imagine",
+            "message": "En el formulario Radicación del contrato, campo Fecha recibido Imagine: debe ser menor o igual a la fecha actual.",
+        })
+    if radicacion and radicacion > today:
+        errors.append({
+            "field": "fecha_radicacion",
+            "message": "En el formulario Radicación del contrato, campo Fecha radicación Alfa: debe ser menor o igual a la fecha actual.",
+        })
+    if values.get("fecha_inicio_vigencia") and not inicio_vigencia:
+        errors.append({
+            "field": "fecha_inicio_vigencia",
+            "message": "En el formulario Radicación del contrato, campo Fecha inicio vigencia: debe ser una fecha válida.",
+        })
+    if is_traslado and radicacion and inicio_vigencia:
+        expected = _parse_iso_date(_radicacion_month_after_next(values.get("fecha_radicacion", "")))
+        if expected and inicio_vigencia != expected:
+            errors.append({
+                "field": "fecha_inicio_vigencia",
+                "message": f"En el formulario Radicación del contrato, campo Fecha inicio vigencia: debe ser {expected.isoformat()}, mes subsiguiente a la Fecha radicación Alfa.",
+            })
+    if is_traslado and values.get("empresa_arl_anterior") and str(values.get("empresa_arl_anterior") or "").strip().upper() not in RADICACION_ARL_TRASLADO_VALUES:
+        errors.append({
+            "field": "empresa_arl_anterior",
+            "message": "En el formulario Radicación del contrato, campo ARL traslado: debe existir en la lista de ARL traslado.",
+        })
+    tipo_doc = normalize_text(values.get("empleador_tipo_documento")).upper()
+    nit_digits = only_digits(values.get("nit"))
+    if nit_digits and tipo_doc in {"NIT", "NI"} and len(nit_digits) != 9:
+        errors.append({
+            "field": "nit",
+            "message": "En el formulario Radicación del contrato, campo No. de identificación: debe tener 9 dígitos cuando el Tipo de Documento es NIT.",
+        })
+    elif nit_digits and tipo_doc == "CC" and not (len(nit_digits) > 6 and len(nit_digits) < 11 and len(nit_digits) != 9):
+        errors.append({
+            "field": "nit",
+            "message": "En el formulario Radicación del contrato, campo No. de identificación: debe tener 7, 8 o 10 dígitos cuando el Tipo de Documento es CC.",
+        })
+    elif nit_digits and not re.fullmatch(r"\d{5,15}", nit_digits):
+        errors.append({
+            "field": "nit",
+            "message": "En el formulario Radicación del contrato, campo No. de identificación: debe ser numérico y tener entre 5 y 15 dígitos.",
+        })
+    return errors
+
+
 @app.post("/api/cases", response_model=CaseCreateResponse)
 async def create_case(
     label: str = Form(default=""),
     operation: str = Form(default="colima"),
+    entry_type: str = Form(default="empresa"),
+    radicacion_json: str = Form(default=""),
     files: Optional[List[UploadFile]] = File(default=None),
     xlsx_file: Optional[UploadFile] = File(default=None),
     attachments: Optional[List[UploadFile]] = File(default=None),
 ):
     operation_key = normalize_operation(operation)
+    entry_type_key = normalize_haystack(entry_type).replace(" ", "_")
+    if entry_type_key not in {"empresa", "contratista"}:
+        entry_type_key = "empresa"
     uploads: List[tuple[str, bytes]] = []
     rejected_files: List[Dict[str, str]] = []
     for item in files or []:
@@ -3004,9 +3478,10 @@ async def create_case(
     for item in attachments or []:
         uploads.append((item.filename or "adjunto.bin", await item.read()))
     if not uploads:
-        raise HTTPException(status_code=400, detail="Debes adjuntar al menos un XLSX o un soporte.")
+        raise HTTPException(status_code=400, detail="Debes adjuntar al menos un documento del paquete.")
 
     accepted_uploads: List[tuple[str, bytes]] = []
+    accepted_total_bytes = 0
     for filename, content in uploads:
         lower_name = str(filename or "").lower()
         suffix = Path(lower_name).suffix
@@ -3016,15 +3491,37 @@ async def create_case(
         if not content:
             rejected_files.append({"filename": filename, "reason": "El archivo está vacío y no se pudo cargar."})
             continue
+        if len(content) > settings.max_upload_file_bytes:
+            rejected_files.append(
+                {
+                    "filename": filename,
+                    "reason": f"El archivo supera el máximo permitido de {_human_bytes(settings.max_upload_file_bytes)}.",
+                }
+            )
+            continue
         if suffix not in SUPPORTED_CASE_UPLOAD_EXTENSIONS:
             rejected_files.append(
                 {
                     "filename": filename,
-                    "reason": "El archivo no tiene una extensión permitida. Usa XLSX, PDF o un formato de imagen soportado.",
+                    "reason": "El archivo no tiene una extensión permitida. Usa PDF, imagen, TXT o XLSX cuando exista.",
+                }
+            )
+            continue
+        if suffix == ".zip":
+            zip_error = _validate_case_zip_upload(filename, content)
+            if zip_error:
+                rejected_files.append({"filename": filename, "reason": zip_error})
+                continue
+        if accepted_total_bytes + len(content) > settings.max_upload_total_bytes:
+            rejected_files.append(
+                {
+                    "filename": filename,
+                    "reason": f"La carga total supera el máximo permitido de {_human_bytes(settings.max_upload_total_bytes)}.",
                 }
             )
             continue
         accepted_uploads.append((filename, content))
+        accepted_total_bytes += len(content)
 
     if not accepted_uploads:
         raise HTTPException(
@@ -3035,13 +3532,30 @@ async def create_case(
             },
         )
 
-    xlsx_count = sum(1 for filename, _ in accepted_uploads if str(filename).lower().endswith((".xlsx", ".xlsm", ".xls")))
-    pdf_count = sum(1 for filename, _ in accepted_uploads if str(filename).lower().endswith(".pdf"))
-    if len(accepted_uploads) < 2 or xlsx_count < 1 or pdf_count < 1:
+    uploaded_names = [filename for filename, _ in accepted_uploads]
+    if uploaded_names and all(is_page_fragment_filename(filename) for filename in uploaded_names):
         raise HTTPException(
             status_code=400,
             detail={
-                "message": "Debes cargar mínimo 2 archivos válidos: un Excel en formato XLSX y al menos un PDF.",
+                "message": (
+                    "La carga contiene páginas sueltas de un PDF explotado. "
+                    "Debes cargar el paquete completo del contrato o documentos completos, no fragmentos __pNNN.pdf."
+                ),
+                "code": "PAGE_FRAGMENTS_ARE_NOT_A_CONTRACT",
+                "rejected_files": uploaded_names,
+            },
+        )
+
+    document_count = sum(
+        1
+        for filename, _ in accepted_uploads
+        if str(filename).lower().endswith((".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".txt"))
+    )
+    if document_count < 1:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Debes cargar al menos un documento legible del paquete. El XLSX es opcional en AFILEGA.",
                 "accepted_files": [filename for filename, _ in accepted_uploads],
                 "rejected_files": rejected_files,
             },
@@ -3065,11 +3579,76 @@ async def create_case(
                 "existing_label": existing_label,
             },
         )
-    case_payload = store_case_files(label=label, uploads=accepted_uploads, operation=operation_key)
+    radicacion_values = _parse_case_radicacion_json(radicacion_json)
+    radicacion_errors = _validate_case_radicacion_values(radicacion_values) if radicacion_values else []
+    if radicacion_errors:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "La radicación del contrato tiene validaciones pendientes.",
+                "errors": radicacion_errors,
+            },
+        )
+    if radicacion_values.get("numero_radicacion"):
+        try:
+            committed_radicacion = commit_generated_radicacion(radicacion_values.get("numero_radicacion"))
+            radicacion_values["numero_radicacion"] = committed_radicacion
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "El consecutivo de radicación ya fue utilizado. Refresca Nuevo contrato para tomar el siguiente disponible.",
+                    "code": "RADICACION_CONSECUTIVO_USADO",
+                    "numero_radicacion": radicacion_values.get("numero_radicacion"),
+                },
+            ) from exc
+    effective_label = label or radicacion_values.get("razon_social") or ""
+    try:
+        case_payload = store_case_files(label=effective_label, uploads=accepted_uploads, operation=operation_key, entry_type=entry_type_key)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "El paquete contiene archivos que no cumplen las reglas de seguridad de carga.",
+                "errors": [{"field": "files", "message": str(exc)}],
+            },
+        ) from exc
     case_payload["upload_summary"] = {
+        "entry_type": entry_type_key,
         "accepted_files": [filename for filename, _ in accepted_uploads],
         "rejected_files": rejected_files,
+        "package_semantics": "one_case_per_uploaded_package",
     }
+    if radicacion_values:
+        now = datetime.now(timezone.utc).isoformat()
+        sources = {
+            key: {"source": "radicación nuevo contrato", "confidence": 0.99}
+            for key in radicacion_values
+        }
+        validation = validate_digitacion_payload({"values": radicacion_values}, require_all=False)
+        analysis = case_payload.setdefault("analysis", {}) or {}
+        analysis["digitacion_manual"] = {
+            "proyecto": "AFILEGA_FA_IMA_LA_V2",
+            "formato": "radicacion_contrato",
+            "source_case_id": case_payload.get("id"),
+            "source_entry_type": entry_type_key,
+            "source_label": case_payload.get("label") or "",
+            "prefill_sources": sources,
+            "values": radicacion_values,
+            "updated_at": now,
+            "validation": validation,
+            "legacy_mdb": validation.get("legacy_mdb"),
+        }
+        analysis["digitacion_prefill"] = {
+            "form_target": entry_type_key,
+            "entry_type": entry_type_key,
+            "values": radicacion_values,
+            "sources": sources,
+            "documents_processed": 0,
+            "updated_at": now,
+        }
+        case_payload["analysis"] = analysis
+    save_case(case_payload)
     return CaseCreateResponse(**case_payload)
 
 
@@ -3110,6 +3689,205 @@ async def case_analyze(case_id: str, operation: Optional[str] = Query(default=No
     except Exception as exc:
         logger.error("Error analizando caso %s: %s", case_id, exc)
         raise HTTPException(status_code=500, detail=f"No pude analizar el caso: {exc}") from exc
+
+
+@app.get("/api/cases/{case_id}/digitacion")
+async def case_digitacion_get(case_id: str, operation: Optional[str] = Query(default=None)):
+    try:
+        _ensure_case_operation(load_case(case_id), operation)
+        draft = load_digitacion_draft(case_id)
+        return {"case_id": case_id, "digitacion": draft}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
+
+
+@app.post("/api/cases/{case_id}/digitacion/validate-mdb")
+async def case_digitacion_validate(case_id: str, request: CaseDigitacionRequest, operation: Optional[str] = Query(default=None)):
+    try:
+        _ensure_case_operation(load_case(case_id), operation)
+        draft = request.dict(exclude_none=True)
+        validation = validate_digitacion_payload(draft, require_all=bool(request.require_all))
+        return {"case_id": case_id, "validation": validation}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
+
+
+@app.post("/api/cases/{case_id}/digitacion")
+async def case_digitacion_save(case_id: str, request: CaseDigitacionRequest, operation: Optional[str] = Query(default=None)):
+    try:
+        _ensure_case_operation(load_case(case_id), operation)
+        draft = request.dict(exclude_none=True)
+        saved = save_digitacion_draft(case_id, draft, require_all=bool(request.require_all))
+        return {"case_id": case_id, "digitacion": saved}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
+    except Exception as exc:
+        logger.error("Error guardando digitación del caso %s: %s", case_id, exc)
+        raise HTTPException(status_code=500, detail=f"No pude guardar digitación: {exc}") from exc
+
+
+def _worker_import_header_key(value: Any) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+
+
+WORKER_IMPORT_ALIASES: Dict[str, str] = {
+    "centro": "trabajador_centro_trabajo",
+    "centro_trabajo": "trabajador_centro_trabajo",
+    "codigo_centro": "trabajador_centro_trabajo",
+    "codigo_centro_trabajo": "trabajador_centro_trabajo",
+    "codigo_del_centro_trabajo": "trabajador_centro_trabajo",
+    "trabajador_centro_trabajo": "trabajador_centro_trabajo",
+    "ti": "tipo_documento_afiliado",
+    "tipoid": "tipo_documento_afiliado",
+    "tipo_id": "tipo_documento_afiliado",
+    "tipo_documento": "tipo_documento_afiliado",
+    "tipo_documento_afiliado": "tipo_documento_afiliado",
+    "numero_id": "documento_afiliado",
+    "nroid": "documento_afiliado",
+    "nro_id": "documento_afiliado",
+    "numero_documento": "documento_afiliado",
+    "documento": "documento_afiliado",
+    "documento_afiliado": "documento_afiliado",
+    "primer_apellido": "primer_apellido",
+    "primerapellido": "primer_apellido",
+    "pri_ape": "primer_apellido",
+    "segundo_apellido": "segundo_apellido",
+    "segundoapellido": "segundo_apellido",
+    "segungo_apellido": "segundo_apellido",
+    "seg_ape": "segundo_apellido",
+    "primer_nombre": "primer_nombre",
+    "primernombre": "primer_nombre",
+    "pri_nom": "primer_nombre",
+    "segundo_nombre": "segundo_nombre",
+    "segundonombre": "segundo_nombre",
+    "seg_nom": "segundo_nombre",
+    "fecha_nacimiento": "fecha_nacimiento",
+    "fechadenacimiento": "fecha_nacimiento",
+    "fecha_de_nacimiento": "fecha_nacimiento",
+    "fec_nac": "fecha_nacimiento",
+    "edad": "edad",
+    "sexo": "genero",
+    "genero": "genero",
+    "afi_tipo": "tipo_cotizante",
+    "tipo_cotizante": "tipo_cotizante",
+    "tipo_de_cotizante": "tipo_cotizante",
+    "salario": "ibc",
+    "salario_ibc": "ibc",
+    "ibc": "ibc",
+    "cargo": "cargo_actividad",
+    "codigo_cargo": "cargo_actividad",
+    "cod_cargo": "cargo_actividad",
+    "cargo_actividad": "cargo_actividad",
+    "eps": "eps",
+    "codigo_eps": "eps",
+    "codigo_e_p_s": "eps",
+    "cod_eps": "eps",
+    "afp": "afp",
+    "codigo_afp": "afp",
+    "cod_afp": "afp",
+}
+
+
+def _worker_import_scalar(value: Any) -> Any:
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
+def _worker_import_date(value: Any) -> str:
+    if isinstance(value, datetime):
+        return value.strftime("%d%m%Y")
+    value = _worker_import_scalar(value)
+    text = str(value or "").strip()
+    digits = only_digits(text)
+    if len(digits) == 8:
+        if int(digits[:4] or "0") >= 1900:
+            return f"{digits[6:8]}{digits[4:6]}{digits[:4]}"
+        return digits
+    return digits[:8]
+
+
+def _worker_import_cell(key: str, value: Any) -> str:
+    if value is None:
+        return ""
+    value = _worker_import_scalar(value)
+    if key in {"documento_afiliado", "ibc", "edad", "tipo_cotizante", "cargo_actividad", "eps", "afp"}:
+        return only_digits(value)
+    if key == "fecha_nacimiento":
+        return _worker_import_date(value)
+    if key in {"tipo_documento_afiliado", "genero"}:
+        return str(value or "").strip().upper()
+    return str(value or "").strip()
+
+
+def _read_worker_import_rows(filename: str, content: bytes) -> List[List[Any]]:
+    if re.search(r"\.(xlsx|xlsm)$", filename, re.IGNORECASE):
+        wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        ws = wb.active
+        return [list(row) for row in ws.iter_rows(values_only=True)]
+    if re.search(r"\.xls$", filename, re.IGNORECASE):
+        try:
+            import xlrd
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="El servidor no tiene habilitado el lector de archivos .xls.") from exc
+        book = xlrd.open_workbook(file_contents=content)
+        sheet = book.sheet_by_index(0)
+        rows: List[List[Any]] = []
+        for r_idx in range(sheet.nrows):
+            row: List[Any] = []
+            for c_idx in range(sheet.ncols):
+                cell = sheet.cell(r_idx, c_idx)
+                if cell.ctype == xlrd.XL_CELL_DATE:
+                    row.append(xlrd.xldate_as_datetime(cell.value, book.datemode))
+                elif cell.ctype == xlrd.XL_CELL_NUMBER:
+                    row.append(_worker_import_scalar(cell.value))
+                else:
+                    row.append(cell.value)
+            rows.append(row)
+        return rows
+    raise HTTPException(status_code=400, detail="Carga un archivo .xlsx, .xlsm o .xls para importar trabajadores.")
+
+
+@app.post("/api/digitacion/trabajadores/import-xlsx")
+async def digitacion_trabajadores_import_xlsx(file: UploadFile = File(...)):
+    filename = file.filename or ""
+    if not re.search(r"\.(xlsx|xlsm|xls)$", filename, re.IGNORECASE):
+        raise HTTPException(status_code=400, detail="Carga un archivo .xlsx, .xlsm o .xls para importar trabajadores.")
+    try:
+        content = await file.read()
+        rows = _read_worker_import_rows(filename, content)
+    except Exception as exc:
+        if isinstance(exc, HTTPException):
+            raise exc
+        raise HTTPException(status_code=400, detail=f"No pude leer el Excel de trabajadores: {exc}") from exc
+
+    header_index = -1
+    mapped_headers: List[str] = []
+    for idx, row in enumerate(rows[:20]):
+        mapped = [WORKER_IMPORT_ALIASES.get(_worker_import_header_key(cell), "") for cell in row]
+        if sum(1 for item in mapped if item) >= 4:
+            header_index = idx
+            mapped_headers = mapped
+            break
+    if header_index < 0:
+        raise HTTPException(status_code=400, detail="No encontré encabezados de trabajadores en el Excel.")
+
+    parsed_rows: List[Dict[str, str]] = []
+    for excel_row_number, row in enumerate(rows[header_index + 1 :], start=header_index + 2):
+        item: Dict[str, str] = {}
+        for col_index, value in enumerate(row):
+            key = mapped_headers[col_index] if col_index < len(mapped_headers) else ""
+            if not key:
+                continue
+            item[key] = _worker_import_cell(key, value)
+        if not any(str(value or "").strip() for value in item.values()):
+            continue
+        item["_row"] = str(excel_row_number)
+        parsed_rows.append(item)
+
+    return {"filename": filename, "count": len(parsed_rows), "rows": parsed_rows}
 
 
 @app.post("/api/cases/{case_id}/run-workflow", response_model=CaseCreateResponse)
@@ -3461,7 +4239,42 @@ async def delete_case_file(case_id: str, filename: str):
         raise HTTPException(status_code=404, detail="Archivo no encontrado.")
     try:
         path.unlink()
-        return {"ok": True, "deleted": filename}
+        payload = load_case(case_id)
+        payload["files"] = [
+            item for item in (payload.get("files") or [])
+            if str(item.get("filename") or "") != filename
+        ]
+        analysis = payload.setdefault("analysis", {}) or {}
+        for key in ("documents", "document_list"):
+            if isinstance(analysis.get(key), list):
+                analysis[key] = [
+                    item for item in analysis[key]
+                    if str(item.get("filename") or "") != filename
+                ]
+        checklist = analysis.get("checklist") or {}
+        for group in checklist.get("received_summary") or []:
+            files = [item for item in (group.get("files") or []) if item != filename]
+            group["files"] = files
+            group["count"] = len(files)
+        workspace = analysis.get("document_workspace") or {}
+        workspace["order"] = [item for item in (workspace.get("order") or []) if item != filename]
+        workspace["removed_files"] = [item for item in (workspace.get("removed_files") or []) if item != filename]
+        analysis["document_workspace"] = workspace
+        manual_review = analysis.get("manual_review") or {}
+        if isinstance(manual_review.get("documents"), dict):
+            manual_review["documents"].pop(filename, None)
+        if isinstance(manual_review.get("comisiones"), dict):
+            manual_review["comisiones"].pop(filename, None)
+        if isinstance(manual_review.get("reviews"), list):
+            manual_review["reviews"] = [
+                item for item in manual_review["reviews"]
+                if str(item.get("file") or item.get("filename") or "") != filename
+            ]
+        analysis["manual_review"] = manual_review
+        payload["analysis"] = analysis
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+        save_case(payload)
+        return {"ok": True, "deleted": filename, "case": payload}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

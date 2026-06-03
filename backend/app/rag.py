@@ -191,6 +191,58 @@ async def reindex_knowledge() -> Dict[str, int]:
     }
 
 
+async def index_knowledge_file(filename: str) -> Dict[str, object]:
+    safe_name = Path(str(filename or "")).name
+    if not safe_name:
+        raise ValueError("Debes indicar el archivo de conocimiento a indexar.")
+    path = Path(settings.knowledge_dir) / safe_name
+    if not path.exists() or path.suffix.lower() not in {".md", ".txt"}:
+        raise FileNotFoundError(f"No existe un archivo de conocimiento valido: {safe_name}")
+    text = path.read_text(encoding="utf-8").strip()
+    if not text:
+        return {"documents": 1, "chunks": 0, "source": str(path), "collection": get_active_collection_name()}
+
+    chunks = chunk_text(text)
+    sample_vector = await ollama_embed(chunks[0].text if isinstance(chunks[0], KnowledgeChunk) else chunks[0])
+    collection_name = get_active_collection_name()
+    client = get_qdrant_client()
+    if not collection_exists(collection_name):
+        client.create_collection(
+            collection_name=collection_name,
+            vectors_config=models.VectorParams(size=len(sample_vector), distance=models.Distance.COSINE),
+        )
+
+    source = str(path)
+    client.delete(
+        collection_name=collection_name,
+        points_selector=models.FilterSelector(
+            filter=models.Filter(
+                must=[models.FieldCondition(key="source", match=models.MatchValue(value=source))]
+            )
+        ),
+        wait=True,
+    )
+    catalog = load_catalog()
+    metadata = catalog.get(path.name, {})
+    title = path.stem.replace("-", " ").replace("_", " ").title()
+    points = [
+        models.PointStruct(
+            id=str(uuid.uuid4()),
+            vector=await ollama_embed(chunk),
+            payload={
+                "source": source,
+                "title": title,
+                "text": chunk,
+                **metadata,
+            },
+        )
+        for chunk in chunks
+    ]
+    if points:
+        client.upsert(collection_name=collection_name, points=points, wait=True)
+    return {"documents": 1, "chunks": len(points), "source": source, "collection": collection_name}
+
+
 def get_collection_stats() -> Dict[str, int]:
     try:
         client = get_qdrant_client()
@@ -232,6 +284,7 @@ def build_query_hints(query: str) -> List[str]:
         "resolucion-2388": ["2388", "resolucion 2388", "pila", "recaudo"],
         "afiliacion-independientes": ["afiliacion", "afiliar", "independiente", "independientes"],
         "documentos-afiliacion": ["documento", "documentos", "soporte", "rut", "cedula"],
+        "casos-reales-afilega": ["casos reales", "case-colima", "digitacion", "prellenado", "prefill", "ocr"],
     }
     for label, keywords in mapping.items():
         if any(keyword in lowered for keyword in keywords):
@@ -264,6 +317,10 @@ def build_preferred_sources(query: str) -> List[str]:
             "afiliacion-independientes.md",
             "documentos-afiliacion.md",
             "validaciones-documentales.md",
+        ],
+        "casos_reales": [
+            "afilega-casos-reales-empresa-contratista-2026-05-10.md",
+            "afilega-aprendizaje-sintetico-variaciones-2026-05-10.md",
         ],
         "estandares": [
             "colmena-estandares-minimos-operativo.md",
@@ -301,6 +358,8 @@ def build_preferred_sources(query: str) -> List[str]:
         preferred.extend(mapping["res2388"])
     if any(token in lowered for token in ["independiente", "independientes", "afiliacion", "afiliar", "documentos", "documento"]):
         preferred.extend(mapping["independientes"])
+    if any(token in lowered for token in ["casos reales", "case-colima", "variaciones sinteticas", "sintetico", "sintético", "digitacion", "digitación", "prellenado", "prefill", "ocr"]):
+        preferred.extend(mapping["casos_reales"])
     if any(get_close_matches(token, ["afiliacion", "independientes", "documentos", "validaciones"], n=1, cutoff=0.82) for token in tokens):
         preferred.extend(mapping["independientes"])
     if any(token in lowered for token in ["estandares", "sg-sst"]):
@@ -381,7 +440,7 @@ def rerank_matches(query: str, matches: List[Dict[str, object]]) -> List[Dict[st
             if preferred.lower() in source:
                 score += 0.42
 
-        if doc_type in {"workflow", "checklist", "requisitos", "guia_operativa", "capacitacion", "tramites", "decreto", "resolucion", "informe"}:
+        if doc_type in {"workflow", "checklist", "requisitos", "guia_operativa", "aprendizaje_operativo", "capacitacion", "tramites", "decreto", "resolucion", "informe"}:
             score += 0.08
         if doc_type == "portal":
             score -= 0.08
@@ -396,6 +455,8 @@ def rerank_matches(query: str, matches: List[Dict[str, object]]) -> List[Dict[st
             score += 0.24
         if any(token in lowered for token in ["independiente", "independientes", "afiliacion", "documentos", "validaciones"]) and any(token in haystack for token in ["independientes", "afiliacion", "documentos", "validaciones"]):
             score += 0.2
+        if any(token in lowered for token in ["casos reales", "case-colima", "variaciones sinteticas", "sintetico", "sintético", "digitacion", "digitación", "prellenado", "prefill", "ocr"]) and any(token in haystack for token in ["casos reales", "case-colima", "variaciones sinteticas", "sinteticas", "sintetico", "digitacion", "prellenado", "case_ocr", "aprendizaje_operativo"]):
+            score += 0.45
         if any(token in lowered for token in ["capacitaciones", "capacitacion", "e-learning", "formacion"]) and any(token in haystack for token in ["inscripciones", "e-learning", "convenios", "capacitacion"]):
             score += 0.18
         if any(token in lowered for token in ["observado", "subsanacion", "inconsistencia"]) and any(token in haystack for token in ["observaciones", "subsanacion", "workflow"]):

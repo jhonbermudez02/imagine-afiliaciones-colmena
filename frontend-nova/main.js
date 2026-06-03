@@ -1,6 +1,37 @@
 // ============================================================
-// AFI COLIMA · MAIN.JS — Frontend refactorizado
+// AFILEGA_FA_IMA_LA_V2 · MAIN.JS
 // ============================================================
+
+import { COLOMBIA_LOCATIONS } from './colombia-locations.js';
+import { CAMARA_COMERCIO_ACTIVITY_CATALOG } from './camara-comercio-catalog.js';
+import { CARGO_TRABAJADORES_CATALOG } from './cargo-trabajadores-catalog.js';
+import { TIPO_COTIZANTE_TRABAJADORES_CATALOG } from './tipo-cotizante-trabajadores-catalog.js';
+import { VINCULADOR_LABORAL_CONTRATANTE_CATALOG } from './vinculador-laboral-contratante-catalog.js';
+import {
+    ACTIVITY_RISK_CATALOG,
+    AFP_CATALOG_NORMALIZED,
+    AFP_CATALOG_OPTIONS,
+    EPS_CATALOG_NORMALIZED,
+    EPS_CATALOG_OPTIONS,
+    SMMLV_BY_YEAR,
+} from './digitacion-catalogs.js';
+import {
+    AFILEGA_MDB_ALLOWED_NOVEDAD_CODES,
+    AFILEGA_MDB_ALLOWED_NOVEDAD_AUTOLIQUIDACION,
+    AFILEGA_MDB_ALLOWED_NOVEDAD_ESTADO,
+    AFILEGA_MDB_ALLOWED_NOVEDAD_ORIGEN,
+    AFILEGA_MDB_ALLOWED_TIPO_COTIZANTE,
+    AFILEGA_MDB_ALLOWED_BOOLEAN_SN,
+    AFILEGA_MDB_ALLOWED_ZONA,
+    AFILEGA_MDB_DEFAULT_SUBTIPO_COTIZANTE,
+    AFILEGA_MDB_DOCUMENT_TYPES,
+    AFILEGA_MDB_FIELD_LIMITS,
+    AFILEGA_MDB_VERSION,
+    calculateAfilegaNitDv,
+    departmentLegacyCode,
+    municipalityLegacyCode,
+} from './afilega-legacy-mdb.js';
+import { AFILEGA_MDB_VALUE_CATALOGS } from './afilega-mdb-value-catalogs.js';
 
 const rawApiUrl = (import.meta.env.VITE_API_URL || '').trim();
 const normalizedApiUrl = rawApiUrl.replace(/\/+$/, '');
@@ -10,48 +41,44 @@ const API_URL = (
     || /^(https?:)?\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/api)?$/i.test(normalizedApiUrl)
 ) ? '' : normalizedApiUrl;
 
-const PROFILE_KEY = 'afi-colima-profile-v1';
-const TESTER_KEY = 'afi-colima-tester-v1';
-const PROCESS_STATE_KEY = 'afi-colima-process-v1';
-const CLASSIFICATION_ORDER_KEY = 'afi-colima-classif-order-v1';
+const PROFILE_KEY = 'afilega-fa-ima-la-v2-profile-v1';
+const TESTER_KEY = 'afilega-fa-ima-la-v2-tester-v1';
+const PROCESS_STATE_KEY = 'afilega-fa-ima-la-v2-process-v1';
+const CLASSIFICATION_ORDER_KEY = 'afilega-fa-ima-la-v2-classif-order-v1';
+const DIGITACION_DRAFT_KEY = 'afilega-fa-ima-la-v2-digitacion-draft-v1';
 
 const OPERATION_OPTIONS = {
-    colima: { key: 'colima', short: 'COLIMA', name: 'AFI Colima', brand: 'AFI Colima · Portal ARL', validation: 'Reglas Colima' },
+    colima: { key: 'colima', short: 'AFILEGA', name: 'AFILEGA_FA_IMA_LA_V2', brand: '', validation: 'Reglas AFILEGA' },
 };
 
 const REVIEW_TYPE_OPTIONS = [
-    ['formulario_afiliacion', 'Afiliación',        '01'],
-    ['anexo_sedes',           'Sedes ·01',         '01'],
-    ['anexo_sedes_02',        'Sedes ·02',         '01'],
-    ['anexo_sedes_03',        'Sedes ·03',         '01'],
-    ['anexo_sedes_04',        'Sedes ·04',         '01'],
-    ['anexo_sedes_05',        'Sedes ·05',         '01'],
-    ['anexo_sedes_06',        'Sedes ·06',         '01'],
-    ['anexo_sedes_07',        'Sedes ·07',         '01'],
-    ['anexo_sedes_08',        'Sedes ·08',         '01'],
-    ['anexo_sedes_09',        'Sedes ·09',         '01'],
-    ['anexo_sedes_10',        'Sedes ·10',         '01'],
-    ['listado_trabajadores',  'Listados',           '03'],
-    ['comision',              'Comisión',           '02'],
-    ['carta',                 'Carta',              '04'],
-    ['camara_comercio',       'Cámara de comercio', '05'],
-    ['cedula',                'Cédula',             '06'],
-    ['constancia_afiliacion', 'Verificación',       '07'],
-    ['rut',                   'RUT / DIAN',         '08'],
-    ['entrega_documentos',    'Entrega Doc',        '10'],
-    ['soporte_ingresos',      'Pagos',              '11'],
-    ['contrato',              'Contrato',           '13'],
-    ['eps',                   'EPS',                '14'],
-    ['afp',                   'AFP',                '15'],
-    ['paz_y_salvo',           'Paz y Salvo',        '16'],
-    ['eps_afp',               'EPS / AFP',          '17'],
-    ['identificacion_peligros','Id. Peligros',      '20'],
-    ['examen_preocupacional', 'Examen Pre-ocup.',   '21'],
-    ['autorizacion',          'Autorización',       '98'],
-    ['beneficiario_final',    'Beneficiario Final', '27'],
-    ['sat',                   'SAT',                '99'],
-    ['pdf',                   'PDF / Imagen',       '99'],
-];
+    ...AFILEGA_MDB_DOCUMENT_TYPES,
+    ['autorizacion', 'Autorización Uso Datos Personales', '11'],
+    ['autorizacion_uso_datos_personales', 'Formato de autorización de uso de datos personales', '98'],
+    ['camara_comercio_contratante', 'Cámara de Comercio de la empresa contratante original menor a 90 días', '07'],
+    ['carta_presentacion_trabajador', 'Carta de presentación del trabajador por parte del Contratante', '04'],
+    ['carta_traslado_arl_anterior', 'Carta Solicitud de traslado de la ARL anterior', '04'],
+    ['cedula_representante_legal_contratante', 'Cédula de representante legal de la empresa contratante', '05'],
+    ['cedula_trabajador_independiente', 'Cédula de trabajador independiente / contratista', '05'],
+    ['cedula_trabajadores', 'Cédula de los trabajadores', '05'],
+    ['anexo_sedes', 'SEDES', '02'],
+    ['certificacion_afiliacion_afp', 'Certificación de afiliación del trabajador a la AFP. Menor a 30 días de expedición', '11'],
+    ['certificacion_afiliacion_eps', 'Certificación de afiliación del trabajador a la EPS. menor a 30 días de expedición. (Activa)', '11'],
+    ['contrato_contratista_contratante', 'Contrato entre el contratista y el contratante', '11'],
+    ['contrato_trabajo_remoto', 'Para Trabajo remoto contrato con el trabajador', '11'],
+    ['rut_contratista', 'Copia RUT del Contratista', '06'],
+    ['formulario_afiliacion', 'Formulario de Afiliación. (firmado por ambas partes)', '01'],
+    ['formulario_afiliacion_adicional', 'Formulario de afiliación', '01'],
+    ['listado_documentos_entregados', 'Listado documentos entregados', '10'],
+    ['pagos_seguridad_social', 'Pagos seguridad social', '09'],
+    ['paz_salvo_arl_anterior', 'Paz y salvo con la anterior ARL', '11'],
+    ['pdf', 'PDF / Imagen sin clasificar', '99'],
+    ['relacion_ingreso_trabajadores', 'Relación de ingreso de trabajadores', '03'],
+    ['solicitud_afiliacion_empleador', 'Solicitud Afiliación Empleador', '01'],
+    ['solicitud_usuario_pagina_web', 'Solicitud Usuario Página WEB', '11'],
+]
+    .filter((item, index, arr) => arr.findIndex(other => other[0] === item[0]) === index)
+    .sort((a, b) => a[1].localeCompare(b[1], 'es', { sensitivity: 'base' }));
 
 // ── Estado global ────────────────────────────────────────────
 let activeCaseId = null;
@@ -61,10 +88,18 @@ let testerRoster = [];
 let productionLoadController = null;
 let workflowLaunchInFlight = false;
 let workflowStatusPollTimer = null;
+let flowRadicacionPromise = null;
 let selectedColmenaCaseIds = new Set();
 let currentView = 'bandeja';
 let bandejaActiveTab = 'todos';
 let allCases = [];
+let digitacionActiveTab = 'afiliacion';
+let uploadEntryType = 'empresa';
+let digitacionEvidenceDocFile = '';
+let digitacionEvidenceManualFile = '';
+let digitacionActiveFieldKey = '';
+let digitacionDocumentStageKey = '';
+let digitacionEditingCentroIndex = -1;
 
 function normalizeOperation(value = '') {
     return 'colima';
@@ -104,6 +139,10 @@ function normalizeText(v = '') {
     return String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 }
 
+function onlyDigits(v = '') {
+    return String(v || '').replace(/\D/g, '');
+}
+
 function formatDateTime(v) {
     if (!v) return 'n/d';
     const d = new Date(v);
@@ -126,8 +165,8 @@ function formatCurrency(v) {
 
 function localizeStatus(v) {
     const map = {
-        uploaded:'cargado', completed:'completado', blocked:'bloqueado',
-        failed:'fallido', pending:'pendiente', analyzed:'analizado',
+        uploaded:'Pendiente', completed:'completado', blocked:'bloqueado',
+        failed:'fallido', pending:'Pendiente', analyzed:'analizado',
         stopped_prevalidacion:'No pasó validación', ok:'ok', degraded:'degradado',
     };
     return map[String(v||'').toLowerCase()] || String(v||'n/d');
@@ -204,9 +243,48 @@ async function fetchWithRetry(url, options = {}, attempts = 2) {
     throw lastErr;
 }
 
+function markFlowRadicacionUsed() {
+    const field = document.getElementById('flowNumeroRadicacion');
+    if (field) field.dataset.radUsed = '1';
+}
+
+async function ensureFlowNumeroRadicacion({ force = false } = {}) {
+    const field = document.getElementById('flowNumeroRadicacion');
+    if (!field) return '';
+    field.readOnly = true;
+    field.setAttribute('aria-readonly', 'true');
+    if (force) {
+        field.value = '';
+        delete field.dataset.radUsed;
+    }
+    if (field.value && !force) return field.value;
+    if (!flowRadicacionPromise) {
+        flowRadicacionPromise = fetchWithRetry(`${API_URL}/api/radicacion/next`, { method: 'POST' })
+            .then(async response => {
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+                return payload;
+            })
+            .finally(() => { flowRadicacionPromise = null; });
+    }
+    try {
+        const payload = await flowRadicacionPromise;
+        const nextValue = String(payload.numero_radicacion || '').trim();
+        if (nextValue) field.value = nextValue;
+        return field.value;
+    } catch (error) {
+        console.error('ensureFlowNumeroRadicacion:', error);
+        showToast('No fue posible obtener el consecutivo de radicación.', 'err');
+        return '';
+    }
+}
+
 // ── Sesión / perfil ──────────────────────────────────────────
 function readProfile() {
-    try { return String(localStorage.getItem(PROFILE_KEY)||'').toLowerCase(); } catch { return ''; }
+    try {
+        const profile = String(localStorage.getItem(PROFILE_KEY) || 'imagine').toLowerCase();
+        return profile === 'imagine' ? 'imagine' : 'imagine';
+    } catch { return 'imagine'; }
 }
 function saveProfile(p) {
     try { localStorage.setItem(PROFILE_KEY, p); } catch {}
@@ -232,6 +310,14 @@ function caseFileUrl(caseId, filename, inline = false) {
     url.searchParams.set('operation', readOperation());
     if (inline) url.searchParams.set('inline', '1');
     return url.toString();
+}
+
+function documentViewerUrl(caseId, filename, inline = true) {
+    const url = caseFileUrl(caseId, filename, inline);
+    if (/\.pdf$/i.test(filename || '')) {
+        return `${url}#navpanes=0&view=FitH&zoom=page-width`;
+    }
+    return url;
 }
 
 function case926Url(caseId) {
@@ -333,8 +419,10 @@ function resolveContractNumber(analysis, item = {}) {
     const formFields = (a.xlsx_profile || {}).form_fields || {};
     const output926 = wf.output_926 || a.output_926 || {};
     const legacy = output926.legacy || {};
+    const digitacionValues = item.digitacion_values || a.digitacion_manual?.values || a.digitacion_prefill?.values || {};
     return item.contract_number || item.numero_contrato || item.nro_contrato || item.nro_afiliacion ||
         legacy.numero_afiliacion || legacy.nro_afiliacion ||
+        digitacionValues.numero_contrato || digitacionValues.numero_radicacion ||
         profile.numero_contrato || profile.nro_contrato || profile.numero_radicacion || profile.nro_radicacion ||
         formFields.numero_radicacion || '';
 }
@@ -382,7 +470,8 @@ function casePillLabel(status, finalStatus) {
     if (s === 'completed') return 'Completado';
     if (s === 'analyzed') return 'Analizado';
     if (s === 'failed') return 'Error';
-    if (['uploaded','pending','processing','queued'].includes(s)) return 'En proceso';
+    if (['uploaded','pending'].includes(s)) return 'Pendiente';
+    if (['processing','queued'].includes(s)) return 'En proceso';
     return localizeStatus(status) || 'Pendiente';
 }
 
@@ -420,7 +509,7 @@ function renderLoginUsers() {
             const email = btn.getAttribute('data-tester-email');
             const tester = testerRoster.find(t => t.email === email) || { email, name: email };
             if (!readProfile()) {
-                document.getElementById('loginNote').textContent = 'Primero selecciona un perfil (Imagine o Colmena).';
+                document.getElementById('loginNote').textContent = 'Primero selecciona un perfil.';
                 return;
             }
             saveTester(tester);
@@ -458,7 +547,7 @@ function updateSidebarUser() {
     const initials = name.split(' ').slice(0,2).map(w => w[0]||'').join('').toUpperCase() || 'OP';
     document.getElementById('userAvatar').textContent = initials;
     document.getElementById('userName').textContent = name;
-    document.getElementById('userRole').textContent = p === 'colmena' ? 'Perfil Colmena' : 'Perfil Imagine';
+    document.getElementById('userRole').textContent = 'Perfil Imagine';
 }
 
 function updateOperationChrome() {
@@ -492,7 +581,7 @@ function setActiveOperation(operation) {
     try { localStorage.removeItem(PROCESS_STATE_KEY); } catch {}
     stopBandejaLivePolling();
     if (hasSession()) {
-        showToast(`Operación activa: ${OPERATION_OPTIONS[next].name}. Bandejas y validaciones separadas.`, 'info');
+        showToast(`Entidad activa: ${OPERATION_OPTIONS[next].name}.`, 'info');
         switchView(readProfile() === 'colmena' ? 'produccion' : 'bandeja');
     }
 }
@@ -500,15 +589,12 @@ function setActiveOperation(operation) {
 function showNavColmena() {
     const p = readProfile();
     const isColmena = p === 'colmena';
-    // Grupos solo para Imagine
-    ['navOperacion', 'navRevision', 'navSistema'].forEach(id => {
+    ['navOperacion', 'navSistema'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = isColmena ? 'none' : '';
     });
-    // Grupo Colmena solo para Colmena
     const navColmena = document.getElementById('navColmena');
     if (navColmena) navColmena.style.display = isColmena ? '' : 'none';
-    // Si perfil es Colmena y vista actual no es producción, redirigir
     if (isColmena && currentView !== 'produccion') {
         switchView('produccion');
     }
@@ -529,19 +615,19 @@ function updateMobileNavOptions() {
 
 // ── NAVEGACIÓN ───────────────────────────────────────────────
 const VIEW_META = {
-    bandeja:       { title: 'Bandeja de entrada',      breadcrumb: 'Operación · contratos activos' },
-    flujo:         { title: 'Nuevo contrato',           breadcrumb: 'Operación · cargar expediente' },
-    clasificacion: { title: 'Clasificación documental', breadcrumb: 'Operación · documentos por revisar' },
-    validacion:    { title: 'Validación OCR',           breadcrumb: 'Revisión · comparación de fuentes' },
-    visor:         { title: 'Visor documental',         breadcrumb: 'Revisión · documentos adjuntos' },
-    reporte:       { title: 'Reporte ejecutivo',        breadcrumb: 'Revisión · resumen de decisión' },
-    produccion:    { title: 'Producción · Colmena',     breadcrumb: 'Colmena · archivo plano' },
-    entrenamiento: { title: 'Hallazgos',                breadcrumb: 'Sistema · mejoras y ajustes' },
-    busqueda:      { title: 'Búsqueda',                 breadcrumb: 'Sistema · búsqueda documental' },
-    admin:         { title: 'Administración',           breadcrumb: 'Sistema · estado y configuración' },
+    bandeja:       { title: 'Bandeja de entrada',        breadcrumb: 'Operación · contratos activos' },
+    flujo:         { title: 'Nuevo contrato',            breadcrumb: 'Operación · cargue documental' },
+    digitacion:    { title: 'Digitación',                breadcrumb: 'Operación · captura manual' },
+    clasificacion: { title: 'Clasificación documental',  breadcrumb: 'Operación · documentos por revisar' },
+    validacion:    { title: 'Validación OCR',            breadcrumb: 'Revisión · comparación de fuentes' },
+    visor:         { title: 'Visor documental',          breadcrumb: 'Revisión · documentos adjuntos' },
+    reporte:       { title: 'Reporte ejecutivo',         breadcrumb: 'Revisión · resumen de decisión' },
+    produccion:    { title: 'Entrega de plano',          breadcrumb: 'Operación · archivo plano' },
+    admin:         { title: 'Administración',            breadcrumb: 'Sistema · configuración' },
 };
 
 function switchView(viewId) {
+    if (!VIEW_META[viewId]) viewId = 'bandeja';
     currentView = viewId;
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     const target = document.getElementById(`view-${viewId}`);
@@ -554,11 +640,12 @@ function switchView(viewId) {
     const meta = VIEW_META[viewId] || { title: viewId, breadcrumb: '' };
     const op = currentOperation();
     document.getElementById('pageTitle').textContent = viewId === 'produccion' ? `${meta.title} · ${op.short}` : meta.title;
-    document.getElementById('pageBreadcrumb').textContent = `${op.name} · ${meta.breadcrumb}`;
+    document.getElementById('pageBreadcrumb').textContent = viewId === 'produccion' ? meta.breadcrumb : `${op.short} · ${meta.breadcrumb}`;
     updateMobileNavOptions();
     updateTopbarActions(viewId);
 
     if (viewId === 'flujo') resetFlujoView();
+    if (viewId === 'digitacion') initDigitacionView();
     if (viewId === 'bandeja') loadBandeja();
     if (viewId === 'produccion') loadProduccion();
     if (viewId === 'entrenamiento') { loadFeedbackNotes(); syncFeedbackName(); }
@@ -665,7 +752,7 @@ function galleryNav(dir) {
 function renderGalleryItem() {
     const item = _galleryItems[_galleryIndex];
     if (!item || !_galleryPayload) return;
-    const url = caseFileUrl(_galleryPayload.id, item.file, true);
+    const url = documentViewerUrl(_galleryPayload.id, item.file, true);
     document.getElementById('galleryCounter').textContent = `${_galleryIndex + 1} / ${_galleryItems.length}`;
     document.getElementById('galleryLabel').textContent = item.displayName || item.file;
     document.getElementById('galleryType').textContent = item.label || item.type || '';
@@ -690,6 +777,3176 @@ function updateTopbarActions(viewId) {
     }
 }
 
+// ── DIGITACIÓN ───────────────────────────────────────────────
+function getDigitacionFields() {
+    return Array.from(document.querySelectorAll('.digitacion-field'));
+}
+
+function getVisibleDigitacionFields() {
+    return getDigitacionFields().filter(field => !field.disabled && field.offsetParent !== null);
+}
+
+function focusNextDigitacionField(field, direction = 1) {
+    const fields = getVisibleDigitacionFields();
+    const index = fields.indexOf(field);
+    if (index < 0 || !fields.length) return;
+    const next = fields[index + direction] || fields[direction > 0 ? 0 : fields.length - 1];
+    if (!next) return;
+    const section = next.closest('[data-digitacion-panel]')?.dataset?.digitacionPanel;
+    if (section && section !== digitacionActiveTab) switchDigitacionTab(section);
+    setTimeout(() => {
+        next.focus();
+        if (next.select && next.tagName !== 'SELECT') next.select();
+    }, 0);
+}
+
+const DIGITACION_REQUIRED = {
+    radicacion: [
+        'numero_radicacion', 'tipo_tramite', 'tipo_afiliacion', 'fecha_radicacion', 'fecha_inicio_cobertura',
+        'fecha_recibido_imagine', 'empleador_tipo_documento', 'nit', 'razon_social', 'sucursal',
+    ],
+    afiliacion: [
+        'empleador_tipo_documento', 'nit', 'razon_social',
+        'nit_dv', 'codigo_actividad_economica', 'clase_riesgo_empresa',
+        'direccion_empresa', 'municipio_empresa', 'departamento_empresa', 'correo_empresa', 'telefono_empresa',
+        'rep_legal_nombre_completo', 'rep_legal_tipo_documento',
+        'rep_legal_numero_documento', 'rep_legal_correo', 'rep_legal_cargo',
+        'empresa_tipo_aportante', 'empresa_clase_aportante', 'empresa_vinculador_laboral',
+        'camara_fecha_constitucion', 'camara_regimen', 'camara_codigo_actividad', 'camara_actividad_principal',
+        'camara_olcsa_pyme', 'camara_naturaleza', 'camara_clase_sociedad', 'camara_tamano',
+        'contacto_pagos_nombre', 'contacto_pagos_cargo', 'contacto_pagos_correo', 'contacto_pagos_direccion',
+        'contacto_pagos_departamento', 'contacto_pagos_municipio', 'contacto_pagos_telefono', 'contacto_pagos_celular',
+        'contacto_sst_nombre', 'contacto_sst_cargo', 'contacto_sst_correo', 'contacto_sst_direccion',
+        'contacto_sst_departamento', 'contacto_sst_municipio', 'contacto_sst_telefono', 'contacto_sst_celular',
+    ],
+    sedes: [
+        'sede_sucursal', 'sede_nombre', 'sede_centro_trabajo_nombre', 'sede_codigo', 'sede_direccion', 'sede_municipio', 'sede_departamento',
+        'sede_zona', 'sede_codigo_actividad', 'sede_clase_riesgo', 'sede_numero_trabajadores',
+        'sede_telefono', 'sede_celular', 'sede_transporte', 'sede_contacto', 'sede_cargo_contacto', 'sede_correo',
+        'sede_grado', 'sede_tarifa',
+    ],
+    novedades: [
+        'trabajador_centro_trabajo', 'tipo_documento_afiliado', 'documento_afiliado',
+        'primer_apellido', 'primer_nombre', 'fecha_nacimiento', 'genero',
+        'tipo_cotizante', 'ibc', 'cargo_actividad', 'eps', 'afp',
+    ],
+};
+
+const DIGITACION_REQUIRED_AFILIACION_LEGACY = [];
+
+const DIGITACION_REQUIRED_TRASLADO_LEGACY = [];
+
+const DIGITACION_LEGACY_EMPRESA_KEYS = [
+    'numero_radicacion',
+    'tipo_persona',
+    'actividad_principal_empresa',
+    'telefono_empresa',
+    'extension_empresa',
+    'celular_empresa',
+    'empresa_forma_pago',
+    'empresa_tipo_aportante',
+    'empresa_clase_aportante',
+    'empresa_vinculador_laboral',
+    'empresa_regimen',
+    'empresa_naturaleza',
+    'empresa_clase_sociedad',
+    'empresa_tamano',
+    'empresa_grupo',
+    'empresa_tipo_localizacion',
+    'empresa_zona_localizacion',
+    'empresa_pyme',
+    'empresa_olcsa',
+    'empresa_contratante',
+    'empresa_arl_anterior',
+    'camara_fecha_constitucion',
+    'camara_regimen',
+    'camara_codigo_actividad',
+    'camara_actividad_principal',
+    'camara_olcsa_pyme',
+    'camara_naturaleza',
+    'camara_clase_sociedad',
+    'camara_tamano',
+    'camara_grupo_empresarial',
+    'camara_tipo_localizacion',
+    'camara_zona_localizacion',
+    'contacto_pagos_nombre',
+    'contacto_pagos_cargo',
+    'contacto_pagos_correo',
+    'contacto_pagos_direccion',
+    'contacto_pagos_departamento',
+    'contacto_pagos_municipio',
+    'contacto_pagos_telefono',
+    'contacto_pagos_extension',
+    'contacto_pagos_celular',
+    'contacto_sst_nombre',
+    'contacto_sst_cargo',
+    'contacto_sst_correo',
+    'contacto_sst_direccion',
+    'contacto_sst_departamento',
+    'contacto_sst_municipio',
+    'contacto_sst_telefono',
+    'contacto_sst_extension',
+    'contacto_sst_celular',
+    'a_numero_sedes',
+    'a_numero_centros_trabajo',
+    'a_numero_inicial_trabajadores_estudiantes',
+    'a_valor_total_nomina',
+    'b_numero_sedes',
+    'b_numero_centros_trabajo',
+    'b_numero_total_trabajadores_estudiantes',
+    'b_monto_total_cotizacion',
+    'estado_cuenta_empleador',
+];
+
+const DIGITACION_TIPO_COTIZANTE_VALUES = new Set(Object.keys(TIPO_COTIZANTE_TRABAJADORES_CATALOG));
+const DIGITACION_VINCULADOR_LABORAL_VALUES = new Set(Object.keys(VINCULADOR_LABORAL_CONTRATANTE_CATALOG));
+const DIGITACION_CARGO_TRABAJADORES_CODES = new Set([
+    ...Object.keys(CARGO_TRABAJADORES_CATALOG || {}),
+    ...Object.values(CARGO_TRABAJADORES_CATALOG || {}).map(item => String(item?.codigo || '').trim()),
+].filter(Boolean));
+const DIGITACION_CARGO_CODE_BY_NAME = new Map(Object.entries(CARGO_TRABAJADORES_CATALOG || {})
+    .flatMap(([code, profile]) => {
+        const normalizedName = normalizeCatalogText(profile?.nombre || '');
+        const normalizedLabel = normalizeCatalogText(`${code} · ${profile?.nombre || ''}`);
+        return [
+            [normalizedName, code],
+            [normalizedLabel, code],
+        ].filter(([key]) => key);
+    }));
+const DIGITACION_EPS_CODES = new Set(EPS_CATALOG_OPTIONS
+    .map(item => String(item?.label || '').split('·')[0].trim())
+    .filter(Boolean));
+const DIGITACION_AFP_CODES = new Set(AFP_CATALOG_OPTIONS
+    .map(item => String(item?.label || '').split('·')[0].trim())
+    .filter(Boolean));
+
+const DIGITACION_SECTION_KEYS = {
+    radicacion: [...DIGITACION_REQUIRED.radicacion],
+    afiliacion: [...DIGITACION_REQUIRED.afiliacion, ...DIGITACION_LEGACY_EMPRESA_KEYS],
+    sedes: [...DIGITACION_REQUIRED.sedes, 'sede_celular', 'sede_fax', 'sede_transporte', 'sede_grado', 'sede_tarifa', 'sede_tipo_localizacion', 'responsable_sede_principal_nombre_completo', 'responsable_sede_principal_tipo_documento', 'responsable_sede_principal_numero_documento', 'sedes_adicionales'],
+    novedades: [...DIGITACION_REQUIRED.novedades, 'segundo_apellido', 'segundo_nombre', 'edad', 'subtipo_cotizante', 'trabajadores_adicionales'],
+};
+
+const DIGITACION_WORKER_KEYS = [
+    'trabajador_centro_trabajo',
+    'tipo_documento_afiliado',
+    'documento_afiliado',
+    'primer_apellido',
+    'segundo_apellido',
+    'primer_nombre',
+    'segundo_nombre',
+    'fecha_nacimiento',
+    'edad',
+    'genero',
+    'tipo_cotizante',
+    'ibc',
+    'cargo_actividad',
+    'eps',
+    'afp',
+];
+
+const DIGITACION_CENTRO_REQUIRED_KEYS = [
+    'codigo',
+    'nombre',
+    'sucursal',
+    'direccion',
+    'departamento',
+    'municipio',
+    'zona',
+    'telefono',
+    'codigo_actividad',
+    'clase',
+    'trabajadores',
+    'grado',
+    'contacto',
+    'cargo_contacto',
+];
+
+const DIGITACION_ALPHA_KEYS = new Set([
+    'primer_apellido',
+    'segundo_apellido',
+    'primer_nombre',
+    'segundo_nombre',
+    'sede_nombre',
+    'sede_contacto',
+    'sede_cargo_contacto',
+    'rep_legal_cargo',
+    'contacto_pagos_nombre',
+    'contacto_pagos_cargo',
+    'contacto_sst_nombre',
+    'contacto_sst_cargo',
+    'rep_legal_nombre_completo',
+    'responsable_sede_principal_nombre_completo',
+    'arl_anterior',
+    'empresa_arl_anterior',
+    'nuevo_centro_trabajo',
+]);
+
+const DIGITACION_ALPHA_RE = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ .'-]{2,150}$/;
+const DIGITACION_ALPHA_CLEAN_RE = /[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ .'-]/g;
+const DIGITACION_ALNUM_RE = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9 .,&'°#/-]{2,200}$/;
+const DIGITACION_ALNUM_CLEAN_RE = /[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9 .,&'°#/-]/g;
+const DIGITACION_DIGIT_ONLY_KEYS = new Set([
+    'nit',
+    'nit_dv',
+    'documento_afiliado',
+    'ibc',
+    'rep_legal_numero_documento',
+    'responsable_sede_principal_numero_documento',
+    'codigo_actividad_economica',
+    'sede_codigo_actividad',
+    'camara_codigo_actividad',
+    'sede_codigo',
+    'sede_telefono',
+    'sede_celular',
+    'sede_numero_trabajadores',
+    'telefono_empresa',
+    'extension_empresa',
+    'celular_empresa',
+    'contacto_pagos_telefono',
+    'contacto_pagos_extension',
+    'contacto_pagos_celular',
+    'contacto_sst_telefono',
+    'contacto_sst_extension',
+    'contacto_sst_celular',
+    'nuevo_codigo_ocupacion',
+    'fecha_nacimiento',
+    'tipo_cotizante',
+    'subtipo_cotizante',
+    'empresa_forma_pago',
+    'empresa_tipo_aportante',
+    'empresa_clase_aportante',
+    'empresa_vinculador_laboral',
+    'empresa_regimen',
+    'empresa_naturaleza',
+    'empresa_clase_sociedad',
+    'empresa_tamano',
+    'empresa_grupo',
+    'empresa_tipo_localizacion',
+    'sede_grado',
+    'sede_tipo_localizacion',
+    'novedad_dias',
+    'novedad_estado',
+    'a_numero_sedes',
+    'a_numero_centros_trabajo',
+    'a_numero_inicial_trabajadores_estudiantes',
+    'b_numero_sedes',
+    'b_numero_centros_trabajo',
+    'b_numero_total_trabajadores_estudiantes',
+]);
+const DIGITACION_MONEY_KEYS = new Set(['ibc', 'nuevo_ibc', 'valor_total_contrato', 'valor_mensual_contrato', 'a_valor_total_nomina', 'b_monto_total_cotizacion', 'novedad_valor_anterior', 'novedad_valor_nuevo']);
+const DIGITACION_SN_KEYS = new Set(['empresa_pyme', 'empresa_olcsa', 'empresa_contratante', 'sede_transporte', 'novedad_traslado']);
+const DIGITACION_TIPO_APORTANTE_DEFAULTS = {
+    '1': { clase: '1', vinculador: '1' },
+    '2': { clase: '2', vinculador: '2' },
+    '3': { clase: '3', vinculador: '3' },
+    '4': { clase: '4', vinculador: '4' },
+};
+const DIGITACION_ALLOWED_WORKER_DOC_TYPES = new Set(['CC', 'CD', 'CE', 'PE', 'PT', 'RC', 'SC', 'TI', 'NI', 'NIT']);
+const DIGITACION_CLASE_AFILIACION_VALUES = new Set(['primera vez', 'traslado', 'independiente contratista']);
+const DIGITACION_CLASE_AFILIACION_ALIASES = {
+    individual: 'Independiente - Contratista',
+    contratista: 'Independiente - Contratista',
+    independiente: 'Independiente - Contratista',
+    'independiente empresa no afiliada': 'Independiente - Contratista',
+    'empresa no afiliada': 'Independiente - Contratista',
+    colectiva: 'Primera vez',
+    empresa: 'Primera vez',
+    'primera vez': 'Primera vez',
+    traslado: 'Traslado',
+    'independiente contratista': 'Independiente - Contratista',
+};
+const DIGITACION_ROMAN_RISK_TO_NUMBER = { I: '1', II: '2', III: '3', IV: '4', V: '5' };
+const DIGITACION_RISK_TARIFFS = {
+    1: '0.522',
+    2: '1.044',
+    3: '2.436',
+    4: '4.360',
+    5: '6.960',
+};
+
+function digitacionRequiredKeys() {
+    const currentValues = readDigitacionDraft().values || {};
+    const workerKeys = digitacionIsContratista(currentValues) ? [] : DIGITACION_REQUIRED.novedades;
+    return new Set([
+        ...DIGITACION_REQUIRED.radicacion,
+        ...DIGITACION_REQUIRED.afiliacion,
+        ...DIGITACION_REQUIRED.sedes,
+        ...workerKeys,
+        ...DIGITACION_REQUIRED_AFILIACION_LEGACY,
+        ...DIGITACION_REQUIRED_TRASLADO_LEGACY,
+    ]);
+}
+
+function markDigitacionRequiredFields() {
+    const requiredKeys = digitacionRequiredKeys();
+    getDigitacionFields().forEach(field => {
+        const row = field.closest('.field-row');
+        const isRequired = requiredKeys.has(field.dataset.digKey);
+        field.required = isRequired;
+        field.setAttribute('aria-required', isRequired ? 'true' : 'false');
+        row?.classList.toggle('field-required', isRequired);
+    });
+    document.querySelectorAll('#digitacionCentroEditor [data-centro-field]').forEach(field => {
+        const row = field.closest('.field-row');
+        const isRequired = DIGITACION_CENTRO_REQUIRED_KEYS.includes(field.dataset.centroField);
+        field.required = isRequired;
+        field.setAttribute('aria-required', isRequired ? 'true' : 'false');
+        row?.classList.toggle('field-required', isRequired);
+    });
+}
+
+function setDatalistOptions(id, items, maxItems = 5000) {
+    const list = document.getElementById(id);
+    if (!list || list.dataset.loaded === '1') return;
+    const seen = new Set();
+    const options = [];
+    for (const item of items) {
+        const value = String(item?.value ?? item ?? '').trim();
+        if (!value || seen.has(value)) continue;
+        seen.add(value);
+        const label = String(item?.label ?? value).trim();
+        options.push(`<option value="${escapeHtml(value)}" label="${escapeHtml(label)}"></option>`);
+        if (options.length >= maxItems) break;
+    }
+    list.innerHTML = options.join('');
+    list.dataset.loaded = '1';
+}
+
+function setSelectOptions(select, items, maxItems = 5000) {
+    if (!select) return;
+    const currentValue = select.value || '';
+    const seen = new Set();
+    const options = ['<option value="">Selecciona...</option>'];
+    for (const item of items) {
+        const value = String(item?.value ?? item ?? '').trim();
+        if (!value || seen.has(value)) continue;
+        seen.add(value);
+        const label = String(item?.label ?? value).trim();
+        options.push(`<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`);
+        if (options.length > maxItems) break;
+    }
+    select.innerHTML = options.join('');
+    if (currentValue && seen.has(currentValue)) select.value = currentValue;
+}
+
+function populateDigitacionCatalogDatalists() {
+    setDatalistOptions('epsCatalogOptions', EPS_CATALOG_OPTIONS, 1000);
+    setDatalistOptions('afpCatalogOptions', AFP_CATALOG_OPTIONS, 1000);
+
+    const activityRows = Object.entries(ACTIVITY_RISK_CATALOG)
+        .map(([code, profile]) => ({
+            value: code,
+            label: `${code} · Clase ${profile?.clase || ''} · ${profile?.nombre || ''}`.trim(),
+        }))
+        .sort((a, b) => a.value.localeCompare(b.value, 'es', { numeric: true }));
+    setDatalistOptions('actividadEconomicaOptions', activityRows, 10000);
+
+    const camaraActivityRows = Object.entries(CAMARA_COMERCIO_ACTIVITY_CATALOG)
+        .map(([code, profile]) => ({
+            value: code,
+            label: `${code} · Clase ${profile?.clase || ''} · ${profile?.nombre || ''}`.trim(),
+        }))
+        .sort((a, b) => a.value.localeCompare(b.value, 'es', { numeric: true }));
+    setDatalistOptions('camaraActividadOptions', camaraActivityRows, 10000);
+
+    const cargoRows = Object.entries(CARGO_TRABAJADORES_CATALOG)
+        .map(([code, profile]) => ({
+            value: String(code || profile?.codigo || '').trim(),
+            label: `${code} · ${profile?.nombre || ''}`.trim(),
+        }))
+        .filter(item => item.value)
+        .sort((a, b) => normalizeCatalogText(a.label).localeCompare(normalizeCatalogText(b.label), 'es', { numeric: true }));
+    setDatalistOptions('cargoCatalogOptions', cargoRows, 10000);
+
+    const tipoCotizanteSelect = document.getElementById('digTipoCotizante');
+    if (tipoCotizanteSelect) {
+        const rows = Object.entries(TIPO_COTIZANTE_TRABAJADORES_CATALOG)
+            .map(([code, profile]) => ({
+                value: code,
+                label: `${code} · ${profile?.descripcion || ''}`.trim(),
+            }))
+            .sort((a, b) => a.value.localeCompare(b.value, 'es', { numeric: true }));
+        const currentValue = tipoCotizanteSelect.value || '';
+        tipoCotizanteSelect.innerHTML = [
+            '<option value="">Selecciona...</option>',
+            ...rows.map(item => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`),
+        ].join('');
+        if (currentValue && rows.some(item => item.value === currentValue)) tipoCotizanteSelect.value = currentValue;
+    }
+
+    const vinculadorSelect = document.getElementById('digEmpresaVinculador');
+    if (vinculadorSelect) {
+        const rows = Object.entries(VINCULADOR_LABORAL_CONTRATANTE_CATALOG)
+            .map(([code, profile]) => ({
+                value: code,
+                label: `${code} · ${profile?.nombre || ''}`.trim(),
+            }))
+            .sort((a, b) => a.value.localeCompare(b.value, 'es', { numeric: true }));
+        const currentValue = vinculadorSelect.value || '';
+        vinculadorSelect.innerHTML = [
+            '<option value="">Selecciona...</option>',
+            ...rows.map(item => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`),
+        ].join('');
+        if (currentValue && rows.some(item => item.value === currentValue)) vinculadorSelect.value = currentValue;
+    }
+}
+
+function digitacionAutocompleteCatalog(key = '') {
+    if (key === 'eps') return EPS_CATALOG_OPTIONS;
+    if (key === 'afp') return AFP_CATALOG_OPTIONS;
+    if (key === 'cargo_actividad') {
+        return Object.entries(CARGO_TRABAJADORES_CATALOG || {})
+            .map(([code, profile]) => ({
+                value: String(profile?.codigo || code || '').trim(),
+                label: `${profile?.codigo || code} · ${profile?.nombre || ''}`.trim(),
+            }))
+            .filter(item => item.value)
+            .sort((a, b) => normalizeCatalogText(a.label).localeCompare(normalizeCatalogText(b.label), 'es', { numeric: true }));
+    }
+    return [];
+}
+
+function digitacionAutocompleteSearchText(item = {}) {
+    return normalizeCatalogText(`${item.value || ''} ${item.label || ''}`);
+}
+
+function digitacionAutocompleteMatches(key = '', query = '') {
+    const normalizedQuery = normalizeCatalogText(query);
+    const catalog = digitacionAutocompleteCatalog(key);
+    if (!normalizedQuery) return key === 'cargo_actividad' ? catalog.slice(0, 8) : [];
+    const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+    return catalog
+        .filter(item => {
+            const haystack = digitacionAutocompleteSearchText(item);
+            return tokens.every(token => haystack.includes(token));
+        })
+        .slice(0, 8);
+}
+
+function ensureDigitacionAutocompleteMenu(field) {
+    const row = field?.closest('.field-row');
+    if (!row) return null;
+    let menu = row.querySelector('.field-autocomplete-menu');
+    if (!menu) {
+        menu = document.createElement('div');
+        menu.className = 'field-autocomplete-menu';
+        menu.hidden = true;
+        menu.addEventListener('mousedown', event => event.preventDefault());
+        menu.addEventListener('click', event => {
+            const option = event.target.closest('[data-autocomplete-value]');
+            if (!option) return;
+            selectDigitacionAutocompleteOption(field, option.dataset.autocompleteValue || '');
+        });
+        row.appendChild(menu);
+    }
+    return menu;
+}
+
+function hideDigitacionAutocomplete(field) {
+    const menu = field?.closest('.field-row')?.querySelector('.field-autocomplete-menu');
+    if (menu) menu.hidden = true;
+}
+
+function renderDigitacionAutocomplete(field) {
+    const key = field?.dataset?.digKey || '';
+    if (!digitacionAutocompleteCatalog(key).length) return;
+    const menu = ensureDigitacionAutocompleteMenu(field);
+    if (!menu) return;
+    const matches = digitacionAutocompleteMatches(key, field.value);
+    if (!String(field.value || '').trim() && key !== 'cargo_actividad') {
+        menu.hidden = true;
+        menu.innerHTML = '';
+        return;
+    }
+    if (!matches.length) {
+        menu.innerHTML = '<div class="field-autocomplete-empty">Sin coincidencias</div>';
+        menu.hidden = false;
+        return;
+    }
+    menu.innerHTML = matches.map((item, index) => `
+        <button class="field-autocomplete-option${index === 0 ? ' active' : ''}" type="button" data-autocomplete-value="${escapeHtml(item.value || '')}">
+          ${escapeHtml(item.label || item.value || '')}
+        </button>
+    `).join('');
+    menu.hidden = false;
+}
+
+function selectDigitacionAutocompleteOption(field, value = '') {
+    if (!field || !value) return;
+    if (field.dataset?.digKey === 'cargo_actividad') {
+        setDigitacionCargoFieldDisplay(field, value);
+    } else {
+        field.value = value;
+    }
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+    hideDigitacionAutocomplete(field);
+    field.focus();
+}
+
+function moveDigitacionAutocomplete(field, direction = 1) {
+    const menu = ensureDigitacionAutocompleteMenu(field);
+    if (!menu || menu.hidden) return false;
+    const options = Array.from(menu.querySelectorAll('.field-autocomplete-option'));
+    if (!options.length) return false;
+    const current = Math.max(0, options.findIndex(option => option.classList.contains('active')));
+    const next = (current + direction + options.length) % options.length;
+    options.forEach(option => option.classList.remove('active'));
+    options[next].classList.add('active');
+    options[next].scrollIntoView({ block: 'nearest' });
+    return true;
+}
+
+function handleDigitacionAutocompleteKeydown(field, event) {
+    const key = field?.dataset?.digKey || '';
+    if (!digitacionAutocompleteCatalog(key).length) return false;
+    const menu = ensureDigitacionAutocompleteMenu(field);
+    if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        renderDigitacionAutocomplete(field);
+        moveDigitacionAutocomplete(field, 1);
+        return true;
+    }
+    if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        renderDigitacionAutocomplete(field);
+        moveDigitacionAutocomplete(field, -1);
+        return true;
+    }
+    if (event.key === 'Escape') {
+        hideDigitacionAutocomplete(field);
+        return true;
+    }
+    if (event.key === 'Enter' && menu && !menu.hidden) {
+        const active = menu.querySelector('.field-autocomplete-option.active') || menu.querySelector('.field-autocomplete-option');
+        if (active) {
+            event.preventDefault();
+            selectDigitacionAutocompleteOption(field, active.dataset.autocompleteValue || '');
+            return true;
+        }
+    }
+    return false;
+}
+
+const DIGITACION_FIELD_DOCUMENT_HINTS = [
+    {
+        keys: ['eps'],
+        types: ['certificacion_afiliacion_eps', 'afiliacion_eps', 'eps', 'eps_afp'],
+        label: 'Certificacion EPS',
+    },
+    {
+        keys: ['afp'],
+        types: ['certificacion_afiliacion_afp', 'afiliacion_afp', 'afp', 'eps_afp'],
+        label: 'Certificacion AFP',
+    },
+    {
+        keys: ['documento_afiliado', 'tipo_documento_afiliado', 'primer_apellido', 'segundo_apellido', 'primer_nombre', 'segundo_nombre', 'fecha_nacimiento', 'genero', 'tipo_cotizante', 'subtipo_cotizante', 'rep_legal_tipo_documento', 'rep_legal_numero_documento', 'responsable_sede_principal_tipo_documento', 'responsable_sede_principal_numero_documento'],
+        types: ['cedula_trabajador_independiente', 'cedula_representante_legal_contratante', 'cedula_trabajadores', 'cedula'],
+        label: 'Documento de identidad',
+    },
+    {
+        keys: ['numero_contrato', 'tipo_contrato', 'fecha_inicio_contrato', 'fecha_fin_contrato', 'valor_total_contrato', 'valor_mensual_contrato', 'cargo_actividad', 'ibc'],
+        types: ['contrato_contratista_contratante', 'contrato', 'contrato_trabajo_remoto', 'carta_presentacion_trabajador'],
+        label: 'Contrato / carta',
+    },
+    {
+        keys: ['sede_sucursal', 'sede_nombre', 'sede_centro_trabajo_nombre', 'sede_codigo', 'sede_direccion', 'sede_departamento', 'sede_municipio', 'sede_zona', 'sede_telefono', 'sede_celular', 'sede_numero_trabajadores', 'sede_fax', 'sede_correo', 'sede_codigo_actividad', 'sede_clase_riesgo', 'sede_transporte', 'sede_grado', 'sede_tarifa', 'sede_tipo_localizacion', 'sede_contacto', 'sede_cargo_contacto', 'responsable_sede_principal_nombre_completo', 'sedes_adicionales', 'nuevo_centro_trabajo'],
+        types: ['centros_trabajo', 'anexo_sedes', 'formulario_afiliacion'],
+        label: 'Sede / centro de trabajo',
+    },
+    {
+        keys: ['nit', 'nit_dv', 'razon_social', 'empleador_tipo_documento', 'telefono_empresa', 'celular_empresa', 'rep_legal_nombre_completo', 'rep_legal_correo', 'rep_legal_cargo', 'codigo_actividad_economica', 'actividad_principal_empresa', 'clase_riesgo_empresa', ...DIGITACION_LEGACY_EMPRESA_KEYS],
+        types: ['formulario_afiliacion', 'camara_comercio_contratante', 'camara_comercio', 'rut_contratista', 'rut'],
+        label: 'Contratante',
+    },
+    {
+        keys: ['direccion_empresa', 'departamento_empresa', 'municipio_empresa', 'correo_empresa', 'fecha_radicacion', 'fecha_inicio_cobertura', 'fecha_recibido_imagine', 'sucursal', 'tipo_tramite', 'tipo_afiliacion'],
+        types: ['formulario_afiliacion', 'centros_trabajo', 'anexo_sedes'],
+        label: 'Formulario',
+    },
+    {
+        keys: ['tipo_novedad', 'fecha_novedad_inicio', 'fecha_novedad_fin', 'arl_anterior', 'nuevo_ibc', 'nuevo_codigo_ocupacion', 'novedad_contrato', 'novedad_dias', 'novedad_estado', 'novedad_autoliquidacion', 'novedad_origen', 'novedad_valor_anterior', 'novedad_valor_nuevo', 'novedad_traslado', 'novedad_observaciones'],
+        types: ['carta_traslado_arl_anterior', 'paz_salvo_arl_anterior', 'formulario_afiliacion', 'contrato_contratista_contratante'],
+        label: 'Novedad / traslado',
+    },
+];
+
+function getDigitacionField(key) {
+    return document.querySelector(`.digitacion-field[data-dig-key="${key}"]`);
+}
+
+function normalizeCatalogText(value = '') {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^A-Za-z0-9]+/g, ' ')
+        .trim()
+        .toUpperCase();
+}
+
+function normalizeCatalogName(value = '') {
+    const tokens = normalizeCatalogText(value).split(/\s+/).filter(Boolean);
+    const stop = new Set(['SA', 'SAS', 'LTDA', 'EPS', 'AFP']);
+    return tokens.filter(token => !stop.has(token)).join('') || tokens.join('');
+}
+
+function isDigitacionCatalogCode(value, codeSet) {
+    const text = String(value || '').trim();
+    return Boolean(text) && /^\d+$/.test(text) && codeSet.has(text);
+}
+
+function normalizeImportedWorkerCatalogCode(value) {
+    const text = String(value || '').trim();
+    const digits = onlyDigits(text);
+    return digits || text;
+}
+
+function normalizeDigitacionCargoCode(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    const digits = onlyDigits(text);
+    if (digits && DIGITACION_CARGO_TRABAJADORES_CODES.has(digits)) return digits;
+    return DIGITACION_CARGO_CODE_BY_NAME.get(normalizeCatalogText(text)) || text;
+}
+
+function digitacionCargoProfile(value) {
+    const code = normalizeDigitacionCargoCode(value);
+    return code && CARGO_TRABAJADORES_CATALOG?.[code] ? CARGO_TRABAJADORES_CATALOG[code] : null;
+}
+
+function digitacionCargoDisplayName(value) {
+    const profile = digitacionCargoProfile(value);
+    return profile?.nombre || '';
+}
+
+function setDigitacionCargoFieldDisplay(field, value = '') {
+    if (!field) return;
+    const code = normalizeDigitacionCargoCode(value);
+    const profile = digitacionCargoProfile(code);
+    if (profile?.codigo || profile?.nombre) {
+        field.dataset.catalogCode = String(profile.codigo || code);
+        field.value = profile.nombre || String(profile.codigo || code);
+        return;
+    }
+    delete field.dataset.catalogCode;
+    field.value = String(value || '');
+}
+
+function isDigitacionEpsValid(value) {
+    return isDigitacionCatalogCode(value, DIGITACION_EPS_CODES)
+        || EPS_CATALOG_NORMALIZED.includes(normalizeCatalogName(value));
+}
+
+function isDigitacionAfpValid(value) {
+    return isDigitacionCatalogCode(value, DIGITACION_AFP_CODES)
+        || AFP_CATALOG_NORMALIZED.includes(normalizeCatalogName(value));
+}
+
+function digitacionRiskNumber(value = '') {
+    const raw = String(value || '').trim().toUpperCase();
+    return DIGITACION_ROMAN_RISK_TO_NUMBER[raw] || raw.replace(/\D/g, '').slice(0, 1);
+}
+
+function normalizeDigitacionDocumentTypeForUi(value = '') {
+    const raw = String(value || '').trim().toUpperCase();
+    return raw === 'NI' ? 'NIT' : raw;
+}
+
+function normalizeDigitacionDocumentTypeForLegacy(value = '') {
+    const raw = String(value || '').trim().toUpperCase();
+    return raw === 'NIT' ? 'NI' : raw;
+}
+
+function digitacionActivityCode(value = '') {
+    const raw = String(value || '').trim();
+    const leading = raw.match(/^\D*(\d{7})\b/);
+    if (leading) return leading[1];
+    const any = raw.match(/\d{7}/);
+    return any ? any[0] : onlyDigits(raw).slice(0, 7);
+}
+
+function digitacionActivityProfile(value = '') {
+    const code = digitacionActivityCode(value);
+    return code ? ACTIVITY_RISK_CATALOG[code] : null;
+}
+
+function digitacionCamaraActivityProfile(value = '') {
+    const code = onlyDigits(value);
+    return code ? CAMARA_COMERCIO_ACTIVITY_CATALOG[code] : null;
+}
+
+function digitacionRiskGrade(value = '') {
+    const raw = String(value || '').trim().toUpperCase();
+    return DIGITACION_ROMAN_RISK_TO_NUMBER[raw] || onlyDigits(raw).slice(0, 1);
+}
+
+function digitacionTarifaForGrado(value = '') {
+    return DIGITACION_RISK_TARIFFS[digitacionRiskGrade(value)] || '';
+}
+
+function syncDigitacionSedeTarifa() {
+    const gradoField = getDigitacionField('sede_grado');
+    const tarifaField = getDigitacionField('sede_tarifa');
+    if (!gradoField || !tarifaField) return;
+    tarifaField.value = digitacionTarifaForGrado(gradoField.value);
+}
+
+function digitacionAgeFromBirthDate(value = '') {
+    const birth = parseDigitacionDate(value);
+    if (!birth) return '';
+    const today = new Date();
+    let age = today.getFullYear() - birth.getFullYear();
+    const beforeBirthday = today.getMonth() < birth.getMonth()
+        || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate());
+    if (beforeBirthday) age -= 1;
+    return age >= 0 && age < 130 ? String(age) : '';
+}
+
+function syncDigitacionWorkerAge() {
+    const birthField = getDigitacionField('fecha_nacimiento');
+    const ageField = getDigitacionField('edad');
+    if (ageField) ageField.value = digitacionAgeFromBirthDate(birthField?.value || '');
+}
+
+function digitacionSmmlvForData(data = {}) {
+    const date = parseDigitacionDate(data.fecha_radicacion || data.fecha_inicio_cobertura || '') || new Date();
+    const year = String(date.getFullYear());
+    return Number(SMMLV_BY_YEAR[year] || SMMLV_BY_YEAR['2026'] || SMMLV_BY_YEAR['2025'] || 0);
+}
+
+function digitacionDatePlusDays(value = '', days = 1) {
+    const date = parseDigitacionDate(value);
+    if (!date) return '';
+    date.setDate(date.getDate() + days);
+    return formatLocalIsoDate(date);
+}
+
+function digitacionStartOfMonthAfterNext(value = '') {
+    const date = parseDigitacionDate(value);
+    if (!date) return '';
+    return formatLocalIsoDate(new Date(date.getFullYear(), date.getMonth() + 2, 1));
+}
+
+function syncDigitacionCoverageDate(force = false) {
+    const radicacionField = getDigitacionField('fecha_radicacion');
+    const coberturaField = getDigitacionField('fecha_inicio_cobertura');
+    if (!radicacionField || !coberturaField || !radicacionField.value) return;
+    const nextDay = digitacionDatePlusDays(radicacionField.value, 1);
+    if (nextDay && (force || !coberturaField.value)) coberturaField.value = nextDay;
+}
+
+function syncRadicacionVigencia() {
+    const tipoField = document.getElementById('flowTipoAfiliacion');
+    const radicacionField = document.getElementById('flowFechaRadicacion');
+    const vigenciaField = document.getElementById('flowFechaInicioVigencia');
+    const arlField = document.getElementById('flowArlTraslado');
+    const isTraslado = normalizeText(tipoField?.value || '').includes('traslado');
+    if (arlField) {
+        const row = arlField.closest('.field-row');
+        row?.classList.toggle('field-required', isTraslado);
+        arlField.disabled = !isTraslado;
+        arlField.required = isTraslado;
+        arlField.setAttribute('aria-required', isTraslado ? 'true' : 'false');
+        arlField.setAttribute('aria-disabled', isTraslado ? 'false' : 'true');
+        if (!isTraslado) arlField.value = '';
+    }
+    if (vigenciaField) {
+        vigenciaField.required = true;
+        vigenciaField.setAttribute('aria-required', 'true');
+        const calculated = isTraslado ? digitacionStartOfMonthAfterNext(radicacionField?.value || '') : '';
+        if (calculated) vigenciaField.value = calculated;
+    }
+}
+
+function syncDigitacionActivityDependentFields(key = 'codigo_actividad_economica') {
+    const field = getDigitacionField(key);
+    if (!field) return;
+    const activityCode = digitacionActivityCode(field.value);
+    const profile = digitacionActivityProfile(field.value);
+    if (profile && activityCode && field.value !== activityCode) field.value = activityCode;
+    if (key === 'codigo_actividad_economica') {
+        const activityField = getDigitacionField('actividad_principal_empresa');
+        const riskField = getDigitacionField('clase_riesgo_empresa');
+        if (activityField) activityField.value = profile?.nombre || profile?.actividad || '';
+        if (riskField) riskField.value = profile?.clase || '';
+    }
+    if (key === 'sede_codigo_actividad') {
+        const riskField = getDigitacionField('sede_clase_riesgo');
+        if (riskField) riskField.value = profile?.clase || '';
+    }
+}
+
+function normalizeDigitacionClaseAfiliacion(value = '') {
+    const key = normalizeText(value).replace(/[^a-z0-9]+/g, ' ').trim();
+    return DIGITACION_CLASE_AFILIACION_ALIASES[key] || value || '';
+}
+
+function sortedDepartments() {
+    return Object.keys(COLOMBIA_LOCATIONS).sort((a, b) => a.localeCompare(b, 'es'));
+}
+
+function findDepartmentName(value = '') {
+    const normalized = normalizeCatalogText(value);
+    return sortedDepartments().find(dept => normalizeCatalogText(dept) === normalized) || '';
+}
+
+function findMunicipalityName(department, value = '') {
+    const dept = findDepartmentName(department);
+    if (!dept) return '';
+    const normalized = normalizeCatalogText(value);
+    return (COLOMBIA_LOCATIONS[dept] || []).find(mun => normalizeCatalogText(mun) === normalized) || '';
+}
+
+function allMunicipalityOptions() {
+    return sortedDepartments().flatMap(dept => (COLOMBIA_LOCATIONS[dept] || []).map(mun => ({ dept, mun })))
+        .sort((a, b) => normalizeCatalogText(a.mun).localeCompare(normalizeCatalogText(b.mun), 'es'));
+}
+
+function findDepartmentByMunicipality(value = '') {
+    const normalized = normalizeCatalogText(value);
+    const match = allMunicipalityOptions().find(item => normalizeCatalogText(item.mun) === normalized);
+    return match?.dept || '';
+}
+
+function parseDigitacionCentrosAdicionales(value = '') {
+    return String(value || '')
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map(line => {
+            const parts = line.split('|').map(part => part.trim());
+            if (parts.length >= 20) {
+                const [
+                    codigo = '', nombre = '', sucursal = '', direccion = '', departamento = '', municipio = '',
+                    zona = '', telefono = '', celular = '', fax = '', correo = '', codigo_actividad = '',
+                    clase = '', trabajadores = '', transporte = '', grado = '', tarifa = '', tipo_localizacion = '',
+                    contacto = '', cargo_contacto = '',
+                ] = parts;
+                const safeGrado = grado || clase;
+                return {
+                    codigo, nombre, sucursal, direccion, departamento, municipio, zona,
+                    telefono: onlyDigits(telefono), celular: onlyDigits(celular), fax: onlyDigits(fax),
+                    correo, codigo_actividad: onlyDigits(codigo_actividad), clase,
+                    trabajadores: onlyDigits(trabajadores), transporte, grado: safeGrado,
+                    tarifa: tarifa || digitacionTarifaForGrado(safeGrado),
+                    tipo_localizacion: onlyDigits(tipo_localizacion), contacto, cargo_contacto,
+                };
+            }
+            const [codigo = '', nombre = '', direccion = '', municipio = '', departamento = '', clase = '', grado = '', tarifa = '', trabajadores = ''] = parts;
+            const safeGrado = grado || clase;
+            return { codigo, nombre, sucursal: '', direccion, departamento, municipio, zona: '', telefono: '', celular: '', fax: '', correo: '', codigo_actividad: '', clase, trabajadores, transporte: '', grado: safeGrado, tarifa: tarifa || digitacionTarifaForGrado(safeGrado), tipo_localizacion: '', contacto: '', cargo_contacto: '' };
+        });
+}
+
+function serializeDigitacionCentroAdicional(row = {}) {
+    return [
+        row.codigo || '',
+        row.nombre || '',
+        row.sucursal || '',
+        row.direccion || '',
+        row.departamento || '',
+        row.municipio || '',
+        row.zona || '',
+        onlyDigits(row.telefono || ''),
+        onlyDigits(row.celular || ''),
+        onlyDigits(row.fax || ''),
+        row.correo || '',
+        onlyDigits(row.codigo_actividad || ''),
+        digitacionRiskGrade(row.clase) || '',
+        onlyDigits(row.trabajadores || ''),
+        row.transporte || '',
+        digitacionRiskGrade(row.grado) || '',
+        row.tarifa || digitacionTarifaForGrado(row.grado),
+        onlyDigits(row.tipo_localizacion || ''),
+        row.contacto || '',
+        row.cargo_contacto || '',
+    ].map(value => String(value || '').trim()).join(' | ');
+}
+
+function getDigitacionCentroEditorValues() {
+    const row = {};
+    document.querySelectorAll('#digitacionCentroEditor [data-centro-field]').forEach(field => {
+        row[field.dataset.centroField] = field.value || '';
+    });
+    if (row.municipio && !row.departamento) {
+        row.departamento = findDepartmentByMunicipality(row.municipio) || row.departamento;
+    }
+    row.clase = digitacionRiskGrade(row.clase);
+    row.grado = digitacionRiskGrade(row.grado);
+    row.tarifa = digitacionTarifaForGrado(row.grado);
+    row.trabajadores = onlyDigits(row.trabajadores);
+    row.telefono = onlyDigits(row.telefono);
+    row.celular = onlyDigits(row.celular);
+    row.fax = onlyDigits(row.fax);
+    row.codigo_actividad = onlyDigits(row.codigo_actividad);
+    row.tipo_localizacion = onlyDigits(row.tipo_localizacion);
+    return row;
+}
+
+function setDigitacionCentroEditorValues(row = {}) {
+    populateCentroDepartmentSelect();
+    document.querySelectorAll('#digitacionCentroEditor [data-centro-field]').forEach(field => {
+        const key = field.dataset.centroField;
+        field.value = row[key] || '';
+    });
+    updateCentroMunicipalitySelect(row.municipio || '');
+}
+
+function isDigitacionCentroEditorOpen() {
+    const editor = document.getElementById('digitacionCentroEditor');
+    return Boolean(editor && !editor.classList.contains('hidden'));
+}
+
+function showDigitacionCentroEditor(editing = false) {
+    const editor = document.getElementById('digitacionCentroEditor');
+    const addBtn = document.getElementById('addCentroTrabajoBtn');
+    if (!editor) return;
+    populateCentroDepartmentSelect();
+    updateCentroMunicipalitySelect();
+    editor.classList.remove('hidden');
+    if (addBtn) addBtn.textContent = editing ? 'Actualizar centro' : 'Guardar centro';
+    getCentroField('codigo')?.focus();
+}
+
+function hideDigitacionCentroEditor() {
+    const editor = document.getElementById('digitacionCentroEditor');
+    const addBtn = document.getElementById('addCentroTrabajoBtn');
+    if (editor) editor.classList.add('hidden');
+    if (addBtn) addBtn.textContent = 'Agregar centro';
+}
+
+function clearDigitacionCentroEditor() {
+    setDigitacionCentroEditorValues({});
+    document.querySelectorAll('#digitacionCentroEditor [data-centro-field]').forEach(field => setCentroFieldError(field, ''));
+    updateCentroMunicipalitySelect('');
+    digitacionEditingCentroIndex = -1;
+    hideDigitacionCentroEditor();
+}
+
+function populateCentroDepartmentSelect() {
+    const select = document.querySelector('#digitacionCentroEditor [data-centro-field="departamento"]');
+    if (!select || select.dataset.loaded === '1') return;
+    const current = select.value;
+    select.innerHTML = '<option value="">Selecciona...</option>' + sortedDepartments()
+        .map(dept => `<option value="${escapeHtml(dept)}">${escapeHtml(dept)}</option>`)
+        .join('');
+    if (current) {
+        const dept = findDepartmentName(current);
+        if (dept) select.value = dept;
+    }
+    select.dataset.loaded = '1';
+}
+
+function updateCentroMunicipalitySelect(preferredValue = '') {
+    const departmentSelect = document.querySelector('#digitacionCentroEditor [data-centro-field="departamento"]');
+    const municipalitySelect = document.querySelector('#digitacionCentroEditor [data-centro-field="municipio"]');
+    if (!departmentSelect || !municipalitySelect) return;
+    const dept = findDepartmentName(departmentSelect.value);
+    const current = preferredValue || municipalitySelect.value;
+    if (!dept) {
+        municipalitySelect.innerHTML = '<option value="">Selecciona departamento...</option>';
+        municipalitySelect.disabled = true;
+        return;
+    }
+    municipalitySelect.disabled = false;
+    municipalitySelect.innerHTML = '<option value="">Selecciona...</option>' + (COLOMBIA_LOCATIONS[dept] || [])
+        .map(mun => `<option value="${escapeHtml(mun)}">${escapeHtml(mun)}</option>`)
+        .join('');
+    const normalized = findMunicipalityName(dept, current);
+    if (normalized) municipalitySelect.value = normalized;
+}
+
+function getCentroField(key) {
+    return document.querySelector(`#digitacionCentroEditor [data-centro-field="${key}"]`);
+}
+
+function getCentroFieldLabel(key) {
+    return getCentroField(key)?.closest('.field-row')?.querySelector('.field-label')?.textContent?.trim() || key;
+}
+
+function setCentroFieldError(field, message = '') {
+    if (!field) return;
+    const row = field.closest('.field-row') || field.parentElement;
+    field.classList.toggle('field-invalid', Boolean(message));
+    if (!row) return;
+    let error = row.querySelector('.field-error-msg');
+    if (message) {
+        if (!error) {
+            error = document.createElement('div');
+            error.className = 'field-error-msg';
+            row.appendChild(error);
+        }
+        error.textContent = message;
+    } else if (error) {
+        error.remove();
+    }
+}
+
+function validateDigitacionCentroEditorValue(key, row = getDigitacionCentroEditorValues()) {
+    const value = String(row[key] || '').trim();
+    const label = getCentroFieldLabel(key);
+    if (DIGITACION_CENTRO_REQUIRED_KEYS.includes(key) && !value) return `${label} es obligatorio.`;
+    if (!value) return '';
+    if (key === 'codigo' && !/^[0-9A-Za-z.-]{1,20}$/.test(value)) return `${label} debe ser un código válido.`;
+    if (['nombre', 'contacto', 'cargo_contacto'].includes(key) && !DIGITACION_ALPHA_RE.test(value)) return `${label} solo permite letras y espacios.`;
+    if (key === 'direccion' && value.length < 5) return `${label} es demasiado corta.`;
+    if (key === 'departamento' && !findDepartmentName(value)) return `${label} debe existir en la tabla de departamentos.`;
+    if (key === 'municipio') {
+        const dept = findDepartmentName(row.departamento);
+        return findMunicipalityName(dept, value) ? '' : `${label} debe pertenecer al departamento seleccionado.`;
+    }
+    if (key === 'zona' && !['urbana', 'rural', 'U', 'R'].includes(value)) return `${label} es obligatorio.`;
+    if (key === 'telefono' && !/^\d{10}$/.test(value)) return `${label} debe tener 10 dígitos.`;
+    if (key === 'celular' && value && !/^\d{10}$/.test(value)) return `${label} debe tener 10 dígitos.`;
+    if (key === 'correo' && value && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(value)) return `${label} debe tener un correo válido.`;
+    if (key === 'codigo_actividad') return digitacionActivityProfile(value) ? '' : `${label} no existe en el catálogo ARP/926.`;
+    if (key === 'clase' && !['1', '2', '3', '4', '5'].includes(digitacionRiskGrade(value))) return `${label} debe estar entre 1 y 5.`;
+    if (key === 'trabajadores' && !/^\d{1,6}$/.test(value)) return `${label} debe ser numérico.`;
+    if (key === 'transporte' && !value) return `${label} es obligatorio.`;
+    if (key === 'transporte' && !['S', 'N'].includes(value.toUpperCase())) return `${label} debe ser S o N.`;
+    if (key === 'grado') {
+        const grade = digitacionRiskGrade(value);
+        if (!['1', '2', '3', '4', '5'].includes(grade)) return `${label} debe estar entre 1 y 5.`;
+        const activityFirst = digitacionActivityCode(row.codigo_actividad).slice(0, 1);
+        if (activityFirst && activityFirst !== grade) return `${label} debe ser ${activityFirst} porque el código de actividad inicia en ${activityFirst}.`;
+    }
+    if (key === 'tarifa') {
+        const expected = digitacionTarifaForGrado(row.grado);
+        return !expected || String(value) === expected ? '' : `${label} debe ser ${expected}.`;
+    }
+    if (key === 'tipo_localizacion' && value && !/^\d{1,3}$/.test(value)) return `${label} debe ser numérico.`;
+    return '';
+}
+
+function validateDigitacionCentroEditor(editIndex = -1) {
+    const row = getDigitacionCentroEditorValues();
+    const errors = [];
+    document.querySelectorAll('#digitacionCentroEditor [data-centro-field]').forEach(field => {
+        const key = field.dataset.centroField;
+        const message = validateDigitacionCentroEditorValue(key, row);
+        setCentroFieldError(field, message);
+        if (message) errors.push({ key, message, field });
+    });
+    if (row.codigo) {
+        const existing = parseDigitacionCentrosAdicionales(getDigitacionField('sedes_adicionales')?.value || '');
+        if (existing.some((item, index) => index !== editIndex && String(item.codigo || '').trim() === row.codigo)) {
+            const field = getCentroField('codigo');
+            const message = 'Ya existe un centro con este código.';
+            setCentroFieldError(field, message);
+            errors.push({ key: 'codigo', message, field });
+        }
+    }
+    return { ok: !errors.length, errors, row };
+}
+
+function renderDigitacionCentrosAdicionales() {
+    const hidden = getDigitacionField('sedes_adicionales');
+    const list = document.getElementById('digitacionCentrosList');
+    if (!hidden || !list) return;
+    const rows = parseDigitacionCentrosAdicionales(hidden.value);
+    if (!rows.length) {
+        list.innerHTML = '<div class="digitacion-centros-empty">No hay centros adicionales registrados.</div>';
+        return;
+    }
+    list.innerHTML = rows.map((row, index) => `
+        <div class="digitacion-centro-row">
+          <div class="digitacion-centro-main">
+            <strong>${escapeHtml(row.codigo || `Centro ${index + 2}`)} · ${escapeHtml(row.nombre || 'Sin nombre')}</strong>
+            <span>${escapeHtml(row.sucursal || 'Sin sucursal')} · ${escapeHtml(row.direccion || 'Sin dirección')} · ${escapeHtml(row.municipio || '')}${row.departamento ? `, ${escapeHtml(row.departamento)}` : ''}</span>
+          </div>
+          <div class="digitacion-centro-meta">
+            <span>Clase ${escapeHtml(digitacionRiskGrade(row.clase) || '-')}</span>
+            <span>Grado ${escapeHtml(digitacionRiskGrade(row.grado) || '-')}</span>
+            <span>Tarifa ${escapeHtml(row.tarifa || digitacionTarifaForGrado(row.grado) || '-')}</span>
+            <span>Trab. ${escapeHtml(row.trabajadores || '-')}</span>
+            <button class="table-action-link" type="button" data-edit-centro="${index}">Editar</button>
+            <button class="table-action-link table-action-danger" type="button" data-remove-centro="${index}">Quitar</button>
+          </div>
+        </div>
+    `).join('');
+}
+
+function writeDigitacionCentrosAdicionales(rows = []) {
+    const hidden = getDigitacionField('sedes_adicionales');
+    if (!hidden) return;
+    hidden.value = rows.map(serializeDigitacionCentroAdicional).join('\n');
+    renderDigitacionCentrosAdicionales();
+    updateTrabajadorCentroOptions();
+    renderDigitacionTrabajadores();
+}
+
+function syncDigitacionCentroEditorTarifa() {
+    const grado = document.querySelector('#digitacionCentroEditor [data-centro-field="grado"]');
+    const tarifa = document.querySelector('#digitacionCentroEditor [data-centro-field="tarifa"]');
+    if (tarifa) tarifa.value = digitacionTarifaForGrado(grado?.value || '');
+}
+
+function initDigitacionCentrosTrabajo() {
+    const addBtn = document.getElementById('addCentroTrabajoBtn');
+    const hidden = getDigitacionField('sedes_adicionales');
+    if (!addBtn || !hidden) return;
+    populateCentroDepartmentSelect();
+    updateCentroMunicipalitySelect();
+    document.querySelectorAll('#digitacionCentroEditor [data-centro-field]').forEach(field => {
+        field.addEventListener('input', () => {
+            if (['codigo', 'trabajadores', 'telefono', 'celular', 'fax', 'codigo_actividad', 'tipo_localizacion'].includes(field.dataset.centroField)) {
+                const cleaned = field.value.replace(/\D/g, '');
+                if (field.value !== cleaned) field.value = cleaned;
+            }
+            if (field.dataset.centroField === 'transporte') {
+                const cleaned = field.value.toUpperCase().replace(/[^SN]/g, '').slice(0, 1);
+                if (field.value !== cleaned) field.value = cleaned;
+            }
+            if (field.dataset.centroField === 'grado') syncDigitacionCentroEditorTarifa();
+            if (field.dataset.centroField === 'codigo_actividad') {
+                const profile = digitacionActivityProfile(field.value);
+                const claseField = document.querySelector('#digitacionCentroEditor [data-centro-field="clase"]');
+                if (claseField && profile?.clase) claseField.value = profile.clase;
+            }
+            setCentroFieldError(field, '');
+        });
+        field.addEventListener('change', () => {
+            if (field.dataset.centroField === 'departamento') updateCentroMunicipalitySelect('');
+            if (field.dataset.centroField === 'grado') syncDigitacionCentroEditorTarifa();
+            if (field.dataset.centroField === 'codigo_actividad') {
+                const profile = digitacionActivityProfile(field.value);
+                const claseField = document.querySelector('#digitacionCentroEditor [data-centro-field="clase"]');
+                if (claseField && profile?.clase) claseField.value = profile.clase;
+            }
+            setCentroFieldError(field, validateDigitacionCentroEditorValue(field.dataset.centroField));
+        });
+        field.addEventListener('keydown', e => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            const fields = Array.from(document.querySelectorAll('#digitacionCentroEditor [data-centro-field]'));
+            const next = fields[fields.indexOf(field) + 1] || addBtn;
+            next.focus();
+        });
+    });
+    addBtn.addEventListener('click', () => {
+        if (!isDigitacionCentroEditorOpen()) {
+            setDigitacionCentroEditorValues({});
+            document.querySelectorAll('#digitacionCentroEditor [data-centro-field]').forEach(field => setCentroFieldError(field, ''));
+            digitacionEditingCentroIndex = -1;
+            showDigitacionCentroEditor(false);
+            return;
+        }
+        const rows = parseDigitacionCentrosAdicionales(hidden.value);
+        const editIndex = digitacionEditingCentroIndex;
+        const validation = validateDigitacionCentroEditor(editIndex);
+        if (!validation.ok) {
+            const first = validation.errors[0];
+            first?.field?.focus();
+            showToast(first?.message || 'Corrige los campos del centro de trabajo.', 'err');
+            return;
+        }
+        const row = validation.row;
+        if (editIndex >= 0 && editIndex < rows.length) {
+            rows[editIndex] = row;
+            showToast('Centro de trabajo actualizado', 'ok');
+        } else {
+            rows.push(row);
+            showToast('Centro de trabajo agregado', 'ok');
+        }
+        writeDigitacionCentrosAdicionales(rows);
+        clearDigitacionCentroEditor();
+        updateDigitacionStatus('Cambios sin guardar', 'warn');
+    });
+    document.getElementById('digitacionCentrosList')?.addEventListener('click', e => {
+        const rows = parseDigitacionCentrosAdicionales(hidden.value);
+        const editBtn = e.target.closest('[data-edit-centro]');
+        if (editBtn) {
+            const index = Number(editBtn.dataset.editCentro);
+            const row = rows[index];
+            if (!row) return;
+            digitacionEditingCentroIndex = index;
+            setDigitacionCentroEditorValues(row);
+            showDigitacionCentroEditor(true);
+            showToast('Centro cargado para modificar', 'ok');
+            return;
+        }
+        const removeBtn = e.target.closest('[data-remove-centro]');
+        if (!removeBtn) return;
+        const removeIndex = Number(removeBtn.dataset.removeCentro);
+        rows.splice(removeIndex, 1);
+        writeDigitacionCentrosAdicionales(rows);
+        if (digitacionEditingCentroIndex === removeIndex) clearDigitacionCentroEditor();
+        else if (digitacionEditingCentroIndex > removeIndex) digitacionEditingCentroIndex -= 1;
+        updateDigitacionStatus('Cambios sin guardar', 'warn');
+    });
+    renderDigitacionCentrosAdicionales();
+}
+
+function digitacionCentroOptions() {
+    const rows = [];
+    const codigoPrincipal = String(getDigitacionField('sede_codigo')?.value || '').trim();
+    const nombrePrincipal = String(getDigitacionField('sede_centro_trabajo_nombre')?.value || getDigitacionField('sede_nombre')?.value || '').trim() || 'Centro principal';
+    if (codigoPrincipal || nombrePrincipal) {
+        rows.push({
+            value: codigoPrincipal || '1',
+            label: `${codigoPrincipal || '1'} · ${nombrePrincipal}`,
+        });
+    }
+    parseDigitacionCentrosAdicionales(getDigitacionField('sedes_adicionales')?.value || '').forEach((row, index) => {
+        const value = row.codigo || String(index + 2);
+        rows.push({ value, label: `${value} · ${row.nombre || 'Centro adicional'}` });
+    });
+    return rows;
+}
+
+function updateTrabajadorCentroOptions() {
+    const select = getDigitacionField('trabajador_centro_trabajo');
+    if (!select) return;
+    const current = select.value || '';
+    const rows = digitacionCentroOptions();
+    setSelectOptions(select, rows, 500);
+    if (current && rows.some(row => row.value === current)) select.value = current;
+    if (!select.value && rows.length) select.value = rows[0].value;
+    renderDigitacionTrabajadores();
+}
+
+function getDigitacionWorkerFormValues() {
+    const row = {};
+    DIGITACION_WORKER_KEYS.forEach(key => {
+        row[key] = getDigitacionField(key)?.value || '';
+    });
+    if (row.fecha_nacimiento) row.fecha_nacimiento = formatDigitacionBirthDateInput(row.fecha_nacimiento);
+    row.edad = row.edad || digitacionAgeFromBirthDate(row.fecha_nacimiento);
+    row.documento_afiliado = onlyDigits(row.documento_afiliado);
+    row.cargo_actividad = normalizeDigitacionCargoCode(row.cargo_actividad);
+    return row;
+}
+
+function digitacionWorkerHasData(row = {}) {
+    return DIGITACION_WORKER_KEYS
+        .filter(key => key !== 'trabajador_centro_trabajo' && key !== 'edad')
+        .some(key => String(row[key] || '').trim());
+}
+
+function parseDigitacionTrabajadores(value = '') {
+    return String(value || '')
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map(line => {
+            const [
+                trabajador_centro_trabajo = '',
+                tipo_documento_afiliado = '',
+                documento_afiliado = '',
+                primer_apellido = '',
+                segundo_apellido = '',
+                primer_nombre = '',
+                segundo_nombre = '',
+                fecha_nacimiento = '',
+                edad = '',
+                genero = '',
+                tipo_cotizante = '',
+                ibc = '',
+                cargo_actividad = '',
+                eps = '',
+                afp = '',
+            ] = line.split('|').map(part => part.trim());
+            const normalizedBirth = formatDigitacionBirthDateInput(fecha_nacimiento);
+            return {
+                trabajador_centro_trabajo,
+                tipo_documento_afiliado,
+                documento_afiliado: onlyDigits(documento_afiliado),
+                primer_apellido,
+                segundo_apellido,
+                primer_nombre,
+                segundo_nombre,
+                fecha_nacimiento: normalizedBirth,
+                edad: onlyDigits(edad) || digitacionAgeFromBirthDate(normalizedBirth),
+                genero,
+                tipo_cotizante,
+                ibc,
+                cargo_actividad: normalizeDigitacionCargoCode(cargo_actividad),
+                eps,
+                afp,
+            };
+        });
+}
+
+function serializeDigitacionTrabajador(row = {}) {
+    return DIGITACION_WORKER_KEYS.map(key => {
+        const value = key === 'cargo_actividad' ? normalizeDigitacionCargoCode(row[key]) : row[key];
+        return String(value || '').trim();
+    }).join(' | ');
+}
+
+function digitacionWorkerRows(values = collectDigitacionData().values) {
+    const rows = parseDigitacionTrabajadores(values.trabajadores_adicionales || '');
+    const current = {};
+    DIGITACION_WORKER_KEYS.forEach(key => { current[key] = values[key] || ''; });
+    if (digitacionWorkerHasData(current)) {
+        current.fecha_nacimiento = formatDigitacionBirthDateInput(current.fecha_nacimiento);
+        current.edad = current.edad || digitacionAgeFromBirthDate(current.fecha_nacimiento);
+        rows.push(current);
+    }
+    return rows;
+}
+
+function digitacionWorkerIdentityKey(row = {}) {
+    const docType = normalizeDigitacionDocumentTypeForUi(row.tipo_documento_afiliado || '').toUpperCase();
+    const docNumber = onlyDigits(row.documento_afiliado || '');
+    return docType && docNumber ? `${docType}:${docNumber}` : '';
+}
+
+function validateDigitacionWorkerDuplicates(rows = []) {
+    const seen = new Map();
+    const errors = [];
+    rows.forEach((row, index) => {
+        const identity = digitacionWorkerIdentityKey(row);
+        if (!identity) return;
+        if (seen.has(identity)) {
+            const firstIndex = seen.get(identity);
+            errors.push({
+                key: 'trabajadores_adicionales',
+                section: 'novedades',
+                message: `Trabajador ${index + 1}: ya existe un trabajador con el mismo tipo y número de documento que el Trabajador ${firstIndex + 1}.`,
+            });
+            return;
+        }
+        seen.set(identity, index);
+    });
+    return errors;
+}
+
+function digitacionExpectedWorkersByCenter(values = collectDigitacionData().values) {
+    const centers = [];
+    const mainCode = String(values.sede_codigo || '1').trim() || '1';
+    const mainExpected = onlyDigits(values.sede_numero_trabajadores || '');
+    if (mainExpected) {
+        centers.push({
+            code: mainCode,
+            expected: Number(mainExpected),
+            key: 'sede_numero_trabajadores',
+            section: 'sedes',
+            label: `Centro ${mainCode}`,
+        });
+    }
+    parseDigitacionCentrosAdicionales(values.sedes_adicionales || '').forEach((row, index) => {
+        const code = String(row.codigo || index + 2).trim();
+        const expected = onlyDigits(row.trabajadores || '');
+        if (!code || !expected) return;
+        centers.push({
+            code,
+            expected: Number(expected),
+            key: 'sedes_adicionales',
+            section: 'sedes',
+            label: `Centro ${code}${row.nombre ? ` · ${row.nombre}` : ''}`,
+        });
+    });
+    return centers;
+}
+
+function validateDigitacionWorkerCenterCounts(values = collectDigitacionData().values) {
+    const actualByCenter = new Map();
+    digitacionWorkerRows(values)
+        .filter(digitacionWorkerHasData)
+        .forEach(row => {
+            const code = String(row.trabajador_centro_trabajo || '').trim();
+            if (!code) return;
+            actualByCenter.set(code, (actualByCenter.get(code) || 0) + 1);
+        });
+
+    return digitacionExpectedWorkersByCenter(values)
+        .filter(center => Number.isFinite(center.expected))
+        .filter(center => (actualByCenter.get(center.code) || 0) !== center.expected)
+        .map(center => {
+            const actual = actualByCenter.get(center.code) || 0;
+            return {
+                key: center.key,
+                section: center.section,
+                message: `${center.label}: Nro trabajadores declara ${center.expected}, pero hay ${actual} trabajador(es) registrados en la pestaña Trabajadores.`,
+            };
+        });
+}
+
+function validateDigitacionWorkerRow(row = {}, index = 1, existingRows = []) {
+    const errors = [];
+    const contractValues = collectDigitacionData().values;
+    const workerDoc = onlyDigits(row.documento_afiliado);
+    const employerDoc = onlyDigits(contractValues.nit);
+    for (const key of DIGITACION_REQUIRED.novedades) {
+        if (!String(row[key] || '').trim()) {
+            errors.push({ key: 'trabajadores_adicionales', section: 'novedades', message: `Trabajador ${index}: ${getDigitacionLabel(getDigitacionField(key))} es obligatorio.` });
+        }
+    }
+    if (workerDoc && employerDoc && workerDoc === employerDoc) {
+        errors.push({ key: 'documento_afiliado', section: 'novedades', message: `Trabajador ${index}: la cédula del trabajador no puede ser la misma que el número de identificación de la empresa.` });
+    }
+    const identity = digitacionWorkerIdentityKey(row);
+    if (identity && existingRows.some(item => digitacionWorkerIdentityKey(item) === identity)) {
+        errors.push({ key: 'documento_afiliado', section: 'novedades', message: `Trabajador ${index}: ya existe un trabajador con el mismo tipo y número de documento.` });
+    }
+    for (const key of DIGITACION_WORKER_KEYS) {
+        const value = row[key] || '';
+        if (!String(value).trim()) continue;
+        const message = validateDigitacionValue(key, value, row);
+        if (message) errors.push({ key: 'trabajadores_adicionales', section: 'novedades', message: `Trabajador ${index}: ${message}` });
+    }
+    return errors;
+}
+
+function renderDigitacionTrabajadores() {
+    const hidden = getDigitacionField('trabajadores_adicionales');
+    const list = document.getElementById('digitacionTrabajadoresList');
+    if (!hidden || !list) return;
+    const rows = parseDigitacionTrabajadores(hidden.value);
+    if (!rows.length) {
+        list.innerHTML = '<div class="digitacion-centros-empty">No hay trabajadores agregados al contrato.</div>';
+        return;
+    }
+    const centers = new Map(digitacionCentroOptions().map(row => [row.value, row.label]));
+    list.innerHTML = rows.map((row, index) => `
+        <div class="digitacion-centro-row">
+          <div class="digitacion-centro-main">
+            <strong>${escapeHtml(row.tipo_documento_afiliado || 'ID')} ${escapeHtml(row.documento_afiliado || '')} · ${escapeHtml([row.primer_nombre, row.segundo_nombre, row.primer_apellido, row.segundo_apellido].filter(Boolean).join(' ') || `Trabajador ${index + 1}`)}</strong>
+            <span>${escapeHtml(centers.get(row.trabajador_centro_trabajo) || row.trabajador_centro_trabajo || 'Sin centro')} · ${escapeHtml(row.eps || 'EPS pendiente')} · ${escapeHtml(row.afp || 'AFP pendiente')}</span>
+          </div>
+          <div class="digitacion-centro-meta">
+            <span>IBC ${escapeHtml(row.ibc || '-')}</span>
+            <span>Tipo ${escapeHtml(row.tipo_cotizante || '-')}</span>
+            <span>Cargo ${escapeHtml(digitacionCargoDisplayName(row.cargo_actividad) || row.cargo_actividad || '-')}</span>
+            <button class="table-action-link" type="button" data-edit-trabajador="${index}">Modificar</button>
+            <button class="table-action-link table-action-danger" type="button" data-remove-trabajador="${index}">Quitar</button>
+          </div>
+        </div>
+    `).join('');
+}
+
+function writeDigitacionTrabajadores(rows = []) {
+    const hidden = getDigitacionField('trabajadores_adicionales');
+    if (!hidden) return;
+    hidden.value = rows.map(serializeDigitacionTrabajador).join('\n');
+    renderDigitacionTrabajadores();
+}
+
+function setDigitacionWorkerFormValues(row = {}) {
+    DIGITACION_WORKER_KEYS.forEach(key => {
+        const field = getDigitacionField(key);
+        if (!field) return;
+        const aliases = {
+            cargo_actividad: ['cargo', 'cargo_trabajador'],
+            tipo_cotizante: ['afi_tipo', 'afi_tipo_cotizante'],
+            documento_afiliado: ['numero_id', 'nroid', 'nro_id'],
+            fecha_nacimiento: ['fec_nac'],
+        };
+        const aliasValue = (aliases[key] || []).map(alias => row[alias]).find(value => String(value || '').trim());
+        if (key === 'cargo_actividad') {
+            setDigitacionCargoFieldDisplay(field, row[key] || aliasValue || '');
+        } else {
+            field.value = row[key] || aliasValue || '';
+        }
+    });
+    updateTrabajadorCentroOptions();
+    const centro = getDigitacionField('trabajador_centro_trabajo');
+    if (centro && row.trabajador_centro_trabajo) centro.value = row.trabajador_centro_trabajo;
+    syncDigitacionWorkerAge();
+}
+
+function normalizeImportedWorkerRow(row = {}) {
+    const normalized = {};
+    DIGITACION_WORKER_KEYS.forEach(key => { normalized[key] = String(row[key] || '').trim(); });
+    normalized.documento_afiliado = onlyDigits(normalized.documento_afiliado);
+    normalized.fecha_nacimiento = formatDigitacionBirthDateInput(normalized.fecha_nacimiento);
+    normalized.edad = onlyDigits(normalized.edad) || digitacionAgeFromBirthDate(normalized.fecha_nacimiento);
+    normalized.tipo_documento_afiliado = normalizeDigitacionDocumentTypeForUi(normalized.tipo_documento_afiliado || '').toUpperCase();
+    normalized.genero = String(normalized.genero || '').trim().toUpperCase().slice(0, 1);
+    normalized.tipo_cotizante = onlyDigits(normalized.tipo_cotizante);
+    normalized.ibc = onlyDigits(normalized.ibc);
+    normalized.cargo_actividad = normalizeDigitacionCargoCode(normalizeImportedWorkerCatalogCode(normalized.cargo_actividad));
+    normalized.eps = normalizeImportedWorkerCatalogCode(normalized.eps);
+    normalized.afp = normalizeImportedWorkerCatalogCode(normalized.afp);
+    return normalized;
+}
+
+async function importDigitacionTrabajadoresExcel(file) {
+    const hidden = getDigitacionField('trabajadores_adicionales');
+    const status = document.getElementById('trabajadoresImportStatus');
+    if (!file || !hidden) return;
+    if (status) {
+        status.hidden = false;
+        status.textContent = `Leyendo ${file.name}...`;
+    }
+    const form = new FormData();
+    form.append('file', file);
+    try {
+        const response = await fetchWithRetry(`${API_URL}/api/digitacion/trabajadores/import-xlsx`, {
+            method: 'POST',
+            body: form,
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload?.detail || payload?.message || `HTTP ${response.status}`);
+        const existingRows = parseDigitacionTrabajadores(hidden.value);
+        const importedRows = (payload.rows || []).map(normalizeImportedWorkerRow).filter(digitacionWorkerHasData);
+        const mergedRows = [...existingRows, ...importedRows];
+        const errors = [];
+        importedRows.forEach((row, index) => {
+            validateDigitacionWorkerRow(row, existingRows.length + index + 1, [...existingRows, ...importedRows.slice(0, index)]).forEach(error => errors.push(error));
+        });
+        validateDigitacionWorkerDuplicates(mergedRows).forEach(error => errors.push(error));
+        if (errors.length) {
+            if (status) status.textContent = errors.slice(0, 5).map(error => error.message).join(' | ');
+            showToast(errors[0].message, 'err');
+            return;
+        }
+        writeDigitacionTrabajadores(mergedRows);
+        clearDigitacionWorkerForm();
+        updateDigitacionStatus('Cambios sin guardar', 'warn');
+        if (status) status.textContent = `${importedRows.length} trabajador(es) importado(s) desde ${payload.filename || file.name}.`;
+        showToast(`${importedRows.length} trabajador(es) importado(s)`, 'ok');
+    } catch (error) {
+        if (status) status.textContent = `No se pudo importar: ${error.message}`;
+        showToast(`No se pudo importar trabajadores: ${error.message}`, 'err');
+    }
+}
+
+function clearDigitacionWorkerForm() {
+    DIGITACION_WORKER_KEYS.forEach(key => {
+        const field = getDigitacionField(key);
+        if (!field || field.readOnly) return;
+        field.value = '';
+        if (key === 'cargo_actividad') delete field.dataset.catalogCode;
+        setDigitacionFieldError(field, '');
+    });
+    syncDigitacionWorkerAge();
+    updateTrabajadorCentroOptions();
+}
+
+function initDigitacionTrabajadores() {
+    const addBtn = document.getElementById('addTrabajadorBtn');
+    const importBtn = document.getElementById('importTrabajadoresBtn');
+    const importInput = document.getElementById('trabajadoresMasivoInput');
+    const hidden = getDigitacionField('trabajadores_adicionales');
+    if (!addBtn || !hidden) return;
+    if (addBtn.dataset.bound === '1') {
+        renderDigitacionTrabajadores();
+        return;
+    }
+    addBtn.dataset.bound = '1';
+    importBtn?.addEventListener('click', () => importInput?.click());
+    importInput?.addEventListener('change', () => {
+        const file = importInput.files?.[0];
+        importInput.value = '';
+        if (file) importDigitacionTrabajadoresExcel(file);
+    });
+    addBtn.addEventListener('click', () => {
+        const row = getDigitacionWorkerFormValues();
+        const rows = parseDigitacionTrabajadores(hidden.value);
+        DIGITACION_WORKER_KEYS.forEach(key => setDigitacionFieldError(getDigitacionField(key), ''));
+        const errors = validateDigitacionWorkerRow(row, rows.length + 1, rows);
+        if (errors.length) {
+            for (const error of errors) {
+                const match = DIGITACION_WORKER_KEYS.includes(error.key)
+                    ? error.key
+                    : DIGITACION_WORKER_KEYS.find(key => error.message.includes(getDigitacionLabel(getDigitacionField(key))));
+                if (match) setDigitacionFieldError(getDigitacionField(match), error.message.replace(/^Trabajador \d+:\s*/, ''));
+            }
+            showToast(errors[0].message, 'err');
+            return;
+        }
+        rows.push(row);
+        writeDigitacionTrabajadores(rows);
+        clearDigitacionWorkerForm();
+        updateDigitacionStatus('Cambios sin guardar', 'warn');
+        showToast(`Trabajador agregado (${rows.length})`, 'ok');
+    });
+    document.getElementById('digitacionTrabajadoresList')?.addEventListener('click', e => {
+        const editBtn = e.target.closest('[data-edit-trabajador]');
+        const rows = parseDigitacionTrabajadores(hidden.value);
+        if (editBtn) {
+            const index = Number(editBtn.dataset.editTrabajador);
+            const row = rows[index];
+            if (!row) return;
+            rows.splice(index, 1);
+            writeDigitacionTrabajadores(rows);
+            setDigitacionWorkerFormValues(row);
+            updateDigitacionStatus('Cambios sin guardar', 'warn');
+            showToast('Trabajador cargado para modificar', 'warn');
+            return;
+        }
+        const btn = e.target.closest('[data-remove-trabajador]');
+        if (!btn) return;
+        rows.splice(Number(btn.dataset.removeTrabajador), 1);
+        writeDigitacionTrabajadores(rows);
+        updateDigitacionStatus('Cambios sin guardar', 'warn');
+    });
+    renderDigitacionTrabajadores();
+}
+
+function populateDepartmentSelect(select) {
+    if (!select || select.dataset.loaded === '1') return;
+    const current = select.value;
+    select.innerHTML = '<option value="">Selecciona...</option>' + sortedDepartments()
+        .map(dept => `<option value="${escapeHtml(dept)}">${escapeHtml(dept)}</option>`)
+        .join('');
+    if (current) {
+        const dept = findDepartmentName(current);
+        if (dept) select.value = dept;
+    }
+    select.dataset.loaded = '1';
+}
+
+function updateMunicipalitySelect(departmentSelect, preferredValue = '') {
+    if (!departmentSelect) return;
+    const municipalitySelect = document.getElementById(departmentSelect.dataset.municipalityTarget || '');
+    if (!municipalitySelect) return;
+    const dept = findDepartmentName(departmentSelect.value);
+    const municipalityRows = dept
+        ? (COLOMBIA_LOCATIONS[dept] || []).map(mun => ({ dept, mun, label: mun }))
+        : allMunicipalityOptions().map(item => ({ ...item, label: `${item.mun} · ${item.dept}` }));
+    municipalitySelect.disabled = municipalityRows.length === 0;
+    municipalitySelect.innerHTML = municipalityRows.length
+        ? '<option value="">Selecciona...</option>' + municipalityRows.map(item => `<option value="${escapeHtml(item.mun)}">${escapeHtml(item.label)}</option>`).join('')
+        : '<option value="">Selecciona municipio...</option>';
+    const match = municipalityRows.find(item => normalizeCatalogText(item.mun) === normalizeCatalogText(preferredValue));
+    if (match) municipalitySelect.value = match.mun;
+}
+
+function syncDepartmentFromMunicipality(municipalitySelect) {
+    if (!municipalitySelect?.value) return;
+    const departmentSelect = document.getElementById(municipalitySelect.dataset.departmentSource || '');
+    if (!departmentSelect) return;
+    const currentDepartment = findDepartmentName(departmentSelect.value);
+    const selectedMunicipality = municipalitySelect.value;
+    const inferredDepartment = currentDepartment && findMunicipalityName(currentDepartment, selectedMunicipality)
+        ? currentDepartment
+        : findDepartmentByMunicipality(selectedMunicipality);
+    if (!inferredDepartment) return;
+    if (departmentSelect.value !== inferredDepartment) {
+        departmentSelect.value = inferredDepartment;
+        departmentSelect.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    updateMunicipalitySelect(departmentSelect, selectedMunicipality);
+}
+
+function setupDigitacionLocationSelects() {
+    document.querySelectorAll('.js-department-select').forEach(select => {
+        populateDepartmentSelect(select);
+        updateMunicipalitySelect(select, document.getElementById(select.dataset.municipalityTarget || '')?.value || '');
+    });
+}
+
+function getDigitacionLabel(field) {
+    return field?.closest('.field-row')?.querySelector('.field-label')?.textContent?.trim() || field?.dataset?.digKey || 'Campo';
+}
+
+function formatLocalIsoDate(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+    const yyyy = String(date.getFullYear());
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+}
+
+function parseDigitacionDate(value) {
+    const text = String(value || '').trim();
+    const candidates = [];
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+        candidates.push(text);
+    }
+    const digits = onlyDigits(text);
+    if (digits.length === 8) {
+        candidates.push(`${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`);
+        candidates.push(`${digits.slice(4, 8)}-${digits.slice(2, 4)}-${digits.slice(0, 2)}`);
+    }
+    for (const iso of Array.from(new Set(candidates))) {
+        const year = Number(iso.slice(0, 4));
+        const month = Number(iso.slice(5, 7));
+        const day = Number(iso.slice(8, 10));
+        const date = new Date(year, month - 1, day);
+        if (formatLocalIsoDate(date) === iso) return date;
+    }
+    return null;
+}
+
+function formatDigitacionBirthDateInput(value = '') {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    const parsed = parseDigitacionDate(text);
+    if (!parsed) return onlyDigits(text).slice(0, 8);
+    const iso = formatLocalIsoDate(parsed);
+    return `${iso.slice(8, 10)}${iso.slice(5, 7)}${iso.slice(0, 4)}`;
+}
+
+function todayIsoDate() {
+    const now = new Date();
+    return formatLocalIsoDate(now);
+}
+
+function applyDigitacionLegacyLimits() {
+    getDigitacionFields().forEach(field => {
+        const key = field.dataset.digKey || '';
+        const limit = AFILEGA_MDB_FIELD_LIMITS[key];
+        if (!limit || field.tagName === 'SELECT') return;
+        if (key === 'cargo_actividad') return;
+        field.setAttribute('maxlength', String(limit));
+    });
+    const camaraFecha = getDigitacionField('camara_fecha_constitucion');
+    if (camaraFecha) camaraFecha.max = todayIsoDate();
+}
+
+function shouldUppercaseDigitacionField(field) {
+    if (!field || field.tagName === 'SELECT') return false;
+    const key = field.dataset?.digKey || '';
+    const type = String(field.type || '').toLowerCase();
+    if (['date', 'hidden', 'number'].includes(type)) return false;
+    if (DIGITACION_DIGIT_ONLY_KEYS.has(key)) return false;
+    if (key === 'cargo_actividad') return false;
+    if (key === 'fecha_nacimiento' || key.startsWith('fecha_') || key.includes('_fecha_')) return false;
+    return true;
+}
+
+function normalizeDigitacionFieldDisplayValue(field, value = '') {
+    const text = String(value ?? '');
+    return shouldUppercaseDigitacionField(field) ? text.toUpperCase() : text;
+}
+
+function normalizeDigitacionFieldInPlace(field) {
+    if (!field || field.tagName === 'SELECT') return;
+    if (field.dataset?.digKey === 'cargo_actividad') {
+        const cargoCode = normalizeDigitacionCargoCode(field.value);
+        if (DIGITACION_CARGO_TRABAJADORES_CODES.has(cargoCode)) {
+            setDigitacionCargoFieldDisplay(field, cargoCode);
+        } else {
+            delete field.dataset.catalogCode;
+        }
+        return;
+    }
+    const normalized = normalizeDigitacionFieldDisplayValue(field, field.value);
+    if (field.value !== normalized) field.value = normalized;
+    const key = field.dataset?.digKey || '';
+    const limit = AFILEGA_MDB_FIELD_LIMITS[key];
+    if (limit && field.value.length > limit) field.value = field.value.slice(0, limit).trim();
+}
+
+function setDigitacionFieldError(field, message = '') {
+    if (!field) return;
+    const row = field.closest('.field-row') || field.parentElement;
+    field.classList.toggle('field-invalid', Boolean(message));
+    if (!row) return;
+    let error = row.querySelector('.field-error-msg');
+    if (message) {
+        if (!error) {
+            error = document.createElement('div');
+            error.className = 'field-error-msg';
+            row.appendChild(error);
+        }
+        error.textContent = message;
+    } else if (error) {
+        error.remove();
+    }
+}
+
+function getDigitacionFieldHint(key = '') {
+    return DIGITACION_FIELD_DOCUMENT_HINTS.find(item => item.keys.includes(key)) || {
+        keys: [],
+        types: ['formulario_afiliacion'],
+        label: 'Formulario',
+    };
+}
+
+function getDigitacionCaseId() {
+    const draft = readDigitacionDraft();
+    return draft.source_case_id || activeCasePayload?.id || activeCaseId || '';
+}
+
+async function ensureDigitacionCasePayload() {
+    const caseId = getDigitacionCaseId();
+    if (!caseId) return activeCasePayload || null;
+    if (activeCasePayload?.id === caseId) return activeCasePayload;
+    const cached = allCases.find(item => item.id === caseId);
+    if (cached?.analysis?.documents) {
+        activeCasePayload = cached;
+        return cached;
+    }
+    const response = await fetchWithRetry(caseApiUrl(caseId));
+    const payload = await response.json();
+    activeCasePayload = payload;
+    return payload;
+}
+
+function getDigitacionDocuments(payload) {
+    const meta = buildDocMetaMap(payload);
+    return buildDocItems(payload)
+        .filter(item => item.kind === 'document')
+        .map(item => ({
+            ...(meta[item.file] || {}),
+            filename: item.file,
+            document_type: item.type || meta[item.file]?.document_type || '',
+            document_label: item.label || getReviewTypeLabel(item.type) || meta[item.file]?.document_label || '',
+            display_filename: item.displayName || meta[item.file]?.display_filename || item.file,
+            classification_confidence: meta[item.file]?.classification_confidence,
+            ocr_quality_score: meta[item.file]?.ocr_quality_score,
+            ocr_text: meta[item.file]?.ocr_text || meta[item.file]?.text_preview || '',
+        }));
+}
+
+function digitacionSourceFilenameForKey(key, draft, payload) {
+    const source = draft?.prefill_sources?.[key] || payload?.analysis?.digitacion_prefill?.sources?.[key] || null;
+    if (!source || typeof source !== 'object') return '';
+    return source.filename || source.file || source.document || source.document_file || '';
+}
+
+function pickDigitacionDocument(key, payload, forcedFilename = '') {
+    const docs = getDigitacionDocuments(payload);
+    if (!docs.length) return null;
+    const draft = readDigitacionDraft();
+    const sourceFilename = forcedFilename || digitacionSourceFilenameForKey(key, draft, payload);
+    if (sourceFilename) {
+        const direct = docs.find(doc => (doc.filename || '') === sourceFilename);
+        if (direct) return direct;
+    }
+    const hint = getDigitacionFieldHint(key);
+    const byType = docs.find(doc => hint.types.includes(doc.document_type));
+    if (byType) return byType;
+    const byText = docs.find(doc => {
+        const haystack = normalizeText(`${doc.document_type || ''} ${doc.document_label || ''} ${doc.filename || ''}`);
+        return hint.types.some(type => haystack.includes(normalizeText(type)));
+    });
+    return byText || docs[0];
+}
+
+function digitacionFieldNeedles(key, field, doc) {
+    const value = String(field?.value || '').trim();
+    const label = getDigitacionLabel(field);
+    const needles = [];
+    if (value.length >= 3) needles.push(value);
+    const digits = onlyDigits(value);
+    if (digits.length >= 5) needles.push(digits);
+    const labelWords = normalizeText(label).split(/\s+/).filter(word => word.length >= 4).slice(0, 2);
+    needles.push(...labelWords);
+    const keyWords = String(key || '').split('_').filter(word => word.length >= 4).slice(0, 2);
+    needles.push(...keyWords);
+    if (doc?.document_type) needles.push(...String(doc.document_type).split('_').filter(word => word.length >= 5).slice(0, 2));
+    return [...new Set(needles.filter(Boolean))];
+}
+
+function buildDigitacionOcrSnippet(doc, field, key) {
+    const text = String(doc?.ocr_text || doc?.text_preview || '').replace(/\s+/g, ' ').trim();
+    if (!text) return 'Este soporte no tiene texto OCR disponible; revisa directamente la imagen.';
+    const needles = digitacionFieldNeedles(key, field, doc);
+    const normalizedText = normalizeText(text);
+    let index = -1;
+    let selected = '';
+    for (const needle of needles) {
+        const n = normalizeText(needle);
+        if (!n || n.length < 3) continue;
+        index = normalizedText.indexOf(n);
+        if (index >= 0) {
+            selected = text.slice(index, index + String(needle).length);
+            break;
+        }
+    }
+    const start = index >= 0 ? Math.max(0, index - 180) : 0;
+    const end = index >= 0 ? Math.min(text.length, index + 360) : Math.min(text.length, 520);
+    let snippet = `${start > 0 ? '... ' : ''}${text.slice(start, end)}${end < text.length ? ' ...' : ''}`;
+    if (selected) {
+        const escaped = selected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        snippet = snippet.replace(new RegExp(escaped, 'i'), match => `<mark>${escapeHtml(match)}</mark>`);
+        return snippet;
+    }
+    return escapeHtml(snippet);
+}
+
+function renderDigitacionDocumentStage(payload, doc) {
+    const stage = document.getElementById('digitacionDocumentStage');
+    if (!stage) return;
+    if (!payload?.id || !doc?.filename) {
+        if (digitacionDocumentStageKey === 'empty' || stage.dataset.stageKey === 'empty') return;
+        digitacionDocumentStageKey = 'empty';
+        stage.dataset.stageKey = 'empty';
+        stage.innerHTML = `
+            <div class="digitacion-empty-evidence">
+              <strong>Sin soporte cargado</strong>
+              <span>Abre un caso desde Bandeja con prellenado OCR para asociar documentos a los campos.</span>
+            </div>`;
+        return;
+    }
+    const filename = doc.filename || '';
+    const url = documentViewerUrl(payload.id, filename, true);
+    const title = doc.display_filename || doc.document_label || filename;
+    const stageKey = `${payload.id}::${filename}::${url}`;
+    const currentFrame = stage.querySelector('iframe,img');
+    const currentSrc = currentFrame?.getAttribute('src') || '';
+    if (digitacionDocumentStageKey === stageKey || stage.dataset.stageKey === stageKey || currentSrc === url) {
+        if (currentFrame && title) currentFrame.setAttribute('title', title);
+        digitacionDocumentStageKey = stageKey;
+        stage.dataset.stageKey = stageKey;
+        return;
+    }
+    digitacionDocumentStageKey = stageKey;
+    stage.dataset.stageKey = stageKey;
+    if (/\.pdf$/i.test(filename)) {
+        stage.innerHTML = `<iframe src="${escapeHtml(url)}" title="${escapeHtml(title)}"></iframe>`;
+    } else if (/\.(png|jpg|jpeg|webp|bmp|tif|tiff)$/i.test(filename)) {
+        stage.innerHTML = `<div style="padding:12px"><img src="${escapeHtml(url)}" alt="${escapeHtml(title)}"></div>`;
+    } else {
+        stage.innerHTML = `
+            <div class="digitacion-empty-evidence">
+              <strong>${escapeHtml(title)}</strong>
+              <span>Este soporte no es imagen/PDF. Usa Abrir para verlo o descargarlo.</span>
+            </div>`;
+    }
+}
+
+function renderDigitacionDocList(payload, activeFilename = '') {
+    const list = document.getElementById('digitacionDocList');
+    if (!list) return;
+    const docs = getDigitacionDocuments(payload);
+    if (!docs.length) {
+        list.innerHTML = '';
+        renderDigitacionDocSelect(null, '');
+        return;
+    }
+    list.innerHTML = docs.slice(0, 18).map(doc => {
+        const filename = doc.filename || '';
+        const label = doc.document_label || getReviewTypeLabel(doc.document_type) || filename;
+        return `<button class="digitacion-doc-chip${filename === activeFilename ? ' active' : ''}" data-digitacion-doc-file="${escapeHtml(filename)}" type="button" title="${escapeHtml(filename)}">${escapeHtml(label)}</button>`;
+    }).join('');
+    renderDigitacionDocSelect(payload, activeFilename);
+}
+
+function setDigitacionFocusedField(field) {
+    document.querySelectorAll('.field-row.digitacion-field-active').forEach(row => row.classList.remove('digitacion-field-active'));
+    field?.closest('.field-row')?.classList.add('digitacion-field-active');
+    digitacionActiveFieldKey = field?.dataset?.digKey || '';
+}
+
+function renderDigitacionDocSelect(payload, activeFilename = '') {
+    const select = document.getElementById('digitacionDocSelect');
+    if (!select) return;
+    const docs = getDigitacionDocuments(payload);
+    const current = digitacionEvidenceManualFile || '';
+    select.innerHTML = '<option value="">Automático por campo</option>' + docs.map((doc, index) => {
+        const filename = doc.filename || '';
+        const label = doc.document_label || getReviewTypeLabel(doc.document_type) || filename;
+        const name = doc.display_filename || filename;
+        return `<option value="${escapeHtml(filename)}">${String(index + 1).padStart(2, '0')} · ${escapeHtml(label)} · ${escapeHtml(name)}</option>`;
+    }).join('');
+    if (current && docs.some(doc => doc.filename === current)) {
+        select.value = current;
+    } else {
+        select.value = '';
+        digitacionEvidenceManualFile = '';
+    }
+    select.title = select.value || activeFilename || 'Automático por campo';
+}
+
+async function updateDigitacionEvidenceForField(field, forcedFilename = '', options = {}) {
+    setDigitacionFocusedField(field);
+    const title = document.getElementById('digitacionEvidenceTitle');
+    const sub = document.getElementById('digitacionEvidenceSub');
+    const confidence = document.getElementById('digitacionEvidenceConfidence');
+    const text = document.getElementById('digitacionOcrText');
+    const openBtn = document.getElementById('digitacionOpenDocBtn');
+    const key = field?.dataset?.digKey || '';
+    if (!field || !key) {
+        digitacionEvidenceDocFile = '';
+        renderDigitacionDocumentStage(null, null);
+        renderDigitacionDocList(null);
+        if (title) title.textContent = 'Soporte del campo';
+        if (sub) sub.textContent = 'Enfoca un campo para ver el documento asociado';
+        if (confidence) confidence.textContent = 'n/d';
+        if (text) text.textContent = 'No hay evidencia seleccionada.';
+        if (openBtn) openBtn.disabled = true;
+        return;
+    }
+    try {
+        const payload = await ensureDigitacionCasePayload();
+        const effectiveForcedFile = digitacionEvidenceManualFile || forcedFilename || '';
+        const docs = getDigitacionDocuments(payload);
+        const currentDoc = !effectiveForcedFile && digitacionEvidenceDocFile
+            ? docs.find(item => (item.filename || '') === digitacionEvidenceDocFile)
+            : null;
+        const doc = currentDoc || pickDigitacionDocument(key, payload, effectiveForcedFile);
+        digitacionEvidenceDocFile = doc?.filename || '';
+        const hint = getDigitacionFieldHint(key);
+        const source = readDigitacionDraft()?.prefill_sources?.[key] || payload?.analysis?.digitacion_prefill?.sources?.[key] || {};
+        if (title) title.textContent = getDigitacionLabel(field);
+        if (sub) sub.textContent = doc?.filename ? `${hint.label} · ${doc.display_filename || doc.filename}` : 'No encontré documento asociado en este caso';
+        if (confidence) {
+            const value = source?.confidence ?? doc?.classification_confidence ?? doc?.ocr_quality_score ?? '';
+            const numeric = Number(value);
+            confidence.textContent = Number.isFinite(numeric) ? `conf. ${Math.round(numeric * 100)}%` : 'n/d';
+        }
+        if (text) text.innerHTML = doc ? buildDigitacionOcrSnippet(doc, field, key) : 'No hay OCR para este campo.';
+        renderDigitacionDocumentStage(payload, doc);
+        renderDigitacionDocList(payload, doc?.filename || '');
+        if (openBtn) {
+            openBtn.disabled = !(payload?.id && doc?.filename);
+            openBtn.dataset.case = payload?.id || '';
+            openBtn.dataset.file = doc?.filename || '';
+            openBtn.dataset.title = getDigitacionLabel(field);
+            openBtn.dataset.displayName = doc?.display_filename || doc?.document_label || doc?.filename || '';
+        }
+    } catch (e) {
+        console.warn('digitacion evidence:', e);
+        if (sub) sub.textContent = 'No pude cargar la evidencia del caso activo';
+        if (text) text.textContent = e.message || 'Error cargando evidencia.';
+        if (openBtn) openBtn.disabled = true;
+    }
+}
+
+function sectionHasDigitacionData(section) {
+    const keys = DIGITACION_SECTION_KEYS[section] || [];
+    return keys.some(key => String(getDigitacionField(key)?.value || '').trim());
+}
+
+function digitacionIsTraslado(data = collectDigitacionData().values) {
+    return normalizeText(`${data.tipo_tramite || ''} ${data.tipo_afiliacion || ''}`).includes('traslado');
+}
+
+function digitacionIsContratista(data = collectDigitacionData().values) {
+    const text = normalizeText(`${data.tipo_afiliacion || ''} ${data.source_entry_type || ''}`);
+    return text.includes('contratista') || text.includes('independiente');
+}
+
+function digitacionRequiredKeysForSection(section, data = collectDigitacionData().values) {
+    if (section === 'novedades' && digitacionIsContratista(data)) return [];
+    const keys = [...(DIGITACION_REQUIRED[section] || [])];
+    if (section === 'novedades' && parseDigitacionTrabajadores(data.trabajadores_adicionales || '').length) {
+        return [];
+    }
+    if (section === 'afiliacion') {
+        keys.push(...(digitacionIsTraslado(data) ? DIGITACION_REQUIRED_TRASLADO_LEGACY : DIGITACION_REQUIRED_AFILIACION_LEGACY));
+    }
+    return Array.from(new Set(keys));
+}
+
+function shouldRequireDigitacionSection(section, mode) {
+    if (section === 'radicacion') return true;
+    if (section === 'afiliacion') return true;
+    if (section === 'novedades' && digitacionIsContratista()) return false;
+    if (mode === 'full' && section === 'sedes') return true;
+    if (mode === 'full' && section === 'novedades') return true;
+    if (mode === 'all') return sectionHasDigitacionData(section);
+    return digitacionActiveTab === section || sectionHasDigitacionData(section);
+}
+
+function digitacionDocumentNumberMessage(docTypeValue, documentValue, label) {
+    const docType = normalizeDigitacionDocumentTypeForUi(docTypeValue || '').toUpperCase();
+    const rawValue = String(documentValue || '').trim();
+    const digits = onlyDigits(rawValue);
+    if (!rawValue) return '';
+    if (digits !== rawValue) return `${label} debe ser numérico.`;
+    if (['CC', 'TI'].includes(docType)) {
+        return digits.length > 6 && digits.length < 11 && digits.length !== 9
+            ? ''
+            : `${label} debe tener 7, 8 o 10 dígitos cuando el tipo de documento es ${docType}.`;
+    }
+    if (docType === 'CE') {
+        return digits.length < 6
+            ? ''
+            : `${label} debe tener menos de 6 dígitos cuando el tipo de documento es CE.`;
+    }
+    return digits.length >= 5 && digits.length <= 15
+        ? ''
+        : `${label} debe tener entre 5 y 15 dígitos para el 926.`;
+}
+
+function validateDigitacionValue(key, value, data) {
+    const v = String(value || '').trim();
+    const label = getDigitacionLabel(getDigitacionField(key));
+    if (!v) return '';
+
+    const legacyLimit = AFILEGA_MDB_FIELD_LIMITS[key];
+    if (legacyLimit && v.length > legacyLimit) {
+        return `${label} excede el máximo permitido (${legacyLimit} caracteres).`;
+    }
+    const usesExternalCatalog = key === 'tipo_cotizante' && DIGITACION_TIPO_COTIZANTE_VALUES.size;
+    const mdbValueCatalog = !usesExternalCatalog && Array.isArray(AFILEGA_MDB_VALUE_CATALOGS?.[key]) ? AFILEGA_MDB_VALUE_CATALOGS[key] : [];
+    if (mdbValueCatalog.length && !mdbValueCatalog.map(item => String(item || '').trim().toUpperCase()).includes(v.toUpperCase())) {
+        return `${label} no existe en el catálogo de valores AFILEGA (${mdbValueCatalog.join(', ')}).`;
+    }
+
+    if (DIGITACION_ALPHA_KEYS.has(key) && !DIGITACION_ALPHA_RE.test(v)) {
+        return `${label} solo permite letras y espacios.`;
+    }
+    if (key === 'tipo_afiliacion') {
+        const clase = normalizeText(v).replace(/[^a-z0-9]+/g, ' ').trim();
+        return DIGITACION_CLASE_AFILIACION_VALUES.has(clase) ? '' : `${label} debe ser Primera vez, Traslado o Independiente - Contratista.`;
+    }
+    if (key === 'razon_social') {
+        return DIGITACION_ALNUM_RE.test(v) ? '' : `${label} debe ser alfanumérica.`;
+    }
+    if (key === 'sede_centro_trabajo_nombre') {
+        if (!DIGITACION_ALNUM_RE.test(v)) return `${label} debe ser alfanumérico.`;
+        return v.length <= 60 ? '' : `${label} no puede superar 60 caracteres.`;
+    }
+    if (key === 'genero') {
+        return ['F', 'M'].includes(v.toUpperCase()) ? '' : `${label} debe ser M o F.`;
+    }
+    if (key === 'eps') {
+        return isDigitacionEpsValid(v) ? '' : `${label} debe ser un código EPS válido del catálogo estandarizado.`;
+    }
+    if (key === 'afp') {
+        return isDigitacionAfpValid(v) ? '' : `${label} debe ser un código AFP válido del catálogo estandarizado.`;
+    }
+    if (key === 'cargo_actividad') {
+        return DIGITACION_CARGO_TRABAJADORES_CODES.has(normalizeDigitacionCargoCode(v)) ? '' : `${label} debe ser un código de cargo válido del catálogo de trabajadores.`;
+    }
+    if (key.includes('correo')) {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(v) ? '' : `${label} debe tener un correo válido.`;
+    }
+    if (key.includes('celular')) {
+        return /^\d{10}$/.test(v) ? '' : `${label} debe ser numérico de 10 dígitos.`;
+    }
+    if (key.includes('telefono') || key === 'sede_telefono') {
+        return /^\d{10}$/.test(v) ? '' : `${label} debe ser numérico de 10 dígitos.`;
+    }
+    if (key.includes('extension')) {
+        return /^\d{1,6}$/.test(v) ? '' : `${label} debe tener solo dígitos.`;
+    }
+    if (key === 'tipo_documento_afiliado') {
+        return ['CC', 'TI', 'PE', 'PT', 'CE'].includes(v.toUpperCase()) ? '' : `${label} debe ser CC, TI, PE, PT o CE.`;
+    }
+    if (['empleador_tipo_documento', 'rep_legal_tipo_documento', 'responsable_sede_principal_tipo_documento'].includes(key)) {
+        return DIGITACION_ALLOWED_WORKER_DOC_TYPES.has(normalizeDigitacionDocumentTypeForUi(v)) ? '' : `${label} no es válido según el catálogo AFILEGA.`;
+    }
+    if (key === 'trabajador_centro_trabajo') {
+        return digitacionCentroOptions().some(row => row.value === v) ? '' : `${label} debe corresponder a un centro de trabajo registrado.`;
+    }
+    if (key === 'fecha_nacimiento') {
+        return /^\d{8}$/.test(v) && parseDigitacionDate(v) ? '' : `${label} debe ser numérica en formato DDMMAAAA.`;
+    }
+    if (key === 'camara_fecha_constitucion') {
+        const parsed = parseDigitacionDate(v);
+        if (!parsed) return `${label} debe ser una fecha válida.`;
+        return formatLocalIsoDate(parsed) <= todayIsoDate()
+            ? ''
+            : `${label} no puede ser mayor a la fecha actual.`;
+    }
+    if (key === 'nit') {
+        const digits = onlyDigits(v);
+        if (digits !== v) return `${label} debe ser numérico.`;
+        const tipoDoc = normalizeDigitacionDocumentTypeForUi(data?.empleador_tipo_documento || '');
+        if (tipoDoc === 'NIT' && digits.length !== 9) {
+            return `${label} debe tener 9 dígitos cuando el Tipo Id es NIT.`;
+        }
+        if (tipoDoc === 'CC' && !(digits.length > 6 && digits.length < 11 && digits.length !== 9)) {
+            return `${label} debe tener 7, 8 o 10 dígitos cuando el Tipo Id es CC.`;
+        }
+        return /^\d{5,20}$/.test(digits) ? '' : `${label} debe tener entre 5 y 20 dígitos.`;
+    }
+    if (key === 'nit_dv') {
+        if (!/^\d$/.test(v)) return `${label} debe ser un solo dígito.`;
+        const expected = calculateAfilegaNitDv(data.nit || '');
+        return expected && v === expected ? '' : `${label} no coincide con el cálculo AFILEGA; esperado ${expected || 'n/d'}.`;
+    }
+    if (key === 'tipo_cotizante') {
+        const allowed = DIGITACION_TIPO_COTIZANTE_VALUES.size ? DIGITACION_TIPO_COTIZANTE_VALUES : AFILEGA_MDB_ALLOWED_TIPO_COTIZANTE;
+        return allowed.has(v) ? '' : `${label} debe existir en la tabla de tipo cotizante de trabajadores.`;
+    }
+    if (key === 'subtipo_cotizante') {
+        return v === AFILEGA_MDB_DEFAULT_SUBTIPO_COTIZANTE ? '' : `${label} debe ser ${AFILEGA_MDB_DEFAULT_SUBTIPO_COTIZANTE} según reglas AFILEGA.`;
+    }
+    if (key === 'tipo_novedad') {
+        return AFILEGA_MDB_ALLOWED_NOVEDAD_CODES.has(v) ? '' : `${label} debe usar código 00 u 08 según reglas de novedades.`;
+    }
+    if (key === 'novedad_estado') {
+        return AFILEGA_MDB_ALLOWED_NOVEDAD_ESTADO.has(v) ? '' : `${label} debe ser 1 según Plano_Nov_Tmp.`;
+    }
+    if (key === 'novedad_autoliquidacion') {
+        return AFILEGA_MDB_ALLOWED_NOVEDAD_AUTOLIQUIDACION.has(v.toUpperCase()) ? '' : `${label} debe ser N según Plano_Nov_Tmp.`;
+    }
+    if (key === 'novedad_origen') {
+        return AFILEGA_MDB_ALLOWED_NOVEDAD_ORIGEN.has(v.toUpperCase()) ? '' : `${label} debe ser C según Plano_Nov_Tmp.`;
+    }
+    if (key === 'empresa_zona_localizacion') {
+        return AFILEGA_MDB_ALLOWED_ZONA.has(v.toUpperCase()) ? '' : `${label} debe ser U o R según reglas AFILEGA.`;
+    }
+    if (key === 'empresa_vinculador_laboral') {
+        return DIGITACION_VINCULADOR_LABORAL_VALUES.has(v) ? '' : `${label} debe existir en la tabla de vinculador laboral del contratante.`;
+    }
+    if (DIGITACION_SN_KEYS.has(key)) {
+        return AFILEGA_MDB_ALLOWED_BOOLEAN_SN.has(v.toUpperCase()) ? '' : `${label} debe ser S o N según reglas AFILEGA.`;
+    }
+    if ([
+        'empresa_forma_pago',
+        'empresa_tipo_aportante',
+        'empresa_clase_aportante',
+        'empresa_vinculador_laboral',
+        'empresa_regimen',
+        'empresa_naturaleza',
+        'empresa_clase_sociedad',
+        'empresa_tamano',
+        'empresa_grupo',
+        'empresa_tipo_localizacion',
+        'sede_tipo_localizacion',
+        'novedad_dias',
+    ].includes(key)) {
+        return /^\d{1,3}$/.test(v) ? '' : `${label} debe ser código numérico de máximo 3 dígitos según reglas AFILEGA.`;
+    }
+    if ([
+        'a_numero_sedes',
+        'a_numero_centros_trabajo',
+        'a_numero_inicial_trabajadores_estudiantes',
+        'sede_numero_trabajadores',
+        'b_numero_sedes',
+        'b_numero_centros_trabajo',
+        'b_numero_total_trabajadores_estudiantes',
+    ].includes(key)) {
+        return /^\d{1,6}$/.test(v) ? '' : `${label} debe ser un conteo numérico válido.`;
+    }
+    if (key === 'sede_numero_trabajadores' && data.a_numero_inicial_trabajadores_estudiantes && String(v) !== String(data.a_numero_inicial_trabajadores_estudiantes)) {
+        return `${label} debe coincidir con A trabajadores iniciales.`;
+    }
+    if (key === 'sede_tarifa') {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n < 0) return `${label} debe ser una tarifa numérica válida.`;
+        const expected = digitacionTarifaForGrado(data.sede_grado);
+        if (expected && String(v) !== expected) return `${label} debe ser ${expected} para grado de riesgo ${digitacionRiskGrade(data.sede_grado)}.`;
+        return '';
+    }
+    if (key === 'sede_grado') {
+        const grade = digitacionRiskGrade(v);
+        if (!['1', '2', '3', '4', '5'].includes(grade)) return `${label} debe ser un grado de riesgo entre 1 y 5.`;
+        const activityFirst = digitacionActivityCode(data?.sede_codigo_actividad || '').slice(0, 1);
+        if (activityFirst && activityFirst !== grade) {
+            return `${label} debe ser ${activityFirst} porque el código de actividad económica inicia en ${activityFirst}.`;
+        }
+        return '';
+    }
+    if (key === 'estado_cuenta_empleador') {
+        return ['al dia', 'al día', 'en mora', 'acuerdo de pago', 'incumplimiento de acuerdo de pago'].includes(normalizeText(v)) ? '' : `${label} no es válido para traslado.`;
+    }
+    if (key.includes('fecha')) {
+        return parseDigitacionDate(v) ? '' : `${label} debe ser una fecha válida.`;
+    }
+    if (DIGITACION_MONEY_KEYS.has(key)) {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n < 0 || (['ibc', 'nuevo_ibc', 'valor_total_contrato', 'valor_mensual_contrato'].includes(key) && n <= 0)) return `${label} debe ser un valor numérico válido.`;
+        const smmlv = digitacionSmmlvForData(data);
+        const allowsBelowSmmlv = key === 'ibc' && onlyDigits(data?.tipo_cotizante || '') === '51';
+        if ((key === 'ibc' || key === 'nuevo_ibc') && !allowsBelowSmmlv && smmlv && n < smmlv) return `${label} no puede ser inferior al SMMLV configurado (${smmlv}).`;
+        if ((key === 'ibc' || key === 'nuevo_ibc') && smmlv && n > smmlv * 25) return `${label} no puede superar 25 SMMLV configurados (${smmlv * 25}).`;
+        return '';
+    }
+    if (key.includes('clase_riesgo')) {
+        return ['1', '2', '3', '4', '5'].includes(digitacionRiskGrade(v)) ? '' : `${label} debe estar entre 1 y 5.`;
+    }
+    if (key === 'camara_codigo_actividad') {
+        if (!/^\d{4,7}$/.test(v)) return `${label} debe tener un código numérico de la tabla de Cámara de Comercio.`;
+        return digitacionCamaraActivityProfile(v) ? '' : `${label} no existe en la tabla de actividad de Cámara de Comercio.`;
+    }
+    if (key.includes('codigo_actividad')) {
+        const activityCode = digitacionActivityCode(v);
+        if (!/^\d{7}$/.test(activityCode)) return `${label} debe tener 7 dígitos para el catálogo ARP/926.`;
+        return digitacionActivityProfile(v) ? '' : `${label} no existe en el catálogo de actividad económica ARP usado por el 926.`;
+    }
+    if (key === 'nuevo_codigo_ocupacion') {
+        return /^\d{4,10}$/.test(v) ? '' : `${label} debe ser un código numérico CUOC/ocupación válido.`;
+    }
+    if (key === 'edad') {
+        return /^\d{1,3}$/.test(v) ? '' : `${label} se calcula con la fecha de nacimiento.`;
+    }
+    if (key === 'documento_afiliado') {
+        return digitacionDocumentNumberMessage(data?.tipo_documento_afiliado, v, label);
+    }
+    if (key === 'nit' || key === 'rep_legal_numero_documento' || key === 'responsable_sede_principal_numero_documento') {
+        const digits = onlyDigits(v);
+        const max = key === 'nit' ? 15 : 15;
+        return digits === v && digits.length >= 5 && digits.length <= max ? '' : `${label} debe ser numérico y tener entre 5 y ${max} dígitos para el 926.`;
+    }
+    if (key === 'sede_codigo') {
+        return /^\d{1,6}$/.test(v) ? '' : `${label} debe ser numérico, máximo 6 dígitos.`;
+    }
+    if (key.includes('municipio')) {
+        const sourceId = getDigitacionField(key)?.dataset?.departmentSource;
+        const departmentField = sourceId ? document.getElementById(sourceId) : null;
+        const dept = findDepartmentName(departmentField?.value || '');
+        return findMunicipalityName(dept, v) ? '' : `${label} debe pertenecer al departamento seleccionado.`;
+    }
+    if (key.includes('departamento')) {
+        return findDepartmentName(v) ? '' : `${label} debe existir en la tabla de departamentos.`;
+    }
+    if (key === 'razon_social') {
+        return v.length >= 2 ? '' : `${label} debe tener al menos 2 caracteres.`;
+    }
+    if (key === 'sedes_adicionales') {
+        const rows = parseDigitacionCentrosAdicionales(v);
+        for (const [index, row] of rows.entries()) {
+            const { codigo, nombre, sucursal, direccion, municipio, departamento, zona, telefono, celular, correo, codigo_actividad, clase, trabajadores, transporte, grado, tarifa, contacto, cargo_contacto } = row;
+            if (!/^[0-9A-Za-z.-]{1,20}$/.test(codigo)) return `Sede adicional línea ${index + 1}: código inválido.`;
+            if (!DIGITACION_ALPHA_RE.test(nombre)) return `Sede adicional línea ${index + 1}: nombre solo permite letras y espacios.`;
+            if (!sucursal) return `Sede adicional línea ${index + 1}: sucursal es obligatoria.`;
+            if (direccion.length < 5) return `Sede adicional línea ${index + 1}: dirección demasiado corta.`;
+            const dept = findDepartmentName(departamento);
+            if (!dept) return `Sede adicional línea ${index + 1}: departamento no existe en la tabla.`;
+            if (!findMunicipalityName(dept, municipio)) return `Sede adicional línea ${index + 1}: municipio no pertenece al departamento.`;
+            if (!['urbana', 'rural', 'U', 'R'].includes(String(zona || '').trim())) return `Sede adicional línea ${index + 1}: zona es obligatoria.`;
+            if (!/^\d{10}$/.test(telefono)) return `Sede adicional línea ${index + 1}: teléfono debe tener 10 dígitos.`;
+            if (celular && !/^\d{10}$/.test(celular)) return `Sede adicional línea ${index + 1}: celular debe tener 10 dígitos.`;
+            if (correo && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(correo)) return `Sede adicional línea ${index + 1}: correo no es válido.`;
+            if (!digitacionActivityProfile(codigo_actividad)) return `Sede adicional línea ${index + 1}: código de actividad no existe en el catálogo ARP/926.`;
+            if (!['1', '2', '3', '4', '5'].includes(digitacionRiskGrade(clase))) return `Centro adicional línea ${index + 1}: clase de riesgo debe estar entre 1 y 5.`;
+            if (!/^\d{1,6}$/.test(trabajadores)) return `Centro adicional línea ${index + 1}: número de trabajadores debe ser numérico.`;
+            if (!transporte) return `Centro adicional línea ${index + 1}: transporte es obligatorio.`;
+            if (!['S', 'N'].includes(transporte.toUpperCase())) return `Centro adicional línea ${index + 1}: transporte debe ser S o N.`;
+            if (!['1', '2', '3', '4', '5'].includes(digitacionRiskGrade(grado))) return `Centro adicional línea ${index + 1}: grado de riesgo debe estar entre 1 y 5.`;
+            const activityFirst = digitacionActivityCode(codigo_actividad).slice(0, 1);
+            if (activityFirst && activityFirst !== digitacionRiskGrade(grado)) return `Centro adicional línea ${index + 1}: grado de riesgo debe ser ${activityFirst} porque el código de actividad inicia en ${activityFirst}.`;
+            const expected = digitacionTarifaForGrado(grado);
+            if (expected && tarifa && String(tarifa) !== expected) return `Centro adicional línea ${index + 1}: tarifa debe ser ${expected} para grado ${digitacionRiskGrade(grado)}.`;
+            if (!DIGITACION_ALPHA_RE.test(contacto)) return `Centro adicional línea ${index + 1}: contacto solo permite letras y espacios.`;
+            if (!DIGITACION_ALPHA_RE.test(cargo_contacto)) return `Centro adicional línea ${index + 1}: cargo contacto solo permite letras y espacios.`;
+        }
+        return '';
+    }
+    return '';
+}
+
+function buildDigitacionLegacyMdbPayload(values = {}) {
+    const deptEmpresa = departmentLegacyCode(values.departamento_empresa);
+    const munEmpresa = municipalityLegacyCode(values.municipio_empresa);
+    const deptSede = departmentLegacyCode(values.sede_departamento);
+    const munSede = municipalityLegacyCode(values.sede_municipio);
+    const trabajadores = digitacionWorkerRows(values).map(row => ({
+        afi_tipoid: row.tipo_documento_afiliado || '',
+        afi_nroid: onlyDigits(row.documento_afiliado),
+        afi_centro_trabajo: row.trabajador_centro_trabajo || '',
+        afi_apellido1: row.primer_apellido || '',
+        afi_apellido2: row.segundo_apellido || '',
+        afi_nombre1: row.primer_nombre || '',
+        afi_nombre2: row.segundo_nombre || '',
+        afi_fecha_nacimiento: row.fecha_nacimiento || '',
+        afi_edad: row.edad || digitacionAgeFromBirthDate(row.fecha_nacimiento),
+        afi_genero: row.genero || '',
+        afi_ibc: row.ibc || '',
+        afi_cod_cargo: row.cargo_actividad || '',
+        afi_cod_eps: row.eps || '',
+        afi_cod_afp: row.afp || '',
+        afi_tipo_cotizante: row.tipo_cotizante || '',
+        afi_subtipo_cotizante: row.subtipo_cotizante || values.subtipo_cotizante || '',
+    }));
+    const trabajadorPrincipal = trabajadores[0] || {};
+    return {
+        source: `Afiliaciones.mdb v${AFILEGA_MDB_VERSION}`,
+        formulario: {
+            tipo_tramite: values.tipo_tramite || '',
+            tipo_afiliacion: values.tipo_afiliacion || '',
+            numero_radicacion: values.numero_radicacion || '',
+            fecha_radicacion: values.fecha_radicacion || '',
+            fecha_inicio_cobertura: values.fecha_inicio_cobertura || '',
+            tipo_persona: values.tipo_persona || '',
+            a_numero_sedes: onlyDigits(values.a_numero_sedes),
+            a_numero_centros_trabajo: onlyDigits(values.a_numero_centros_trabajo),
+            a_numero_inicial_trabajadores_estudiantes: onlyDigits(values.a_numero_inicial_trabajadores_estudiantes),
+            a_valor_total_nomina: values.a_valor_total_nomina || '',
+            b_numero_sedes: onlyDigits(values.b_numero_sedes),
+            b_numero_centros_trabajo: onlyDigits(values.b_numero_centros_trabajo),
+            b_numero_total_trabajadores_estudiantes: onlyDigits(values.b_numero_total_trabajadores_estudiantes),
+            b_monto_total_cotizacion: values.b_monto_total_cotizacion || '',
+            estado_cuenta_empleador: values.estado_cuenta_empleador || '',
+        },
+        empresa: {
+            emp_tipoid: normalizeDigitacionDocumentTypeForLegacy(values.empleador_tipo_documento || 'NIT'),
+            emp_nit: onlyDigits(values.nit),
+            emp_digito: values.nit_dv || calculateAfilegaNitDv(values.nit),
+            emp_razonsocial: values.razon_social || '',
+            emp_departamento: deptEmpresa,
+            emp_ciudad: munEmpresa,
+            emp_direccion: values.direccion_empresa || '',
+            emp_email: values.correo_empresa || '',
+            emp_actividad: onlyDigits(values.codigo_actividad_economica),
+            emp_clase: digitacionRiskNumber(values.clase_riesgo_empresa),
+            emp_forma_pago: values.empresa_forma_pago || '',
+            emp_aportante: values.empresa_tipo_aportante || '',
+            emp_vinculador: values.empresa_vinculador_laboral || '',
+            emp_regimen: values.empresa_regimen || '',
+            emp_cod_naturaleza: values.empresa_naturaleza || '',
+            emp_cod_clase_soc: values.empresa_clase_sociedad || '',
+            emp_cod_tam_empresa: values.empresa_tamano || '',
+            emp_cod_grupo_emp: values.empresa_grupo || '',
+            emp_cod_tipo_loc: values.empresa_tipo_localizacion || '',
+            emp_cod_zona_loc: values.empresa_zona_localizacion || '',
+            emp_pyme: values.empresa_pyme || '',
+            emp_olcsa: values.empresa_olcsa || '',
+            bln_contratante: values.empresa_contratante || '',
+            emp_arp: values.empresa_arl_anterior || '',
+        },
+        representante_legal: {
+            rep_legal_nombre_completo: values.rep_legal_nombre_completo || '',
+            rep_legal_tipo_documento: values.rep_legal_tipo_documento || '',
+            rep_legal_numero_documento: onlyDigits(values.rep_legal_numero_documento),
+            rep_legal_correo: values.rep_legal_correo || '',
+        },
+        centro_trabajo: {
+            cen_codigo: values.sede_codigo || '',
+            cen_nombre: values.sede_centro_trabajo_nombre || values.sede_nombre || '',
+            cen_departamento: deptSede,
+            cen_ciudad: munSede,
+            cen_direccion: values.sede_direccion || '',
+            cen_telefono: onlyDigits(values.sede_telefono),
+            cen_fax: onlyDigits(values.sede_fax),
+            cen_email: values.sede_correo || '',
+            cen_transporte: values.sede_transporte || '',
+            cen_clase: digitacionRiskNumber(values.sede_clase_riesgo),
+            cen_grado: values.sede_grado || '',
+            cen_tarifa: values.sede_tarifa || '',
+            cen_actividad: onlyDigits(values.sede_codigo_actividad),
+            cen_cod_tipo_loc: values.sede_tipo_localizacion || '',
+            cen_zona: values.sede_zona === 'urbana' ? 'U' : values.sede_zona === 'rural' ? 'R' : values.sede_zona || '',
+            cen_contacto: values.sede_contacto || '',
+            cen_cargo_contacto: values.sede_cargo_contacto || '',
+        },
+        centros_trabajo_adicionales: parseDigitacionCentrosAdicionales(values.sedes_adicionales),
+        responsable_sede_principal: {
+            responsable_sede_principal_nombre_completo: values.responsable_sede_principal_nombre_completo || '',
+            responsable_sede_principal_tipo_documento: values.responsable_sede_principal_tipo_documento || '',
+            responsable_sede_principal_numero_documento: onlyDigits(values.responsable_sede_principal_numero_documento),
+        },
+        trabajador: {
+            afi_tipoid: trabajadorPrincipal.afi_tipoid || '',
+            afi_nroid: trabajadorPrincipal.afi_nroid || '',
+            afi_centro_trabajo: trabajadorPrincipal.afi_centro_trabajo || '',
+            afi_apellido1: trabajadorPrincipal.afi_apellido1 || '',
+            afi_apellido2: trabajadorPrincipal.afi_apellido2 || '',
+            afi_nombre1: trabajadorPrincipal.afi_nombre1 || '',
+            afi_nombre2: trabajadorPrincipal.afi_nombre2 || '',
+            afi_fecha_nacimiento: trabajadorPrincipal.afi_fecha_nacimiento || '',
+            afi_edad: trabajadorPrincipal.afi_edad || '',
+            afi_genero: trabajadorPrincipal.afi_genero || '',
+            afi_ibc: trabajadorPrincipal.afi_ibc || '',
+            afi_cod_cargo: trabajadorPrincipal.afi_cod_cargo || '',
+            afi_cod_eps: trabajadorPrincipal.afi_cod_eps || '',
+            afi_cod_afp: trabajadorPrincipal.afi_cod_afp || '',
+            afi_tipo_cotizante: trabajadorPrincipal.afi_tipo_cotizante || '',
+            afi_subtipo_cotizante: trabajadorPrincipal.afi_subtipo_cotizante || '',
+        },
+        trabajadores,
+        contrato: {
+            numero_contrato: values.numero_contrato || '',
+            tipo_contrato: values.tipo_contrato || '',
+            fecha_inicio_contrato: values.fecha_inicio_contrato || '',
+            fecha_fin_contrato: values.fecha_fin_contrato || '',
+            valor_total_contrato: values.valor_total_contrato || '',
+            valor_mensual_contrato: values.valor_mensual_contrato || '',
+        },
+        novedad: {
+            cod_tipo_novedad_trabajador: values.tipo_novedad || '',
+            fec_inicio: values.fecha_novedad_inicio || '',
+            fec_final: values.fecha_novedad_fin || '',
+            arl_anterior: values.arl_anterior || '',
+            nuevo_ibc: values.nuevo_ibc || '',
+            nuevo_centro_trabajo: values.nuevo_centro_trabajo || '',
+            nuevo_codigo_ocupacion: onlyDigits(values.nuevo_codigo_ocupacion),
+            novedad_contrato: values.novedad_contrato || '',
+            num_dias: values.novedad_dias || '',
+            cod_estado_novedad: values.novedad_estado || '',
+            bln_autoliquidacion: values.novedad_autoliquidacion || '',
+            valor_anterior: values.novedad_valor_anterior || '',
+            valor_nuevo: values.novedad_valor_nuevo || '',
+            traslado: values.novedad_traslado || '',
+            origen: values.novedad_origen || '',
+            observaciones: values.novedad_observaciones || '',
+        },
+    };
+}
+
+function validateDigitacionForm(mode = 'active') {
+    const data = collectDigitacionData().values;
+    const errors = [];
+    getDigitacionFields().forEach(field => setDigitacionFieldError(field, ''));
+
+    for (const section of Object.keys(DIGITACION_REQUIRED)) {
+        if (!shouldRequireDigitacionSection(section, mode)) continue;
+        for (const key of digitacionRequiredKeysForSection(section, data)) {
+            const field = getDigitacionField(key);
+            if (!field) continue;
+            if (!String(field.value || '').trim()) {
+                const message = `${getDigitacionLabel(field)} es obligatorio.`;
+                setDigitacionFieldError(field, message);
+                errors.push({ key, section, message });
+            }
+        }
+    }
+
+    for (const field of getDigitacionFields()) {
+        const key = field.dataset.digKey;
+        const message = validateDigitacionValue(key, field.value, data);
+        if (message) {
+            setDigitacionFieldError(field, message);
+            errors.push({ key, section: field.closest('[data-digitacion-panel]')?.dataset?.digitacionPanel || '', message });
+        }
+    }
+
+    const workerRows = digitacionWorkerRows(data);
+    if (!digitacionIsContratista(data)) {
+        workerRows.forEach((row, index) => {
+            validateDigitacionWorkerRow(row, index + 1).forEach(error => {
+                setDigitacionFieldError(getDigitacionField('trabajadores_adicionales'), error.message);
+                errors.push(error);
+            });
+        });
+        validateDigitacionWorkerDuplicates(workerRows).forEach(error => {
+            setDigitacionFieldError(getDigitacionField('trabajadores_adicionales'), error.message);
+            errors.push(error);
+        });
+
+        validateDigitacionWorkerCenterCounts(data).forEach(error => {
+            setDigitacionFieldError(getDigitacionField(error.key), error.message);
+            errors.push(error);
+        });
+    }
+
+    const radicacion = parseDigitacionDate(data.fecha_radicacion);
+    const cobertura = parseDigitacionDate(data.fecha_inicio_cobertura);
+    if (radicacion && cobertura && cobertura < radicacion) {
+        const field = getDigitacionField('fecha_inicio_cobertura');
+        const message = 'La cobertura no puede ser anterior a la radicación.';
+        setDigitacionFieldError(field, message);
+        errors.push({ key: 'fecha_inicio_cobertura', section: 'radicacion', message });
+    }
+    if (radicacion && cobertura && data.tipo_tramite === 'afiliacion') {
+        const isTraslado = normalizeCatalogText(data.tipo_afiliacion).includes('TRASLADO');
+        const vigencia = parseDigitacionDate(data.fecha_inicio_vigencia);
+        const expected = isTraslado && vigencia ? new Date(vigencia) : new Date(radicacion);
+        if (!isTraslado) expected.setDate(expected.getDate() + 1);
+        if (formatLocalIsoDate(cobertura) !== formatLocalIsoDate(expected)) {
+            const field = getDigitacionField('fecha_inicio_cobertura');
+            const message = isTraslado
+                ? 'Para traslado, la cobertura debe coincidir con la fecha inicio vigencia.'
+                : 'Para afiliación inicial, la cobertura debe ser exactamente un día después de la radicación.';
+            setDigitacionFieldError(field, message);
+            errors.push({ key: 'fecha_inicio_cobertura', section: 'radicacion', message });
+        }
+    }
+
+    const nacimiento = parseDigitacionDate(data.fecha_nacimiento);
+    if (nacimiento && nacimiento >= new Date()) {
+        const field = getDigitacionField('fecha_nacimiento');
+        const message = 'La fecha de nacimiento debe ser anterior a hoy.';
+        setDigitacionFieldError(field, message);
+        errors.push({ key: 'fecha_nacimiento', section: 'novedades', message });
+    }
+
+    const inicioContrato = parseDigitacionDate(data.fecha_inicio_contrato);
+    const finContrato = parseDigitacionDate(data.fecha_fin_contrato);
+    if (inicioContrato && finContrato && finContrato < inicioContrato) {
+        const field = getDigitacionField('fecha_fin_contrato');
+        const message = 'La fecha de terminación no puede ser anterior al inicio del contrato.';
+        setDigitacionFieldError(field, message);
+        errors.push({ key: 'fecha_fin_contrato', section: 'afiliacion', message });
+    }
+    const valorTotal = Number(data.valor_total_contrato || 0);
+    const valorMensual = Number(data.valor_mensual_contrato || 0);
+    if (Number.isFinite(valorTotal) && Number.isFinite(valorMensual) && valorTotal > 0 && valorMensual > valorTotal) {
+        const field = getDigitacionField('valor_mensual_contrato');
+        const message = 'El valor mensual no puede ser mayor al valor total del contrato.';
+        setDigitacionFieldError(field, message);
+        errors.push({ key: 'valor_mensual_contrato', section: 'afiliacion', message });
+    }
+
+    const mainActivity = digitacionActivityProfile(data.codigo_actividad_economica);
+    const mainRisk = digitacionRiskNumber(data.clase_riesgo_empresa);
+    if (mainActivity?.clase && mainRisk && mainActivity.clase !== mainRisk) {
+        const field = getDigitacionField('clase_riesgo_empresa');
+        const message = `La clase de riesgo no coincide con la actividad ${onlyDigits(data.codigo_actividad_economica)}; el catálogo ARP indica clase ${mainActivity.clase}.`;
+        setDigitacionFieldError(field, message);
+        errors.push({ key: 'clase_riesgo_empresa', section: 'afiliacion', message });
+    }
+
+    const sedeActivity = digitacionActivityProfile(data.sede_codigo_actividad);
+    const sedeRisk = digitacionRiskNumber(data.sede_clase_riesgo);
+    if (sedeActivity?.clase && sedeRisk && sedeActivity.clase !== sedeRisk) {
+        const field = getDigitacionField('sede_clase_riesgo');
+        const message = `La clase de riesgo del centro no coincide con la actividad ${onlyDigits(data.sede_codigo_actividad)}; el catálogo ARP indica clase ${sedeActivity.clase}.`;
+        setDigitacionFieldError(field, message);
+        errors.push({ key: 'sede_clase_riesgo', section: 'sedes', message });
+    }
+
+    const inicioNovedad = parseDigitacionDate(data.fecha_novedad_inicio);
+    const finNovedad = parseDigitacionDate(data.fecha_novedad_fin);
+    if (inicioNovedad && finNovedad && finNovedad < inicioNovedad) {
+        const field = getDigitacionField('fecha_novedad_fin');
+        const message = 'La fecha final de novedad no puede ser anterior a la fecha inicial.';
+        setDigitacionFieldError(field, message);
+        errors.push({ key: 'fecha_novedad_fin', section: 'novedades', message });
+    }
+
+    if (errors.length) {
+        const first = errors[0];
+        if (first.section && document.querySelector(`[data-digitacion-tab="${first.section}"]`)) switchDigitacionTab(first.section);
+        setTimeout(() => {
+            const field = getDigitacionField(first.key);
+            if (field?.offsetParent !== null) field.focus();
+        }, 50);
+        updateDigitacionStatus(`${errors.length} campo(s) por corregir`, 'err');
+        return { ok: false, errors };
+    }
+
+    updateDigitacionStatus('Validación correcta', 'ok');
+    return { ok: true, errors: [] };
+}
+
+function digitacionDraftStorageKey(caseId = '') {
+    const id = String(caseId || '').trim();
+    return id ? `${DIGITACION_DRAFT_KEY}:${id}` : DIGITACION_DRAFT_KEY;
+}
+
+function readDigitacionDraft(caseId = '') {
+    try {
+        const targetCaseId = String(caseId || activeCaseId || '').trim();
+        if (targetCaseId) {
+            const scoped = JSON.parse(localStorage.getItem(digitacionDraftStorageKey(targetCaseId)) || '{}');
+            if (scoped && Object.keys(scoped).length) return scoped;
+            const legacy = JSON.parse(localStorage.getItem(DIGITACION_DRAFT_KEY) || '{}');
+            if (legacy?.source_case_id === targetCaseId) return legacy;
+            return {};
+        }
+        return JSON.parse(localStorage.getItem(DIGITACION_DRAFT_KEY) || '{}');
+    } catch {
+        return {};
+    }
+}
+
+function writeDigitacionDraft(data) {
+    try {
+        const serialized = JSON.stringify(data || {});
+        const caseId = String(data?.source_case_id || activeCaseId || '').trim();
+        if (caseId) localStorage.setItem(digitacionDraftStorageKey(caseId), serialized);
+        localStorage.setItem(DIGITACION_DRAFT_KEY, serialized);
+    } catch {}
+}
+
+function collectDigitacionData() {
+    const values = {};
+    getDigitacionFields().forEach(field => {
+        normalizeDigitacionFieldInPlace(field);
+        const key = field.dataset.digKey;
+        if (!key) return;
+        values[key] = key === 'cargo_actividad'
+            ? normalizeDigitacionCargoCode(field.dataset.catalogCode || field.value)
+            : field.value || '';
+    });
+    const existing = readDigitacionDraft();
+    return {
+        ...existing,
+        proyecto: 'AFILEGA_FA_IMA_LA_V2',
+        formato: existing.formato || 'digitacion_formato_afiliacion',
+        updated_at: new Date().toISOString(),
+        values,
+        legacy_mdb: buildDigitacionLegacyMdbPayload(values),
+    };
+}
+
+function normalizeDigitacionDraftForLegacy(data = {}) {
+    const sourceValues = data.values || {};
+    const values = { ...sourceValues };
+    let changed = false;
+    Object.entries(AFILEGA_MDB_FIELD_LIMITS || {}).forEach(([key, limit]) => {
+        if (!limit || !Object.prototype.hasOwnProperty.call(values, key)) return;
+        const value = String(values[key] ?? '');
+        if (value.length <= limit) return;
+        values[key] = value.slice(0, limit).trim();
+        changed = true;
+    });
+    if (!changed) return data;
+    return {
+        ...data,
+        values,
+        validation: null,
+    };
+}
+
+function fillDigitacionForm(data = {}) {
+    data = normalizeDigitacionDraftForLegacy(data);
+    setupDigitacionLocationSelects();
+    applyDigitacionLegacyLimits();
+    const values = data.values || {};
+    getDigitacionFields().forEach(field => {
+        const key = field.dataset.digKey;
+        if (!key) return;
+        if (field.classList.contains('js-municipality-select')) return;
+        if (Object.prototype.hasOwnProperty.call(values, key)) {
+            if (field.classList.contains('js-department-select')) {
+                field.value = findDepartmentName(values[key]) || '';
+            } else if (key === 'empleador_tipo_documento') {
+                field.value = normalizeDigitacionDocumentTypeForUi(values[key]);
+            } else if (key === 'tipo_afiliacion') {
+                field.value = normalizeDigitacionClaseAfiliacion(values[key]);
+            } else if (key === 'fecha_nacimiento') {
+                field.value = formatDigitacionBirthDateInput(values[key]);
+            } else if (key === 'cargo_actividad') {
+                setDigitacionCargoFieldDisplay(field, values[key] || '');
+            } else {
+                field.value = normalizeDigitacionFieldDisplayValue(field, values[key] || '');
+            }
+            normalizeDigitacionFieldInPlace(field);
+        }
+    });
+    const centroNombreField = getDigitacionField('sede_centro_trabajo_nombre');
+    const sedeNombreField = getDigitacionField('sede_nombre');
+    if (centroNombreField && !centroNombreField.value && sedeNombreField?.value) {
+        centroNombreField.value = String(sedeNombreField.value || '').replace(DIGITACION_ALNUM_CLEAN_RE, '').slice(0, 60);
+    }
+    syncDigitacionCoverageDate(false);
+    syncDigitacionActivityDependentFields('codigo_actividad_economica');
+    syncDigitacionActivityDependentFields('sede_codigo_actividad');
+    syncDigitacionSedeTarifa();
+    syncDigitacionWorkerAge();
+    renderDigitacionCentrosAdicionales();
+    updateTrabajadorCentroOptions();
+    renderDigitacionTrabajadores();
+    updateDigitacionContractorMode(data, { clearWorkers: digitacionIsContratista({ ...(values || {}), source_entry_type: data.source_entry_type || '' }) });
+    document.querySelectorAll('.js-department-select').forEach(select => {
+        const target = document.getElementById(select.dataset.municipalityTarget || '');
+        updateMunicipalitySelect(select, target?.dataset?.digKey ? values[target.dataset.digKey] : '');
+    });
+    updateDigitacionStatus(data.updated_at ? `Guardado ${formatDateTime(data.updated_at)}` : 'Borrador local');
+    renderDigitacionValidationSummary(data.validation || null);
+    updateDigitacionContext(data);
+    const focused = document.activeElement?.classList?.contains('digitacion-field') ? document.activeElement : getDigitacionFields()[0];
+    updateDigitacionEvidenceForField(focused);
+}
+
+function digitacionPrefillFromPayload(payload) {
+    return payload?.analysis?.digitacion_prefill || null;
+}
+
+function applyDigitacionPrefillFromPayload(payload, options = {}) {
+    const prefill = digitacionPrefillFromPayload(payload);
+    const values = prefill?.values || {};
+    if (!prefill || !Object.keys(values).length) return false;
+    const existing = readDigitacionDraft();
+    const sameCase = existing.source_case_id && existing.source_case_id === payload.id;
+    const mergedValues = sameCase ? { ...values, ...(existing.values || {}) } : { ...values };
+    const draft = {
+        proyecto: 'AFILEGA_FA_IMA_LA_V2',
+        formato: `digitacion_${prefill.form_target || prefill.entry_type || 'afiliacion'}`,
+        source_case_id: payload.id || '',
+        source_entry_type: prefill.entry_type || '',
+        source_label: payload.label || '',
+        prefill_sources: prefill.sources || {},
+        updated_at: new Date().toISOString(),
+        values: mergedValues,
+    };
+    writeDigitacionDraft(draft);
+    fillDigitacionForm(draft);
+    updateDigitacionStatus(`Prellenado OCR · ${prefill.entry_type || 'entrada'}`, 'ok');
+    if (!options.silent) showToast('Digitación prellenada con OCR', 'ok');
+    return true;
+}
+
+function emptyDigitacionDraftForCase(caseId = '', payload = null) {
+    return {
+        proyecto: 'AFILEGA_FA_IMA_LA_V2',
+        formato: 'digitacion_formato_afiliacion',
+        source_case_id: caseId || '',
+        source_entry_type: payload?.entry_type || payload?.analysis?.digitacion_prefill?.entry_type || '',
+        source_label: payload?.label || '',
+        updated_at: new Date().toISOString(),
+        values: {},
+    };
+}
+
+function updateDigitacionContext(data = readDigitacionDraft()) {
+    const el = document.getElementById('digitacionContext');
+    if (!el) return;
+    const values = data?.values || {};
+    const resolved = activeCasePayload ? resolveCase(activeCasePayload) : {};
+    const empresa = values.razon_social || data?.source_label || resolved.empresa || activeCasePayload?.label || '';
+    const nit = values.nit || resolved.nit || '';
+    const radicado = values.numero_radicacion || resolved.nroRadicacion || '';
+    const contrato = values.numero_contrato || resolveContractNumber(activeCasePayload?.analysis || {}, activeCasePayload || {});
+    const parts = [];
+    if (empresa) parts.push(`<strong>${escapeHtml(empresa)}</strong>`);
+    if (nit && nit !== 'n/d') parts.push(`ID/NIT ${escapeHtml(nit)}`);
+    if (radicado) parts.push(`Radicación ${escapeHtml(radicado)}`);
+    if (contrato) parts.push(`Contrato ${escapeHtml(contrato)}`);
+    el.innerHTML = parts.length ? `Gestionando: ${parts.join(' · ')}` : 'Sin contrato seleccionado';
+}
+
+function updateDigitacionContractorMode(data = readDigitacionDraft(), options = {}) {
+    const values = data?.values || data || {};
+    const isContratista = digitacionIsContratista({ ...values, source_entry_type: data?.source_entry_type || '' });
+    const tab = document.querySelector('[data-digitacion-tab="novedades"]');
+    const panel = document.querySelector('[data-digitacion-panel="novedades"]');
+    if (tab) {
+        tab.hidden = isContratista;
+        tab.disabled = isContratista;
+    }
+    if (panel && isContratista) panel.classList.remove('active');
+    if (isContratista && options.clearWorkers) {
+        DIGITACION_WORKER_KEYS.forEach(key => {
+            const field = getDigitacionField(key);
+            if (field && !field.readOnly) {
+                field.value = '';
+                if (key === 'cargo_actividad') delete field.dataset.catalogCode;
+                setDigitacionFieldError(field, '');
+            }
+        });
+        const hidden = getDigitacionField('trabajadores_adicionales');
+        if (hidden) hidden.value = '';
+        renderDigitacionTrabajadores();
+    }
+    if (isContratista && digitacionActiveTab === 'novedades') {
+        digitacionActiveTab = 'afiliacion';
+    }
+}
+
+async function loadDigitacionDraftFromBackend(caseId) {
+    if (!caseId) return null;
+    const response = await fetchWithRetry(caseApiUrl(caseId, '/digitacion'));
+    const payload = await response.json();
+    return payload?.digitacion || null;
+}
+
+async function openDigitacionForCase(caseId) {
+    if (!caseId) return false;
+    activeCaseId = caseId;
+    const currentDraft = readDigitacionDraft();
+    if (currentDraft.source_case_id && currentDraft.source_case_id !== caseId) {
+        writeDigitacionDraft(emptyDigitacionDraftForCase(caseId));
+    }
+    if (!activeCasePayload || activeCasePayload.id !== caseId) await loadActiveCaseFull(caseId);
+
+    let backendDraft = null;
+    try {
+        backendDraft = await loadDigitacionDraftFromBackend(caseId);
+    } catch (error) {
+        console.warn('digitacion backend draft:', error);
+    }
+
+    if (backendDraft && Object.keys(backendDraft.values || {}).length) {
+        const draft = {
+            ...backendDraft,
+            source_case_id: backendDraft.source_case_id || caseId,
+            source_label: backendDraft.source_label || activeCasePayload?.label || '',
+        };
+        writeDigitacionDraft(draft);
+        switchView('digitacion');
+        fillDigitacionForm(draft);
+        updateDigitacionStatus(`Data capturada · ${formatDateTime(draft.updated_at)}`, draft.validation?.ok === false ? 'err' : 'ok');
+        return true;
+    }
+
+    writeDigitacionDraft(emptyDigitacionDraftForCase(caseId, activeCasePayload));
+    switchView('digitacion');
+    if (applyDigitacionPrefillFromPayload(activeCasePayload || { id: caseId }, { silent: true })) {
+        updateDigitacionStatus('Prellenado OCR del contrato seleccionado', 'ok');
+        showToast('Data OCR cargada para digitación', 'ok');
+        return true;
+    }
+    fillDigitacionForm(readDigitacionDraft());
+    updateDigitacionStatus('Contrato sin data capturada todavía', 'warn');
+    showToast('El contrato está abierto en digitación, pero no tiene data capturada todavía', 'warn');
+    return false;
+}
+
+function getDigitacionFieldLabel(key = '') {
+    const field = getDigitacionField(key);
+    return field?.closest('.field-row')?.querySelector('.field-label')?.textContent?.trim() || key || 'Campo';
+}
+
+function renderDigitacionValidationSummary(validation) {
+    const panel = document.getElementById('digitacionValidationPanel');
+    if (!panel) return;
+    const errors = Array.isArray(validation?.errors) ? validation.errors : [];
+    const warnings = Array.isArray(validation?.warnings) ? validation.warnings : [];
+    if (!validation || (!errors.length && !warnings.length)) {
+        panel.classList.add('hidden');
+        panel.innerHTML = '';
+        return;
+    }
+    const rows = [
+        ...errors.map(item => ({ ...item, kind: 'err', label: 'Error' })),
+        ...warnings.map(item => ({ ...item, kind: 'warn', label: 'Alerta' })),
+    ];
+    panel.classList.remove('hidden');
+    panel.innerHTML = `
+        <div class="digitacion-validation-head">
+            <div>
+                <div class="digitacion-validation-title">Validación de reglas</div>
+                <div class="digitacion-validation-sub">${escapeHtml(validation.source || 'Reglas AFILEGA')}</div>
+            </div>
+            <span class="status-pill ${validation.ok ? 'ok' : 'err'}">${validation.ok ? 'Correcto' : `${errors.length} error(es)`}</span>
+        </div>
+        <div class="digitacion-validation-list">
+            ${rows.slice(0, 8).map(item => `
+                <button class="digitacion-validation-item ${item.kind}" type="button" data-dig-error-key="${escapeHtml(item.key || '')}" data-dig-error-section="${escapeHtml(item.section || '')}">
+                    <span class="digitacion-validation-badge">${escapeHtml(item.label)}</span>
+                    <span class="digitacion-validation-copy"><strong>${escapeHtml(getDigitacionFieldLabel(item.key || ''))}</strong>${escapeHtml(item.message ? `: ${item.message}` : '')}</span>
+                </button>
+            `).join('')}
+            ${rows.length > 8 ? `<div class="digitacion-validation-more">+${rows.length - 8} hallazgo(s) adicional(es)</div>` : ''}
+        </div>
+    `;
+    panel.querySelectorAll('[data-dig-error-key]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const section = btn.dataset.digErrorSection;
+            const key = btn.dataset.digErrorKey;
+            if (section) switchDigitacionTab(section);
+            if (key) setTimeout(() => getDigitacionField(key)?.focus(), 50);
+        });
+    });
+}
+
+function applyBackendDigitacionErrors(validation) {
+    getDigitacionFields().forEach(field => setDigitacionFieldError(field, ''));
+    renderDigitacionValidationSummary(validation);
+    const errors = Array.isArray(validation?.errors) ? validation.errors : [];
+    for (const item of errors) {
+        const field = getDigitacionField(item.key || '');
+        if (field) setDigitacionFieldError(field, item.message || 'Campo inválido para reglas AFILEGA.');
+    }
+    const first = errors.find(item => getDigitacionField(item.key || ''));
+    if (first?.section) switchDigitacionTab(first.section);
+    if (first?.key) setTimeout(() => getDigitacionField(first.key)?.focus(), 50);
+}
+
+function updateDigitacionStatus(text, kind = '') {
+    const status = document.getElementById('digitacionSaveStatus');
+    if (!status) return;
+    status.textContent = text;
+    status.classList.remove('ok', 'warn', 'err');
+    if (kind) status.classList.add(kind);
+}
+
+function switchDigitacionTab(tab) {
+    digitacionActiveTab = tab || 'afiliacion';
+    const targetTab = document.querySelector(`[data-digitacion-tab="${digitacionActiveTab}"]`);
+    if (targetTab?.hidden || targetTab?.disabled) digitacionActiveTab = 'afiliacion';
+    document.querySelectorAll('[data-digitacion-tab]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.digitacionTab === digitacionActiveTab);
+    });
+    document.querySelectorAll('[data-digitacion-panel]').forEach(panel => {
+        panel.classList.toggle('active', panel.dataset.digitacionPanel === digitacionActiveTab);
+    });
+    const activeField = document.querySelector(`[data-digitacion-panel="${digitacionActiveTab}"] .digitacion-field`);
+    if (activeField) updateDigitacionEvidenceForField(activeField);
+}
+
+async function saveDigitacionDraft(options = {}) {
+    const mode = options.mode || 'active';
+    const requireAll = Boolean(options.requireAll);
+    const shouldValidateBeforeSave = options.validate === true || requireAll || mode === 'full';
+    if (shouldValidateBeforeSave) {
+        const validation = validateDigitacionForm(mode);
+        if (!validation.ok) {
+            showToast(`Corrige ${validation.errors.length} campo(s) antes de guardar`, 'err');
+            return null;
+        }
+    }
+    const data = collectDigitacionData();
+    writeDigitacionDraft(data);
+    const caseId = data.source_case_id || getDigitacionCaseId();
+    if (!caseId) {
+        updateDigitacionStatus(`Guardado local ${formatDateTime(data.updated_at)}`, 'warn');
+        showToast('Borrador de digitación guardado localmente', 'warn');
+        return data;
+    }
+    updateDigitacionStatus('Guardando en caso...', 'warn');
+    try {
+        const response = await fetchWithRetry(caseApiUrl(caseId, '/digitacion'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...data, require_all: requireAll }),
+        });
+        const payload = await response.json();
+        const saved = payload?.digitacion || data;
+        writeDigitacionDraft(saved);
+        if (saved.validation && !saved.validation.ok) {
+            applyBackendDigitacionErrors(saved.validation);
+            updateDigitacionStatus(`${saved.validation.errors.length} error(es) de reglas`, 'err');
+            showToast('El backend guardó el borrador, pero encontró errores de reglas', 'err');
+            return saved;
+        }
+        fillDigitacionForm(saved);
+        updateDigitacionStatus(`Guardado en caso ${formatDateTime(saved.updated_at)}`, 'ok');
+        showToast('Borrador de digitación guardado en el caso', 'ok');
+        return saved;
+    } catch (error) {
+        updateDigitacionStatus(`Guardado local: ${formatDateTime(data.updated_at)}`, 'warn');
+        showToast(`No pude guardar en backend; quedó local. ${error.message}`, 'warn');
+        return data;
+    }
+}
+
+async function validateDigitacionWithBackend(options = {}) {
+    const mode = options.mode || 'active';
+    const requireAll = Boolean(options.requireAll);
+    const localValidation = validateDigitacionForm(mode);
+    if (!localValidation.ok) {
+        showToast(`Corrige ${localValidation.errors.length} campo(s) antes de validar reglas`, 'err');
+        return null;
+    }
+    const data = collectDigitacionData();
+    const caseId = data.source_case_id || getDigitacionCaseId();
+    if (!caseId) {
+        updateDigitacionStatus('Sin caso activo para validar reglas', 'err');
+        showToast('Abre la digitación desde un contrato para validar reglas', 'err');
+        return null;
+    }
+    updateDigitacionStatus('Validando reglas...', 'warn');
+    try {
+        const response = await fetchWithRetry(caseApiUrl(caseId, '/digitacion/validate-mdb'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...data, require_all: requireAll }),
+        });
+        const payload = await response.json();
+        const validation = payload?.validation || null;
+        if (!validation) throw new Error('El backend no devolvió validación de reglas.');
+        applyBackendDigitacionErrors(validation);
+        if (!validation.ok) {
+            updateDigitacionStatus(`${validation.errors.length} error(es) de reglas`, 'err');
+            showToast('Validación de reglas con errores', 'err');
+            return validation;
+        }
+        updateDigitacionStatus('Reglas correctas', 'ok');
+        showToast('Validación de reglas correcta', 'ok');
+        return validation;
+    } catch (error) {
+        updateDigitacionStatus('Error validando reglas', 'err');
+        showToast(error.message || 'No pude validar reglas', 'err');
+        return null;
+    }
+}
+
+async function pollDigitacionWorkflow(caseId, button = null) {
+    let latest = null;
+    const terminal = new Set(['completed', 'stopped_prevalidacion', 'stopped_lote', 'stopped_importacion', 'stopped_sync_engine', 'stopped_prebuild', 'stopped_926', 'failed']);
+    for (let index = 0; index < 180; index++) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const response = await fetchWithRetry(caseApiUrl(caseId));
+        latest = await response.json();
+        const wf = latest?.analysis?.workflow_run || {};
+        const status = normalizeText(wf.status || latest.status || '');
+        const step = wf.current_step || status || 'procesando';
+        updateDigitacionStatus(`Workflow: ${step}`, status === 'completed' ? 'ok' : 'warn');
+        if (button) button.textContent = status === 'completed' ? '926 generado' : `Procesando ${index + 1}`;
+        if (terminal.has(status)) break;
+    }
+    return latest;
+}
+
+async function runDigitacionWorkflow() {
+    const caseId = getDigitacionCaseId();
+    if (!caseId) {
+        showToast('No hay contrato activo para generar 926', 'err');
+        return;
+    }
+    const btn = document.getElementById('digitacionRunBtn');
+    const btnIdleLabel = 'Guardar + generar 926';
+    if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+    try {
+        const saved = await saveDigitacionDraft({ mode: 'full', requireAll: true });
+        if (!saved) return;
+        if (saved.validation && !saved.validation.ok) return;
+        if (btn) btn.textContent = 'Enviando workflow...';
+        updateDigitacionStatus('Reanalizando con digitación...', 'warn');
+        const response = await fetchWithRetry(caseApiUrl(caseId, '/run-workflow'), { method: 'POST' });
+        const launched = await response.json();
+        activeCaseId = caseId;
+        activeCasePayload = launched;
+        const finalPayload = await pollDigitacionWorkflow(caseId, btn);
+        if (finalPayload) activeCasePayload = finalPayload;
+        const wf = finalPayload?.analysis?.workflow_run || {};
+        const output926 = wf.output_926 || finalPayload?.analysis?.output_926 || {};
+        const legacyOk = Boolean(output926?.legacy?.ok);
+        if (normalizeText(wf.status) === 'completed' && legacyOk) {
+            updateDigitacionStatus('Plano generado', 'ok');
+            showToast('Plano generado con la digitación guardada', 'ok');
+            loadBandeja().catch(() => {});
+            return;
+        }
+        updateDigitacionStatus(wf.stop_reason || 'Workflow no completado', 'err');
+        showToast(wf.stop_reason || 'El workflow no completó generación 926', 'err');
+    } catch (error) {
+        updateDigitacionStatus('Error generando 926', 'err');
+        showToast(error.message || 'No pude generar 926 desde digitación', 'err');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = btnIdleLabel; }
+    }
+}
+
+function clearDigitacionDraft() {
+    if (!confirm('¿Limpiar todos los campos de digitación?')) return;
+    getDigitacionFields().forEach(field => { field.value = ''; });
+    clearDigitacionCentroEditor();
+    renderDigitacionCentrosAdicionales();
+    renderDigitacionTrabajadores();
+    updateTrabajadorCentroOptions();
+    setupDigitacionLocationSelects();
+    writeDigitacionDraft({});
+    updateDigitacionStatus('Borrador local', 'warn');
+    updateDigitacionEvidenceForField(null);
+    showToast('Digitación limpiada', 'warn');
+}
+
+function exportDigitacionJson() {
+    const validation = validateDigitacionForm('all');
+    if (!validation.ok) {
+        showToast(`Corrige ${validation.errors.length} campo(s) antes de exportar`, 'err');
+        return;
+    }
+    const data = collectDigitacionData();
+    const contract = normalizeText(data.values.numero_contrato || data.values.documento_afiliado || 'borrador').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'borrador';
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `digitacion-afilega-${contract}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast('JSON de digitación generado', 'ok');
+}
+
+function initDigitacionView() {
+    applyDigitacionLegacyLimits();
+    populateDigitacionCatalogDatalists();
+    let draft = readDigitacionDraft();
+    if (activeCaseId && draft.source_case_id && draft.source_case_id !== activeCaseId) {
+        draft = emptyDigitacionDraftForCase(activeCaseId, activeCasePayload);
+        writeDigitacionDraft(draft);
+    }
+    const defaults = {
+        subtipo_cotizante: AFILEGA_MDB_DEFAULT_SUBTIPO_COTIZANTE,
+        novedad_estado: '1',
+        novedad_autoliquidacion: 'N',
+        novedad_origen: 'C',
+        sede_transporte: 'N',
+    };
+    Object.entries(defaults).forEach(([key, value]) => {
+        const field = getDigitacionField(key);
+        if (field && !field.value) field.value = value;
+    });
+    setupDigitacionLocationSelects();
+    initDigitacionCentrosTrabajo();
+    initDigitacionTrabajadores();
+    fillDigitacionForm(draft);
+    markDigitacionRequiredFields();
+    hydrateDigitacionDraftFromActiveCase();
+    switchDigitacionTab(digitacionActiveTab);
+}
+
+async function hydrateDigitacionDraftFromActiveCase() {
+    const caseId = getDigitacionCaseId();
+    if (!caseId) return;
+    try {
+        const backendDraft = await loadDigitacionDraftFromBackend(caseId);
+        if (!backendDraft || !Object.keys(backendDraft.values || {}).length) return;
+        const localDraft = readDigitacionDraft();
+        const sameCase = localDraft.source_case_id && localDraft.source_case_id === caseId;
+        const localTime = sameCase ? Date.parse(localDraft.updated_at || '') : 0;
+        const backendTime = Date.parse(backendDraft.updated_at || '') || 0;
+        if (sameCase && localTime && localTime >= backendTime) return;
+        writeDigitacionDraft(backendDraft);
+        fillDigitacionForm(backendDraft);
+        updateDigitacionStatus(`Borrador del caso · ${formatDateTime(backendDraft.updated_at)}`, backendDraft.validation?.ok === false ? 'err' : 'ok');
+    } catch (error) {
+        console.warn('hydrateDigitacionDraftFromActiveCase:', error);
+    }
+}
+
 // ── BANDEJA ──────────────────────────────────────────────────
 async function loadBandeja() {
     const wrap = document.getElementById('casesTableWrap');
@@ -705,7 +3962,7 @@ async function loadBandeja() {
         // Arrancar live polling si hay contratos activos
         const hasActive = allCases.some(c => {
             const s = normalizeText(resolveCase(c).status);
-            return ['processing','pending','uploaded','queued'].includes(s);
+            return ['processing','queued'].includes(s);
         });
         if (hasActive) startBandejaLivePolling();
     } catch(e) {
@@ -714,50 +3971,82 @@ async function loadBandeja() {
     }
 }
 
-function renderMetrics(cases) {
-    let enProceso = 0, aprobables = 0, observados = 0, noAprobados = 0;
-    for (const c of cases) {
-        const { status, finalStatus } = resolveCase(c);
-        const s = normalizeText(status);
-        const f = normalizeText(finalStatus);
-        if (f.includes('aprob') || f === 'ok' || (s === 'completed' && (f === 'completed' || !f))) { aprobables++; continue; }
-        if (s === 'stopped_prevalidacion') { noAprobados++; continue; }
-        if (f.includes('observ') || s === 'completed') { observados++; continue; }
-        enProceso++;
+function caseDigitacionValues(item = {}) {
+    const analysis = item.analysis || {};
+    if (item.digitacion_values && typeof item.digitacion_values === 'object') return item.digitacion_values;
+    return analysis.digitacion_manual?.values || analysis.digitacion_prefill?.values || {};
+}
+
+function caseHasManualDigitacionProgress(values = {}) {
+    const radicacionOnly = new Set([
+        ...DIGITACION_REQUIRED.radicacion,
+        'fecha_inicio_vigencia',
+        'empresa_arl_anterior',
+        'tipo_tramite',
+    ]);
+    return Object.entries(values).some(([key, value]) => !radicacionOnly.has(key) && String(value || '').trim());
+}
+
+function caseDigitacionMissingRequired(values = {}) {
+    const required = [
+        ...DIGITACION_REQUIRED.radicacion,
+        ...DIGITACION_REQUIRED.afiliacion,
+        ...DIGITACION_REQUIRED.sedes,
+    ];
+    const missing = required.filter(key => !String(values[key] || '').trim());
+    if (digitacionIsContratista(values)) return missing;
+    const workerRows = parseDigitacionTrabajadores(values.trabajadores_adicionales || '');
+    if (!workerRows.length) {
+        missing.push('trabajadores_adicionales');
+    } else {
+        workerRows.forEach((row, index) => {
+            DIGITACION_REQUIRED.novedades.forEach(key => {
+                if (!String(row[key] || '').trim()) missing.push(`trabajador_${index + 1}_${key}`);
+            });
+        });
     }
+    return missing;
+}
+
+function resolveBandejaBucket(item) {
+    const { status, finalStatus } = resolveCase(item);
+    const s = normalizeText(status);
+    const f = normalizeText(finalStatus);
+    const values = caseDigitacionValues(item);
+
+    if (['processing', 'queued', 'analyzing'].includes(s)) return 'en-proceso';
+    if (caseHasManualDigitacionProgress(values)) {
+        return caseDigitacionMissingRequired(values).length ? 'en-proceso' : 'por-entregar';
+    }
+    if (f.includes('devol') || s === 'failed') return 'en-devolucion';
+    if (f.includes('aprob') || f === 'ok' || s === 'completed') return 'por-entregar';
+    return 'radicadas';
+}
+
+function renderMetrics(cases) {
+    let radicadas = 0, enProceso = 0, porEntregar = 0, enDevolucion = 0;
+    for (const c of cases) {
+        const bucket = resolveBandejaBucket(c);
+        if (bucket === 'radicadas') radicadas++;
+        else if (bucket === 'en-proceso') enProceso++;
+        else if (bucket === 'por-entregar') porEntregar++;
+        else if (bucket === 'en-devolucion') enDevolucion++;
+    }
+    document.getElementById('metricRadicadas').textContent = radicadas;
     document.getElementById('metricEnProceso').textContent = enProceso;
-    document.getElementById('metricAprobables').textContent = aprobables;
-    document.getElementById('metricObservados').textContent = observados;
-    document.getElementById('metricNoAprobados').textContent = noAprobados;
-    document.getElementById('metricEnProcesoSub').textContent = enProceso ? 'en prevalidación' : '';
-    document.getElementById('metricAprobablesSub').textContent = aprobables ? 'listos para plano' : '';
-    document.getElementById('metricObservadosSub').textContent = observados ? 'requieren revisión' : '';
-    document.getElementById('metricNoAprobadosSub').textContent = noAprobados ? 'no pasaron validación' : '';
+    document.getElementById('metricPorEntregar').textContent = porEntregar;
+    document.getElementById('metricEnDevolucion').textContent = enDevolucion;
+    document.getElementById('metricRadicadasSub').textContent = radicadas ? 'pendientes de gestión' : '';
+    document.getElementById('metricEnProcesoSub').textContent = enProceso ? 'en validación' : '';
+    document.getElementById('metricPorEntregarSub').textContent = porEntregar ? 'listas para entrega' : '';
+    document.getElementById('metricEnDevolucionSub').textContent = enDevolucion ? 'requieren devolución' : '';
 }
 
 function filterCasesByTab(cases, tab) {
     if (tab === 'todos') return cases;
-    if (tab === 'aprobables') return cases.filter(c => {
-        const { status, finalStatus } = resolveCase(c);
-        const s = normalizeText(status), f = normalizeText(finalStatus);
-        return f.includes('aprob') || f === 'ok' || (s === 'completed' && (f === 'completed' || !f));
-    });
-    if (tab === 'observados') return cases.filter(c => {
-        const { status, finalStatus } = resolveCase(c);
-        const s = normalizeText(status), f = normalizeText(finalStatus);
-        return f.includes('observ') || (s === 'completed' && !f.includes('aprob') && f !== 'ok' && f !== 'completed');
-    });
-    if (tab === 'no-aprobados') return cases.filter(c => {
-        const { status } = resolveCase(c);
-        return normalizeText(status) === 'stopped_prevalidacion';
-    });
-    if (tab === 'cola') return cases.filter(c => {
-        const { status, finalStatus } = resolveCase(c);
-        const s = normalizeText(status), f = normalizeText(finalStatus);
-        // Casos que NO están terminados ni rechazados — pendientes de acción
-        return !['completed','stopped_prevalidacion'].includes(s) || 
-               (['uploaded','pending','processing','queued','analyzing','analyzed'].includes(s));
-    });
+    if (['radicadas', 'en-proceso', 'por-entregar', 'en-devolucion'].includes(tab)) {
+        return cases.filter(c => resolveBandejaBucket(c) === tab);
+    }
     return cases;
 }
 
@@ -797,7 +4086,7 @@ function startBandejaLivePolling() {
 
             const stillProcessing = cases.some(c => {
                 const s = normalizeText(resolveCase(c).status);
-                return ['processing','pending','uploaded','queued'].includes(s);
+                return ['processing','queued'].includes(s);
             });
 
             if (changed) {
@@ -842,7 +4131,7 @@ function renderCasesTable(cases, tab = 'todos') {
     wrap.innerHTML = `<div class="case-cards">${filtered.map(item => {
         const { empresa, nit, fecha, status, finalStatus, has926, filename, nroAfiliacion } = resolveCase(item);
         const wfStatus = normalizeText(status);
-        const isProcessing = ['processing','pending','uploaded','queued'].includes(wfStatus);
+        const isProcessing = ['processing','queued'].includes(wfStatus);
         if (isProcessing) hasProcessing = true;
         const cls = isProcessing ? 'processing' : caseStatusClass(status, finalStatus);
         const label = isProcessing ? 'Procesando...' : casePillLabel(status, finalStatus);
@@ -876,6 +4165,7 @@ function renderCasesTable(cases, tab = 'todos') {
                     <span class="pill pill-${cls}">${escapeHtml(label)}</span>
                     <span class="pill pill-neutral">${escapeHtml((item.operation_label || currentOperation().name))}</span>
                     <div class="case-card-actions" role="group">
+                        <button class="table-action-link case-card-data-link" data-action="digitacion-prefill" data-case="${escapeHtml(id)}" type="button">Ver data</button>
                         <button class="table-action-link" data-action="reporte" data-case="${escapeHtml(id)}" type="button">Reporte</button>
                         <button class="table-action-link" data-action="clasificacion" data-case="${escapeHtml(id)}" type="button">Docs</button>
                         <button class="table-action-link" data-action="recuperar" data-case="${escapeHtml(id)}" type="button">Recuperar</button>
@@ -917,6 +4207,10 @@ async function handleCaseAction(action, caseId, file) {
         activeCaseId = caseId;
         switchView('reporte');
         loadReporteForCase(caseId);
+    } else if (action === 'digitacion-prefill') {
+        await openDigitacionForCase(caseId);
+    } else if (action === 'descargar926') {
+        await download926(caseId, file);
     } else if (action === 'clasificacion') {
         activeCaseId = caseId;
         switchView('clasificacion');
@@ -993,8 +4287,25 @@ function resetFlujoView() {
     if (statusPill) { statusPill.className = 'status-pill'; statusPill.textContent = 'En curso'; }
     window.__uploadFiles = [];
     workflowLaunchInFlight = false;
+    const radicacionField = document.getElementById('flowNumeroRadicacion');
+    if (radicacionField?.dataset?.radUsed === '1') {
+        ensureFlowNumeroRadicacion({ force: true });
+    } else {
+        ensureFlowNumeroRadicacion();
+    }
 }
 
+function setupEntryTypeControls() {
+    document.querySelectorAll('[data-entry-type]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.entryType === uploadEntryType);
+        btn.addEventListener('click', () => {
+            uploadEntryType = btn.dataset.entryType || 'empresa';
+            document.querySelectorAll('[data-entry-type]').forEach(item => {
+                item.classList.toggle('active', item.dataset.entryType === uploadEntryType);
+            });
+        });
+    });
+}
 
 function setupUploadZone() {
     const zone = document.getElementById('uploadZone');
@@ -1014,6 +4325,43 @@ function setupUploadZone() {
 
     document.getElementById('clearFilesBtn')?.addEventListener('click', clearUpload);
     document.getElementById('runWorkflowBtn')?.addEventListener('click', runWorkflow);
+    const today = todayIsoDate();
+    const flowFechaRadicacion = document.getElementById('flowFechaRadicacion');
+    const flowFechaInicioVigencia = document.getElementById('flowFechaInicioVigencia');
+    const flowFechaRecibido = document.getElementById('flowFechaRecibidoImagine');
+    if (flowFechaRadicacion) flowFechaRadicacion.max = today;
+    if (flowFechaInicioVigencia) flowFechaInicioVigencia.min = today;
+    if (flowFechaRecibido) {
+        flowFechaRecibido.max = today;
+        if (!flowFechaRecibido.value) flowFechaRecibido.value = today;
+    }
+    ensureFlowNumeroRadicacion();
+    document.querySelectorAll('.radicacion-field').forEach(field => {
+        field.addEventListener('input', () => {
+            if (field.dataset.radKey === 'nit') {
+                field.value = onlyDigits(field.value).slice(0, 15);
+            }
+            if (field.dataset.radKey === 'razon_social') {
+                const cleaned = field.value.replace(DIGITACION_ALNUM_CLEAN_RE, '');
+                const upper = cleaned.toUpperCase();
+                if (field.value !== upper) field.value = upper;
+            }
+            if (field.dataset.radKey === 'fecha_radicacion' && flowFechaRecibido) {
+                flowFechaRecibido.min = field.value || '';
+            }
+            if (['tipo_afiliacion', 'fecha_radicacion'].includes(field.dataset.radKey)) {
+                syncRadicacionVigencia();
+            }
+            setDigitacionFieldError(field, '');
+        });
+        field.addEventListener('change', () => {
+            if (['tipo_afiliacion', 'fecha_radicacion'].includes(field.dataset.radKey)) {
+                syncRadicacionVigencia();
+            }
+            setDigitacionFieldError(field, '');
+        });
+    });
+    syncRadicacionVigencia();
 }
 
 function handleFilesSelected(files) {
@@ -1053,11 +4401,132 @@ function clearUpload() {
     document.getElementById('workflowResultCard').style.display = 'none';
 }
 
+function getRadicacionContractFields() {
+    return Array.from(document.querySelectorAll('.radicacion-field'));
+}
+
+function collectRadicacionContractData() {
+    const values = {
+        tipo_tramite: 'afiliacion',
+    };
+    getRadicacionContractFields().forEach(field => {
+        const key = field.dataset.radKey;
+        if (!key) return;
+        values[key] = String(field.value || '').trim();
+    });
+    const isTraslado = normalizeText(values.tipo_afiliacion || '').includes('traslado');
+    if (isTraslado && values.fecha_radicacion) {
+        values.fecha_inicio_vigencia = digitacionStartOfMonthAfterNext(values.fecha_radicacion);
+        const vigenciaField = document.querySelector('.radicacion-field[data-rad-key="fecha_inicio_vigencia"]');
+        if (vigenciaField) vigenciaField.value = values.fecha_inicio_vigencia;
+    }
+    if (values.fecha_radicacion) {
+        values.fecha_inicio_cobertura = isTraslado && values.fecha_inicio_vigencia
+            ? values.fecha_inicio_vigencia
+            : digitacionDatePlusDays(values.fecha_radicacion, 1);
+    }
+    values.empleador_tipo_documento = normalizeDigitacionDocumentTypeForUi(values.empleador_tipo_documento || '') || '';
+    values.tipo_afiliacion = normalizeDigitacionClaseAfiliacion(values.tipo_afiliacion || '') || '';
+    values.nit = onlyDigits(values.nit || '');
+    values.razon_social = String(values.razon_social || '').toUpperCase();
+    return values;
+}
+
+function radicacionValidationMessage(field, rule) {
+    return `En el formulario Radicación del contrato, campo ${field}: ${rule}`;
+}
+
+function validateRadicacionContractData(values = collectRadicacionContractData()) {
+    const errors = [];
+    const requiredKeys = [
+        'numero_radicacion', 'tipo_afiliacion', 'fecha_radicacion', 'fecha_inicio_vigencia', 'fecha_recibido_imagine',
+        'empleador_tipo_documento', 'nit', 'razon_social', 'sucursal',
+    ];
+    if (normalizeText(values.tipo_afiliacion || '').includes('traslado')) {
+        requiredKeys.push('empresa_arl_anterior');
+    }
+    getRadicacionContractFields().forEach(field => setDigitacionFieldError(field, ''));
+    for (const key of requiredKeys) {
+        const field = document.querySelector(`.radicacion-field[data-rad-key="${key}"]`);
+        if (!String(values[key] || '').trim()) {
+            const message = radicacionValidationMessage(getDigitacionLabel(field), 'es obligatorio para radicar el contrato.');
+            setDigitacionFieldError(field, message);
+            errors.push({ key, message });
+        }
+    }
+    if (values.nit && values.empleador_tipo_documento === 'NIT' && values.nit.length !== 9) {
+        const field = document.querySelector('.radicacion-field[data-rad-key="nit"]');
+        const message = radicacionValidationMessage('No. de identificación', 'debe tener 9 dígitos cuando el Tipo de Documento es NIT.');
+        setDigitacionFieldError(field, message);
+        errors.push({ key: 'nit', message });
+    } else if (values.nit && values.empleador_tipo_documento === 'CC' && !(values.nit.length > 6 && values.nit.length < 11 && values.nit.length !== 9)) {
+        const field = document.querySelector('.radicacion-field[data-rad-key="nit"]');
+        const message = radicacionValidationMessage('No. de identificación', 'debe tener 7, 8 o 10 dígitos cuando el Tipo de Documento es CC.');
+        setDigitacionFieldError(field, message);
+        errors.push({ key: 'nit', message });
+    } else if (values.nit && !/^\d{5,15}$/.test(values.nit)) {
+        const field = document.querySelector('.radicacion-field[data-rad-key="nit"]');
+        const message = radicacionValidationMessage('No. de identificación', 'debe ser numérico y tener entre 5 y 15 dígitos.');
+        setDigitacionFieldError(field, message);
+        errors.push({ key: 'nit', message });
+    }
+    if (values.razon_social && !DIGITACION_ALNUM_RE.test(values.razon_social)) {
+        const field = document.querySelector('.radicacion-field[data-rad-key="razon_social"]');
+        const message = radicacionValidationMessage('Razón social', 'debe ser alfanumérica y se guarda en mayúscula.');
+        setDigitacionFieldError(field, message);
+        errors.push({ key: 'razon_social', message });
+    }
+    for (const key of ['fecha_radicacion', 'fecha_inicio_vigencia', 'fecha_recibido_imagine']) {
+        if (values[key] && !parseDigitacionDate(values[key])) {
+            const field = document.querySelector(`.radicacion-field[data-rad-key="${key}"]`);
+            const message = radicacionValidationMessage(getDigitacionLabel(field), 'debe ser una fecha válida.');
+            setDigitacionFieldError(field, message);
+            errors.push({ key, message });
+        }
+    }
+    const today = todayIsoDate();
+    if (values.fecha_radicacion && values.fecha_radicacion > today) {
+        const field = document.querySelector('.radicacion-field[data-rad-key="fecha_radicacion"]');
+        const message = radicacionValidationMessage('Fecha radicación Alfa', 'debe ser menor o igual a la fecha actual.');
+        setDigitacionFieldError(field, message);
+        errors.push({ key: 'fecha_radicacion', message });
+    }
+    if (values.fecha_recibido_imagine && values.fecha_radicacion && values.fecha_recibido_imagine < values.fecha_radicacion) {
+        const field = document.querySelector('.radicacion-field[data-rad-key="fecha_recibido_imagine"]');
+        const message = radicacionValidationMessage('Fecha recibido Imagine', 'debe ser mayor o igual al campo Fecha radicación Alfa.');
+        setDigitacionFieldError(field, message);
+        errors.push({ key: 'fecha_recibido_imagine', message });
+    }
+    if (values.fecha_recibido_imagine && values.fecha_recibido_imagine > today) {
+        const field = document.querySelector('.radicacion-field[data-rad-key="fecha_recibido_imagine"]');
+        const message = radicacionValidationMessage('Fecha recibido Imagine', 'debe ser menor o igual a la fecha actual.');
+        setDigitacionFieldError(field, message);
+        errors.push({ key: 'fecha_recibido_imagine', message });
+    }
+    if (normalizeText(values.tipo_afiliacion || '').includes('traslado') && values.fecha_radicacion && values.fecha_inicio_vigencia) {
+        const expected = digitacionStartOfMonthAfterNext(values.fecha_radicacion);
+        if (expected && values.fecha_inicio_vigencia !== expected) {
+            const field = document.querySelector('.radicacion-field[data-rad-key="fecha_inicio_vigencia"]');
+            const message = radicacionValidationMessage('Fecha inicio vigencia', `debe ser ${expected}, mes subsiguiente a la Fecha radicación Alfa.`);
+            setDigitacionFieldError(field, message);
+            errors.push({ key: 'fecha_inicio_vigencia', message });
+        }
+    }
+    return { ok: errors.length === 0, errors };
+}
+
 async function runWorkflow() {
     const files = window.__uploadFiles || [];
     if (!files.length) return;
     const tester = readTester();
     if (!tester.email) { showToast('Por favor selecciona tu usuario antes de continuar.', 'warn'); return; }
+    const radicacionValues = collectRadicacionContractData();
+    const radicacionValidation = validateRadicacionContractData(radicacionValues);
+    if (!radicacionValidation.ok) {
+        showToast(`Corrige ${radicacionValidation.errors.length} campo(s) de radicación antes de continuar.`, 'err');
+        radicacionValidation.errors[0]?.key && document.querySelector(`.radicacion-field[data-rad-key="${radicacionValidation.errors[0].key}"]`)?.focus();
+        return;
+    }
 
     const btn = document.getElementById('runWorkflowBtn');
     const progressCard = document.getElementById('workflowProgressCard');
@@ -1071,7 +4540,7 @@ async function runWorkflow() {
     const steps = [
         { id: 'upload',   label: 'Cargando expediente...' },
         { id: 'classify', label: 'Clasificando documentos...' },
-        { id: 'precheck', label: 'Ejecutando prevalidación...' },
+        { id: 'precheck', label: 'Ejecutando validación documental...' },
         { id: 'decision', label: 'Calculando decisión...' },
         { id: 'legado',   label: 'Generando plano...' },
     ];
@@ -1099,11 +4568,13 @@ async function runWorkflow() {
         // Paso 1: subir archivos
         renderStep(0, 'active');
         const formData = new FormData();
-        const label = deriveCaseLabel(files);
+        const label = radicacionValues.razon_social || deriveCaseLabel(files);
         formData.append('label', label);
         formData.append('operation', readOperation());
+        formData.append('entry_type', uploadEntryType);
         formData.append('tester_email', tester.email);
         formData.append('tester_name', tester.name || tester.email);
+        formData.append('radicacion_json', JSON.stringify(radicacionValues));
         for (const f of files) formData.append('files', f, f.name);
 
         const uploadRes = await fetchWithRetry(operationApiUrl('/api/cases'), {
@@ -1114,6 +4585,17 @@ async function runWorkflow() {
         const caseId = uploadData.id || uploadData.case_id;
         if (!caseId) throw new Error('El backend no devolvió un ID de caso.');
         activeCaseId = caseId;
+        activeCasePayload = {
+            ...uploadData,
+            id: caseId,
+            label,
+            entry_type: uploadEntryType,
+        };
+        writeDigitacionDraft({
+            ...emptyDigitacionDraftForCase(caseId, activeCasePayload),
+            values: { ...radicacionValues },
+        });
+        markFlowRadicacionUsed();
         renderStep(0, 'done');
 
         // Lanzar workflow (encolado automático)
@@ -1129,7 +4611,7 @@ async function runWorkflow() {
         renderStep(2, 'active');
 
         // ✅ Reactivar botón inmediatamente — el operador puede enviar más contratos
-        if (btn) { btn.disabled = false; btn.textContent = 'Ejecutar prevalidación'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Radicar y validar documentos'; }
         if (progressMsg) {
             progressMsg.innerHTML = `<span style="font-weight:600;color:var(--c-brand)">${escapeHtml(label)}</span> · En cola de procesamiento`;
         }
@@ -1200,6 +4682,9 @@ async function runWorkflow() {
         if (progressMsg) progressMsg.innerHTML = '';
 
         renderWorkflowResult(activeCasePayload);
+        if (applyDigitacionPrefillFromPayload(activeCasePayload, { silent: true })) {
+            showToast('OCR llevó datos a Digitación', 'ok');
+        }
         document.getElementById('workflowResultCard').style.display = '';
 
         // Actualizar bandeja en background
@@ -1209,7 +4694,7 @@ async function runWorkflow() {
         console.error('runWorkflow:', e);
         if (progressMsg) progressMsg.textContent = 'Error: ' + e.message;
         if (statusPill) { statusPill.className = 'status-pill err'; statusPill.textContent = 'Error'; }
-        if (btn) { btn.disabled = false; btn.textContent = 'Ejecutar prevalidación'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Radicar y validar documentos'; }
     }
 }
 
@@ -1244,6 +4729,9 @@ function renderWorkflowResult(payload) {
     const acceptedExceptions = getAcceptedValidationExceptions(payload);
     const has926 = Boolean((wf.output_926||{}).legacy?.ok);
     const filename926 = (wf.output_926||{}).legacy?.filename || 'archivo_core.txt';
+    const digitacionPrefill = a.digitacion_prefill || {};
+    const digitacionPrefillCount = Object.keys(digitacionPrefill.values || {}).length;
+    const entryTypeLabel = (payload.entry_type || digitacionPrefill.entry_type || 'empresa') === 'contratista' ? 'Contratista' : 'Empresa';
 
     const stateClass = isNoAprobado ? 'err' : (isAprobable ? 'ok' : 'warn');
     const stateLabel = isNoAprobado ? 'No pasó validación' : (isAprobable ? 'Aprobable' : 'Observado');
@@ -1264,7 +4752,17 @@ function renderWorkflowResult(payload) {
                 <div class="result-kv"><div class="result-kv-label">Sedes</div><div class="result-kv-val">${escapeHtml(String(sedes))}</div></div>
                 <div class="result-kv"><div class="result-kv-label">Nómina total</div><div class="result-kv-val">${escapeHtml(nomina)}</div></div>
                 <div class="result-kv"><div class="result-kv-label">Estado</div><div class="result-kv-val">${escapeHtml(estado)}</div></div>
+                <div class="result-kv"><div class="result-kv-label">Entrada</div><div class="result-kv-val">${escapeHtml(entryTypeLabel)}</div></div>
             </div>
+            ${digitacionPrefillCount ? `
+                <div class="result-blockers" style="border-left-color:var(--c-info)">
+                    <div class="result-blockers-title">Digitación OCR</div>
+                    <div class="result-blocker-item">
+                        <span>✓</span>
+                        <span>${digitacionPrefillCount} campo(s) prellenados desde ${digitacionPrefill.documents_processed || 0} documento(s) OCR.</span>
+                    </div>
+                </div>
+            ` : ''}
             ${blockers.length ? `
                 <div class="result-blockers">
                     <div class="result-blockers-title">Bloqueantes detectados (${blockers.length})</div>
@@ -1291,6 +4789,7 @@ function renderWorkflowResult(payload) {
             <div class="result-actions">
                 <button class="btn-secondary" data-action="reporte" data-case="${escapeHtml(payload.id||'')}" type="button">Ver reporte ejecutivo</button>
                 <button class="btn-secondary" data-action="clasificacion" data-case="${escapeHtml(payload.id||'')}" type="button">Ver documentos</button>
+                ${digitacionPrefillCount ? `<button class="btn-secondary" data-action="digitacion-prefill" data-case="${escapeHtml(payload.id||'')}" type="button">Abrir digitación prellenada</button>` : ''}
                 ${has926 ? `<button class="btn-primary" data-action="descargar926" data-case="${escapeHtml(payload.id||'')}" data-file="${escapeHtml(filename926)}" type="button">Descargar plano</button>` : ''}
             </div>
         </div>
@@ -1366,20 +4865,22 @@ function buildDocItems(payload) {
     const docMeta = buildDocMetaMap(payload);
     const received = Array.isArray(a.checklist?.received_summary) ? a.checklist.received_summary : [];
     const seen = new Set();
+    const removedFiles = new Set((a.document_workspace?.removed_files || []).filter(Boolean));
+    const isRemoved = (filename) => removedFiles.has(filename);
     // Orden del workspace
     const workspaceOrder = Array.isArray(a.document_workspace?.order) ? a.document_workspace.order : [];
 
     // XLSX primero
     const xlsxFiles = collectXlsxFiles(payload);
     for (const f of xlsxFiles) {
-        if (!f || seen.has(f)) continue;
+        if (!f || seen.has(f) || isRemoved(f)) continue;
         seen.add(f);
         items.push({ file: f, kind: 'xlsx', type: 'xlsx', label: 'Archivo base XLSX', displayName: f });
     }
     // PDFs desde received_summary (ya clasificados)
     for (const group of received) {
         for (const f of (group.files||[])) {
-            if (!f || seen.has(f)) continue;
+            if (!f || seen.has(f) || isRemoved(f)) continue;
             seen.add(f);
             const meta = docMeta[f] || {};
             const reviewEntry = getManualReviewEntry(manualReview, 'document', f);
@@ -1388,27 +4889,27 @@ function buildDocItems(payload) {
                 : (meta.document_type || group.label || 'pdf');
             const isCorrected = reviewEntry?.verdict === 'no';
             const legacyCode = isCorrected ? null : (meta.legacy_code ?? null);
-            items.push({ file: f, kind: 'document', type: effectiveType, label: getReviewTypeLabelWithCode(effectiveType, legacyCode), displayName: meta.display_name || f, corrected: isCorrected, codeSource: meta.code_source || '' });
+            items.push({ file: f, kind: 'document', type: effectiveType, label: getReviewTypeLabelWithCode(effectiveType, legacyCode), displayName: meta.display_name || f, corrected: isCorrected, codeSource: meta.code_source || '', validationStatus: meta.validation_status || group.validation_status || '', requiresValidation: Boolean(meta.requires_manual_validation || group.requires_manual_validation) });
         }
     }
     // Agregar documentos del análisis que no aparecieron en received_summary
     for (const [f, meta] of Object.entries(docMeta)) {
-        if (!f || seen.has(f)) continue;
+        if (!f || seen.has(f) || isRemoved(f)) continue;
         seen.add(f);
         const reviewEntry = getManualReviewEntry(manualReview, 'document', f);
         const effectiveType = reviewEntry?.verdict === 'no' && reviewEntry.expected_type
             ? reviewEntry.expected_type
             : (meta.document_type || 'pdf');
-        items.push({ file: f, kind: 'document', type: effectiveType, label: getReviewTypeLabel(effectiveType), displayName: meta.display_name || f, corrected: reviewEntry?.verdict === 'no' });
+        items.push({ file: f, kind: 'document', type: effectiveType, label: getReviewTypeLabel(effectiveType), displayName: meta.display_name || f, corrected: reviewEntry?.verdict === 'no', validationStatus: meta.validation_status || '', requiresValidation: Boolean(meta.requires_manual_validation) });
     }
     // Agregar archivos físicos del caso que no aparecieron en ningún análisis
     const physicalFiles = (payload.files || []).map(f => f.filename || f.file || '').filter(Boolean);
     for (const f of physicalFiles) {
-        if (!f || seen.has(f)) continue;
+        if (!f || seen.has(f) || isRemoved(f)) continue;
         const lower = f.toLowerCase();
         if (lower.endsWith('.xlsx') || lower.endsWith('.xls') || lower.endsWith('.xlsm')) continue;
         seen.add(f);
-        items.push({ file: f, kind: 'document', type: 'pdf', label: f.replace(/\.[^.]+$/, ''), displayName: f, corrected: false });
+        items.push({ file: f, kind: 'document', type: 'pdf', label: f.replace(/\.[^.]+$/, ''), displayName: f, corrected: false, validationStatus: 'validar', requiresValidation: true });
     }
     // Aplicar orden del workspace si existe
     if (workspaceOrder.length) {
@@ -1458,7 +4959,7 @@ function getManualReviewEntry(manualReview, kind, file) {
         const entry = manualReview.documents[file];
         if (entry) return { file, expected_type: entry.expected_type, verdict: entry.verdict };
     }
-    // Formato legacy: manual_review.reviews es un array
+    // Compatibilidad con revisiones guardadas en versiones anteriores.
     return (Array.isArray(manualReview.reviews) ? manualReview.reviews : []).find(r => r.file === file) || null;
 }
 
@@ -1537,6 +5038,7 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
             </span>
             <span class="doc-item-name" title="${escapeHtml(item.displayName||item.file)}">${escapeHtml(item.label)}</span>
             ${isRag ? '<span class="doc-item-corrected" style="background:var(--c-info-bg);color:var(--c-blue)" title="Clasificado por RAG">🧠</span>' : ''}
+            ${item.requiresValidation ? '<span class="doc-item-corrected" style="background:var(--c-warn-bg);color:var(--c-warn)" title="Requiere validar tipificación">validar</span>' : ''}
             ${item.corrected ? '<span class="doc-item-corrected">corregido</span>' : ''}
             ${item.kind !== 'xlsx' ? `
             <span class="doc-item-actions">
@@ -1573,7 +5075,17 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
             try {
                 const r = await fetch(caseApiUrl(payload.id, `/files/${encodeURIComponent(filename)}`), { method: 'DELETE' });
                 if (r.ok) {
-                    btn.closest('.doc-item')?.remove();
+                    const data = await r.json().catch(() => ({}));
+                    if (data?.case) {
+                        activeCasePayload = data.case;
+                        renderClassifDocList(data.case, sortBy, sortDir);
+                    } else {
+                        removeDocumentFromPayload(payload, filename);
+                        renderClassifDocList(payload, sortBy, sortDir);
+                    }
+                    if (preview) preview.innerHTML = '<div class="empty-state">Selecciona un documento para visualizarlo</div>';
+                    if (previewTitle) previewTitle.textContent = 'Documento eliminado';
+                    document.getElementById('classifPreviewActions')?.replaceChildren();
                     showToast(`Archivo eliminado: ${filename}`, 'ok');
                 } else {
                     showToast('No se pudo eliminar el archivo', 'err');
@@ -1633,9 +5145,34 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
     });
 }
 
+function removeDocumentFromPayload(payload, filename) {
+    if (!payload || !filename) return payload;
+    payload.files = (payload.files || []).filter(item => (item.filename || item.file || '') !== filename);
+    const analysis = payload.analysis || {};
+    ['documents', 'document_list'].forEach(key => {
+        if (Array.isArray(analysis[key])) analysis[key] = analysis[key].filter(item => (item.filename || '') !== filename);
+    });
+    const checklist = analysis.checklist || {};
+    (checklist.received_summary || []).forEach(group => {
+        group.files = (group.files || []).filter(item => item !== filename);
+        group.count = group.files.length;
+    });
+    const workspace = analysis.document_workspace || {};
+    workspace.order = (workspace.order || []).filter(item => item !== filename);
+    workspace.removed_files = (workspace.removed_files || []).filter(item => item !== filename);
+    const manual = analysis.manual_review || {};
+    if (manual.documents) delete manual.documents[filename];
+    if (manual.comisiones) delete manual.comisiones[filename];
+    if (Array.isArray(manual.reviews)) {
+        manual.reviews = manual.reviews.filter(item => (item.file || item.filename || '') !== filename);
+    }
+    payload.analysis = analysis;
+    return payload;
+}
+
 async function renderDocPreview(container, caseId, item) {
     if (!caseId || !item.file) { container.innerHTML = '<div class="empty-state">Sin vista previa</div>'; return; }
-    const url = caseFileUrl(caseId, item.file, true);
+    const url = documentViewerUrl(caseId, item.file, true);
     const lower = item.file.toLowerCase();
     if (lower.endsWith('.pdf')) {
         container.innerHTML = `<div class="doc-frame"><iframe src="${escapeHtml(url)}" title="${escapeHtml(item.displayName||item.file)}"></iframe></div>`;
@@ -1683,17 +5220,6 @@ function renderClassifActions(item, payload) {
             </div>
             <div class="reclassify-status" id="reclassifyStatus"></div>
         </div>
-        ${item.type === 'entrega_documentos' ? `
-        <div class="reclassify-panel" style="margin-top:10px;border-top:1px solid var(--c-border);padding-top:12px">
-            <div style="font-size:12px;font-weight:600;color:var(--c-text-1);margin-bottom:8px">Corrección manual de comisiones</div>
-            <div style="font-size:11px;color:var(--c-text-2);margin-bottom:10px">Si el sistema leyó mal la tabla CPS-F-11, ingresa los datos manualmente.</div>
-            <div id="comisionRows" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
-            <button class="btn-secondary" id="addComisionRow" type="button" style="font-size:11px;padding:5px 10px">+ Agregar intermediario</button>
-            <div style="margin-top:8px;display:flex;gap:6px">
-                <button class="btn-primary" id="saveComisiones" type="button" style="font-size:12px;padding:6px 14px">Guardar comisiones</button>
-                <span id="comisionStatus" style="font-size:11px;line-height:2.2"></span>
-            </div>
-        </div>` : ''}
     `;
 
     document.getElementById('reclassifyBtn')?.addEventListener('click', async () => {
@@ -1725,8 +5251,9 @@ function renderClassifActions(item, payload) {
 
             // Leer respuesta para ver si RAG aprendió
             let ragMensaje = '';
+            let respData = null;
             try {
-                const respData = await r.json();
+                respData = await r.json();
                 ragMensaje = respData?.rag_mensaje || '';
             } catch {}
 
@@ -1736,6 +5263,19 @@ function renderClassifActions(item, payload) {
             item.type = newType;
             item.label = newLabel;
             item.corrected = true;
+            payload.analysis = payload.analysis || {};
+            if (respData?.manual_review) {
+                payload.analysis.manual_review = respData.manual_review;
+            } else {
+                payload.analysis.manual_review = payload.analysis.manual_review || {};
+                payload.analysis.manual_review.documents = payload.analysis.manual_review.documents || {};
+                payload.analysis.manual_review.documents[item.file] = {
+                    expected_type: newType,
+                    verdict: 'no',
+                    updated_at: new Date().toISOString(),
+                };
+            }
+            if (activeCasePayload?.id === payload.id) activeCasePayload = payload;
 
             // Actualizar el elemento en la lista sin recargar todo
             const activeDocItem = document.querySelector('.doc-item.active');
@@ -1776,76 +5316,6 @@ function renderClassifActions(item, payload) {
         }
     });
 
-    // ── Panel de comisiones manuales (solo para entrega_documentos) ──
-    if (item.type === 'entrega_documentos') {
-        const comisionRows = document.getElementById('comisionRows');
-        const addBtn = document.getElementById('addComisionRow');
-        const saveBtn = document.getElementById('saveComisiones');
-        const comisionStatus = document.getElementById('comisionStatus');
-
-        // Cargar correcciones existentes si las hay
-        const existingComisiones = payload?.analysis?.manual_review?.comisiones?.[item.file] || [];
-        
-        function renderComisionRow(data = {}) {
-            const idx = comisionRows.children.length;
-            const div = document.createElement('div');
-            div.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap';
-            div.innerHTML = `
-                <select class="field-select comision-codigo" style="width:110px;font-size:11px">
-                    <option value="1" ${data.codigo==='1'?'selected':''}>01 - Consultor</option>
-                    <option value="3" ${data.codigo==='3'?'selected':''}>03 - Corredor</option>
-                </select>
-                <input class="field-input comision-cedula" placeholder="Nro. documento" 
-                    value="${escapeHtml(data.cedula||'')}" style="width:130px;font-size:11px;padding:5px 8px">
-                <input class="field-input comision-pct" placeholder="%" 
-                    value="${escapeHtml(data.porcentaje||'100')}" style="width:55px;font-size:11px;padding:5px 8px">
-                <button class="btn-icon" type="button" style="font-size:12px;padding:2px 6px" 
-                    onclick="this.closest('div').remove()">✕</button>
-            `;
-            comisionRows.appendChild(div);
-        }
-
-        // Renderizar filas existentes o una vacía
-        if (existingComisiones.length) {
-            existingComisiones.forEach(c => renderComisionRow(c));
-        } else {
-            renderComisionRow();
-        }
-
-        addBtn?.addEventListener('click', () => renderComisionRow());
-
-        saveBtn?.addEventListener('click', async () => {
-            const rows = [...comisionRows.querySelectorAll('div')].map(row => ({
-                codigo: row.querySelector('.comision-codigo')?.value || '',
-                cedula: row.querySelector('.comision-cedula')?.value?.trim() || '',
-                porcentaje: row.querySelector('.comision-pct')?.value?.trim() || '100',
-            })).filter(r => r.cedula);
-
-            if (!rows.length) { comisionStatus.textContent = 'Agrega al menos un intermediario.'; return; }
-
-            try {
-                saveBtn.disabled = true; saveBtn.textContent = 'Guardando...';
-                const r = await fetchWithRetry(caseApiUrl(payload.id, '/manual-review'), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        kind: 'comisiones',
-                        filename: item.file,
-                        verdict: 'no',
-                        comisiones: rows,
-                    }),
-                });
-                if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                comisionStatus.style.color = 'var(--c-ok)';
-                comisionStatus.textContent = `✓ ${rows.length} intermediario(s) guardados`;
-                saveBtn.disabled = false; saveBtn.textContent = 'Guardar comisiones';
-            } catch(e) {
-                comisionStatus.style.color = 'var(--c-err)';
-                comisionStatus.textContent = 'Error: ' + e.message;
-                saveBtn.disabled = false; saveBtn.textContent = 'Guardar comisiones';
-            }
-        });
-    }
 }
 
 async function reclassifyDocument(caseId, item, newType) {
@@ -1917,7 +5387,7 @@ function renderValidacionOCR(container, payload) {
     </div>`;
 
     if (blockerRecords.length) {
-        html += `<div class="report-section-title" style="margin-bottom:8px">Bloqueantes de prevalidación</div>`;
+        html += `<div class="report-section-title" style="margin-bottom:8px">Bloqueantes de validación documental</div>`;
         html += `<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">`;
         for (const [i, b] of blockerRecords.entries()) {
             html += `
@@ -2096,7 +5566,7 @@ async function loadReporteSidebar() {
         const r = await fetchWithRetry(operationApiUrl('/api/cases/production-summary'));
         const data = await r.json();
         let cases = Array.isArray(data.cases) ? data.cases : [];
-        // Perfil Colmena: solo mostrar contratos aprobables
+        // Perfil de producción: solo mostrar contratos aprobables cuando aplique.
         if (readProfile() === 'colmena') {
             cases = cases.filter(c => {
                 const { status, finalStatus } = resolveCase(c);
@@ -2217,7 +5687,7 @@ function renderReporte(container, payload) {
     const has926 = Boolean((wf.output_926||{}).legacy?.ok);
     const filename926 = (wf.output_926||{}).legacy?.filename || 'archivo_core.txt';
 
-    // Resultado legacy APOLO
+    // Resultado de entrega al sistema destino.
     const legacy926 = (wf.output_926||{}).legacy || (a.output_926||{}).legacy || {};
     const legacyOk = legacy926.ok || false;
     const legacyNumAfil = resolveContractNumber(a, payload);
@@ -2314,9 +5784,8 @@ function renderReporte(container, payload) {
             </div>
             <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
                 <button class="btn-secondary" data-action="clasificacion" data-case="${escapeHtml(caseId)}" type="button">Ver documentos</button>
-                <button class="btn-secondary" data-panel="comisiones" id="btnComisiones" type="button">Comisiones</button>
                 ${has926 ? `<button class="btn-primary" data-action="descargar926" data-case="${escapeHtml(caseId)}" data-file="${escapeHtml(filename926)}" type="button">Descargar plano</button>` : ''}
-                ${!isAprobable ? `<button class="btn-warn" id="reprocesarBtn" data-case="${escapeHtml(caseId)}" type="button" title="Volver a ejecutar la prevalidación">↺ Reprocesar</button>` : ''}
+                ${!isAprobable ? `<button class="btn-warn" id="reprocesarBtn" data-case="${escapeHtml(caseId)}" type="button" title="Volver a ejecutar la validación documental">↺ Reprocesar</button>` : ''}
             </div>
         </div>
         <div id="reprocesarStatus" style="display:none;padding:8px 16px;font-size:12px;background:var(--c-info-bg);color:var(--c-info);border-bottom:1px solid var(--c-border)"></div>
@@ -2879,160 +6348,21 @@ function renderReporte(container, payload) {
                         dataPanel.querySelector('#btnVerSedes').classList.remove('active');
                     });
                 }
-            } else if (panelType === 'comisiones') {
-                // Panel de comisiones con visor de documento
-                const mr = a.manual_review || {};
-                const comisionesManuales = mr.comisiones || {};
-                const docs = a.documents || [];
-                const entregaDocs = docs.filter(d => d.document_type === 'entrega_documentos');
-                const intermediarios = a.validacion_resumen?.matches?.entrega_documentos_intermediario || {};
-
-                let comisionHTML = `
-                    <div class="blocker-panel-head">
-                        <span class="blocker-panel-title">💰 Comisiones e intermediación</span>
-                        <button class="btn-icon" id="dataPanelClose">✕</button>
-                    </div>
-                    <div style="padding:12px;max-height:500px;overflow-y:auto">`;
-
-                if (Object.keys(comisionesManuales).length) {
-                    comisionHTML += `<div style="font-size:12px;font-weight:600;margin-bottom:8px">Comisiones registradas manualmente:</div>`;
-                    for (const [fname, rows] of Object.entries(comisionesManuales)) {
-                        comisionHTML += `<div style="font-size:11px;color:var(--c-text-2);margin-bottom:4px">📄 ${escapeHtml(fname)}</div>`;
-                        comisionHTML += `<table class="blocker-table" style="margin-bottom:12px">
-                            <thead><tr><th>Código</th><th>Documento</th><th>Porcentaje</th></tr></thead>
-                            <tbody>${(rows||[]).map(r => `<tr>
-                                <td>${escapeHtml(String(r.codigo||''))}</td>
-                                <td>${escapeHtml(String(r.cedula||''))}</td>
-                                <td>${escapeHtml(String(r.porcentaje||''))}%</td>
-                            </tr>`).join('')}</tbody></table>`;
-                    }
-                } else if (intermediarios.codigo_intermediario) {
-                    comisionHTML += `<div style="font-size:12px;font-weight:600;margin-bottom:8px">Comisiones leídas del OCR:</div>
-                        <table class="blocker-table"><thead><tr><th>Código</th><th>% Participación</th><th>Archivo</th></tr></thead>
-                        <tbody><tr>
-                            <td>${escapeHtml(String(intermediarios.codigo_intermediario||''))}</td>
-                            <td>${escapeHtml(String(intermediarios.porcentaje_venta||''))}%</td>
-                            <td>${escapeHtml(String(intermediarios.filename||''))}</td>
-                        </tr></tbody></table>`;
-                } else {
-                    comisionHTML += `<div style="color:var(--c-text-2);font-size:12px">No se encontró información de comisiones. Verifica el documento Entrega Doc.</div>`;
-                }
-
-                // Mostrar documentos Entrega Doc para validación visual
-                if (entregaDocs.length) {
-                    comisionHTML += `<div style="font-size:12px;font-weight:600;margin-top:16px;margin-bottom:8px">Documentos fuente (Entrega Doc):</div>
-                        <div style="display:flex;flex-wrap:wrap;gap:8px">`;
-                    for (const doc of entregaDocs) {
-                        const url = caseFileUrl(caseId, doc.filename || '');
-                        comisionHTML += `<a href="${escapeHtml(url)}" target="_blank" class="btn-secondary" style="font-size:11px;padding:5px 10px">
-                            📄 ${escapeHtml(doc.filename||'Entrega Doc')}
-                        </a>`;
-                    }
-                    comisionHTML += `</div>`;
-                }
-
-                comisionHTML += `</div>`;
-                dataPanel.innerHTML = comisionHTML;
             }
             dataPanel.querySelector('#dataPanelClose')?.addEventListener('click', () => {
                 dataPanel.classList.add('hidden');
-                document.getElementById('btnComisiones')?.classList.remove('active');
             });
             dataPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         });
     });
 
-    // ── Botón Comisiones ──────────────────────────────────────
-    document.getElementById('btnComisiones')?.addEventListener('click', function() {
-        const dataPanel = document.getElementById('reportDataPanel');
-        if (!dataPanel) return;
-        if (!dataPanel.classList.contains('hidden') && dataPanel.dataset.panel === 'comisiones') {
-            dataPanel.classList.add('hidden');
-            this.classList.remove('active');
-            return;
-        }
-        dataPanel.dataset.panel = 'comisiones';
-        dataPanel.classList.remove('hidden');
-        this.classList.add('active');
-
-        const mr = a.manual_review || {};
-        const comisionesManuales = mr.comisiones || {};
-        const docs = a.documents || [];
-        const entregaDocs = docs.filter(d => d.document_type === 'entrega_documentos');
-        const intermediarios = a.validacion_resumen?.matches?.entrega_documentos_intermediario || {};
-        const todosInterm = intermediarios.todos_intermediarios || [];
-
-        // Construir tabla de intermediarios
-        let tablaHTML = '';
-        if (Object.keys(comisionesManuales).length) {
-            for (const [fname, rows] of Object.entries(comisionesManuales)) {
-                tablaHTML += `<div style="font-size:11px;color:var(--c-text-2);margin-bottom:4px">📄 ${escapeHtml(fname)} (manual)</div>
-                    <table class="blocker-table" style="margin-bottom:12px">
-                    <thead><tr><th>Código</th><th>Documento</th><th>Nombre</th><th>% Participación</th></tr></thead>
-                    <tbody>${(rows||[]).map(r => `<tr>
-                        <td>${escapeHtml(String(r.codigo||''))}</td>
-                        <td>${escapeHtml(String(r.cedula||''))}</td>
-                        <td>${escapeHtml(String(r.nombre||''))}</td>
-                        <td>${escapeHtml(String(r.porcentaje||''))}%</td>
-                    </tr>`).join('')}</tbody></table>`;
-            }
-        } else if (todosInterm.length) {
-            tablaHTML += `<table class="blocker-table" style="margin-bottom:12px">
-                <thead><tr><th>Código</th><th>Documento</th><th>Nombre</th><th>% Participación</th></tr></thead>
-                <tbody>${todosInterm.map(r => `<tr>
-                    <td>${escapeHtml(String(r.codigo_intermediario||''))}</td>
-                    <td>${escapeHtml(String(r.vendedor_documento||''))}</td>
-                    <td>${escapeHtml(String(r.nombre_intermediario||''))}</td>
-                    <td>${escapeHtml(String(r.porcentaje_venta||''))}%</td>
-                </tr>`).join('')}</tbody></table>`;
-        } else if (intermediarios.codigo_intermediario) {
-            tablaHTML += `<table class="blocker-table" style="margin-bottom:12px">
-                <thead><tr><th>Código</th><th>% Participación</th></tr></thead>
-                <tbody><tr>
-                    <td>${escapeHtml(String(intermediarios.codigo_intermediario||''))}</td>
-                    <td>${escapeHtml(String(intermediarios.porcentaje_venta||''))}%</td>
-                </tr></tbody></table>`;
-        } else {
-            tablaHTML = `<div style="color:var(--c-text-2);font-size:12px;margin-bottom:12px">No se encontró información de comisiones. Verifica el documento Entrega Doc.</div>`;
-        }
-
-        // Visor PDF inline del primer documento Entrega Doc
-        let visorHTML = '';
-        if (entregaDocs.length) {
-            const firstDoc = entregaDocs[0];
-            const pdfUrl = caseFileUrl(caseId, firstDoc.filename || '', true);
-            visorHTML = `
-                <div style="font-size:12px;font-weight:600;margin-top:12px;margin-bottom:6px">📄 Documento fuente — ${escapeHtml(firstDoc.filename||'Entrega Doc')}</div>
-                <iframe src="${escapeHtml(pdfUrl)}" style="width:100%;height:480px;border:1px solid var(--c-border);border-radius:6px" title="Entrega Doc"></iframe>
-                ${entregaDocs.length > 1 ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${entregaDocs.slice(1).map(d => {
-                    const u = caseFileUrl(caseId, d.filename || '', true);
-                    return `<button class="btn-secondary" style="font-size:11px" onclick="this.closest('.report-data-panel').querySelector('iframe').src='${escapeHtml(u)}'">📄 ${escapeHtml(d.filename||'')}</button>`;
-                }).join('')}</div>` : ''}`;
-        }
-
-        dataPanel.innerHTML = `
-            <div class="blocker-panel-head">
-                <span class="blocker-panel-title">💰 Comisiones e intermediación</span>
-                <button class="btn-icon" id="dataPanelClose2">✕</button>
-            </div>
-            <div style="padding:12px;overflow-y:auto;max-height:700px">
-                ${tablaHTML}
-                ${visorHTML}
-            </div>`;
-
-        dataPanel.querySelector('#dataPanelClose2')?.addEventListener('click', () => {
-            dataPanel.classList.add('hidden');
-            document.getElementById('btnComisiones')?.classList.remove('active');
-        });
-        dataPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    });
     // ── Botón Reprocesar ─────────────────────────────────────
     document.getElementById('reprocesarBtn')?.addEventListener('click', async function() {
         const btn = this;
         const statusBar = document.getElementById('reprocesarStatus');
         const id = btn.dataset.case;
         if (!id) return;
-        if (!confirm('¿Reprocesar este contrato? Se volverá a ejecutar la prevalidación completa.')) return;
+        if (!confirm('¿Reprocesar este contrato? Se volverá a ejecutar la validación documental completa.')) return;
         btn.disabled = true;
         btn.textContent = '↺ Enviando...';
         if (statusBar) { statusBar.style.display = ''; statusBar.textContent = 'Enviando a la cola...'; }
@@ -3916,7 +7246,7 @@ function openModal(title, caseId, filename, displayName) {
     body.innerHTML = '<div class="loading-msg">Cargando...</div>';
     modal.classList.remove('hidden');
     backdrop.classList.remove('hidden');
-    const url = caseFileUrl(caseId, filename, true);
+    const url = documentViewerUrl(caseId, filename, true);
     const lower = filename.toLowerCase();
     if (lower.endsWith('.pdf')) {
         body.innerHTML = `<div class="doc-frame" style="min-height:500px"><iframe src="${escapeHtml(url)}" style="width:100%;height:600px;border:none"></iframe></div>`;
@@ -3956,6 +7286,196 @@ function init() {
         switchView(e.target.value);
     });
 
+    document.getElementById('digitacionTabs')?.addEventListener('click', e => {
+        const tab = e.target.closest('[data-digitacion-tab]');
+        if (!tab) return;
+        switchDigitacionTab(tab.dataset.digitacionTab);
+    });
+    document.getElementById('digitacionSaveBtn')?.addEventListener('click', saveDigitacionDraft);
+    document.getElementById('digitacionValidateBtn')?.addEventListener('click', () => validateDigitacionWithBackend({ mode: 'full', requireAll: true }));
+    document.getElementById('digitacionRunBtn')?.addEventListener('click', runDigitacionWorkflow);
+    document.getElementById('digitacionClearBtn')?.addEventListener('click', clearDigitacionDraft);
+    document.getElementById('digitacionExportBtn')?.addEventListener('click', exportDigitacionJson);
+    document.getElementById('digitacionOpenDocBtn')?.addEventListener('click', e => {
+        const btn = e.currentTarget;
+        if (!btn?.dataset?.case || !btn?.dataset?.file) return;
+        openModal(btn.dataset.title || 'Soporte', btn.dataset.case, btn.dataset.file, btn.dataset.displayName || btn.dataset.file);
+    });
+    document.getElementById('digitacionDocList')?.addEventListener('click', e => {
+        const btn = e.target.closest('[data-digitacion-doc-file]');
+        if (!btn) return;
+        digitacionEvidenceManualFile = btn.dataset.digitacionDocFile || '';
+        const select = document.getElementById('digitacionDocSelect');
+        if (select) select.value = digitacionEvidenceManualFile;
+        const field = document.activeElement?.classList?.contains('digitacion-field')
+            ? document.activeElement
+            : digitacionActiveFieldKey
+                ? getDigitacionField(digitacionActiveFieldKey)
+            : document.querySelector(`[data-digitacion-panel="${digitacionActiveTab}"] .digitacion-field`);
+        updateDigitacionEvidenceForField(field, digitacionEvidenceManualFile);
+    });
+    document.getElementById('digitacionDocSelect')?.addEventListener('change', e => {
+        digitacionEvidenceManualFile = e.target.value || '';
+        if (!digitacionEvidenceManualFile) digitacionEvidenceDocFile = '';
+        const field = document.activeElement?.classList?.contains('digitacion-field')
+            ? document.activeElement
+            : digitacionActiveFieldKey
+                ? getDigitacionField(digitacionActiveFieldKey)
+                : document.querySelector(`[data-digitacion-panel="${digitacionActiveTab}"] .digitacion-field`);
+        updateDigitacionEvidenceForField(field, digitacionEvidenceManualFile);
+    });
+    document.querySelectorAll('.js-department-select').forEach(select => {
+        select.addEventListener('change', () => {
+            updateMunicipalitySelect(select, '');
+            const municipality = document.getElementById(select.dataset.municipalityTarget || '');
+            if (municipality) {
+                municipality.value = '';
+                setDigitacionFieldError(municipality, '');
+            }
+        });
+    });
+    document.querySelectorAll('.js-municipality-select').forEach(select => {
+        select.addEventListener('change', () => {
+            syncDepartmentFromMunicipality(select);
+            setDigitacionFieldError(select, '');
+        });
+    });
+    getDigitacionFields().forEach(field => {
+        field.addEventListener('input', () => {
+            const key = field.dataset.digKey;
+            if (DIGITACION_ALPHA_KEYS.has(key)) {
+                const cleaned = field.value.replace(DIGITACION_ALPHA_CLEAN_RE, '');
+                if (field.value !== cleaned) field.value = cleaned;
+            }
+            if (key === 'sede_centro_trabajo_nombre') {
+                const cleaned = field.value.replace(DIGITACION_ALNUM_CLEAN_RE, '').slice(0, 60);
+                if (field.value !== cleaned) field.value = cleaned;
+            }
+            if (DIGITACION_DIGIT_ONLY_KEYS.has(key)) {
+                const cleaned = field.value.replace(/\D/g, '');
+                if (field.value !== cleaned) field.value = cleaned;
+            }
+            if (key === 'razon_social') {
+                const cleaned = field.value.replace(DIGITACION_ALNUM_CLEAN_RE, '');
+                if (field.value !== cleaned) field.value = cleaned;
+            }
+            if (DIGITACION_SN_KEYS.has(key) || ['novedad_autoliquidacion', 'novedad_origen', 'empresa_zona_localizacion'].includes(key)) {
+                const cleaned = field.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 1);
+                if (field.value !== cleaned) field.value = cleaned;
+            }
+            normalizeDigitacionFieldInPlace(field);
+            const limit = AFILEGA_MDB_FIELD_LIMITS[key];
+            if (limit && key !== 'cargo_actividad' && field.value.length > limit) field.value = field.value.slice(0, limit);
+            if (key === 'nit') {
+                const dvField = getDigitacionField('nit_dv');
+                const expected = calculateAfilegaNitDv(field.value);
+                if (dvField && expected && !dvField.value) dvField.value = expected;
+            }
+            if (key === 'fecha_radicacion') {
+                syncDigitacionCoverageDate(true);
+            }
+            if (key === 'fecha_nacimiento') {
+                syncDigitacionWorkerAge();
+            }
+            if (key === 'tipo_documento_afiliado') {
+                setDigitacionFieldError(getDigitacionField('documento_afiliado'), '');
+            }
+            if (key === 'sede_codigo' || key === 'sede_nombre' || key === 'sede_centro_trabajo_nombre') {
+                updateTrabajadorCentroOptions();
+            }
+            if (key === 'codigo_actividad_economica') {
+                syncDigitacionActivityDependentFields('codigo_actividad_economica');
+            }
+            if (key === 'camara_codigo_actividad') {
+                const profile = digitacionCamaraActivityProfile(field.value);
+                const cameraActivityField = getDigitacionField('camara_actividad_principal');
+                const activityName = profile?.nombre || profile?.actividad || '';
+                if (cameraActivityField && activityName) {
+                    cameraActivityField.value = activityName;
+                    normalizeDigitacionFieldInPlace(cameraActivityField);
+                }
+            }
+            if (key === 'sede_codigo_actividad') {
+                syncDigitacionActivityDependentFields('sede_codigo_actividad');
+            }
+            if (key === 'sede_grado') {
+                syncDigitacionSedeTarifa();
+            }
+            if (key === 'empresa_tipo_aportante') {
+                const defaults = DIGITACION_TIPO_APORTANTE_DEFAULTS[field.value] || {};
+                const claseField = getDigitacionField('empresa_clase_aportante');
+                const vinculadorField = getDigitacionField('empresa_vinculador_laboral');
+                if (claseField && defaults.clase && !claseField.value) claseField.value = defaults.clase;
+                if (vinculadorField && defaults.vinculador && !vinculadorField.value) vinculadorField.value = defaults.vinculador;
+            }
+            renderDigitacionAutocomplete(field);
+            setDigitacionFieldError(field, '');
+            updateDigitacionStatus('Cambios sin guardar', 'warn');
+            updateDigitacionEvidenceForField(field);
+        });
+        field.addEventListener('change', () => {
+            if (field.dataset.digKey === 'tipo_afiliacion') {
+                const data = collectDigitacionData();
+                updateDigitacionContractorMode(data, { clearWorkers: digitacionIsContratista(data.values) });
+                markDigitacionRequiredFields();
+                switchDigitacionTab(digitacionActiveTab);
+            }
+            if (field.dataset.digKey === 'fecha_radicacion') {
+                syncDigitacionCoverageDate(true);
+            }
+            if (field.dataset.digKey === 'fecha_nacimiento') {
+                syncDigitacionWorkerAge();
+            }
+            if (field.dataset.digKey === 'tipo_documento_afiliado') {
+                const docField = getDigitacionField('documento_afiliado');
+                if (docField?.value) {
+                    setDigitacionFieldError(
+                        docField,
+                        validateDigitacionValue('documento_afiliado', docField.value, collectDigitacionData().values),
+                    );
+                }
+            }
+            if (field.dataset.digKey === 'sede_codigo' || field.dataset.digKey === 'sede_nombre' || field.dataset.digKey === 'sede_centro_trabajo_nombre') {
+                updateTrabajadorCentroOptions();
+            }
+            if (field.dataset.digKey === 'codigo_actividad_economica') {
+                syncDigitacionActivityDependentFields('codigo_actividad_economica');
+            }
+            if (field.dataset.digKey === 'sede_codigo_actividad') {
+                syncDigitacionActivityDependentFields('sede_codigo_actividad');
+            }
+            if (field.dataset.digKey === 'sede_grado') {
+                syncDigitacionSedeTarifa();
+            }
+            if (field.dataset.digKey === 'empresa_tipo_aportante') {
+                const defaults = DIGITACION_TIPO_APORTANTE_DEFAULTS[field.value] || {};
+                const claseField = getDigitacionField('empresa_clase_aportante');
+                const vinculadorField = getDigitacionField('empresa_vinculador_laboral');
+                if (claseField && defaults.clase && !claseField.value) claseField.value = defaults.clase;
+                if (vinculadorField && defaults.vinculador && !vinculadorField.value) vinculadorField.value = defaults.vinculador;
+            }
+            const message = validateDigitacionValue(field.dataset.digKey, field.value, collectDigitacionData().values);
+            setDigitacionFieldError(field, message);
+            updateDigitacionStatus('Cambios sin guardar', 'warn');
+            updateDigitacionEvidenceForField(field);
+        });
+        field.addEventListener('focus', () => {
+            renderDigitacionAutocomplete(field);
+            updateDigitacionEvidenceForField(field);
+        });
+        field.addEventListener('blur', () => {
+            window.setTimeout(() => hideDigitacionAutocomplete(field), 140);
+        });
+        field.addEventListener('keydown', e => {
+            if (handleDigitacionAutocompleteKeydown(field, e)) return;
+            if (e.key !== 'Enter') return;
+            if (field.tagName === 'TEXTAREA' && e.shiftKey) return;
+            e.preventDefault();
+            field.dispatchEvent(new Event('change', { bubbles: true }));
+            focusNextDigitacionField(field, e.shiftKey ? -1 : 1);
+        });
+    });
+
     // Logout
     document.getElementById('logoutBtn')?.addEventListener('click', () => {
         clearSession(); activeCaseId = null; activeCasePayload = null;
@@ -3979,10 +7499,10 @@ function init() {
         const filter = card.dataset.filter;
         // Mapear filtro a tab
         const tabMap = {
-            'cola': 'cola',
-            'aprobables': 'aprobables',
-            'observados': 'observados',
-            'no-aprobados': 'no-aprobados',
+            'radicadas': 'radicadas',
+            'en-proceso': 'en-proceso',
+            'por-entregar': 'por-entregar',
+            'en-devolucion': 'en-devolucion',
         };
         const tab = tabMap[filter] || 'todos';
         // Activar tab correspondiente
@@ -4002,6 +7522,7 @@ function init() {
     document.getElementById('refreshBandejaBtn')?.addEventListener('click', loadBandeja);
 
     // Upload zone
+    setupEntryTypeControls();
     setupUploadZone();
 
     // Producción
@@ -4030,7 +7551,7 @@ function init() {
     // Arranque
     fetch(`${API_URL}/health`)
         .then(r => r.json())
-        .then(d => console.log('✅ AFI Colima conectado:', d))
+        .then(d => console.log('AFILEGA_FA_IMA_LA_V2 conectado:', d))
         .catch(e => console.warn('⚠ Health check:', e.message));
 
     loadTesterRoster();

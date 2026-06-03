@@ -94,7 +94,9 @@ services:
       DB_ALIAS_TEMPORAL_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/temporal
       DB_ALIAS_WIMG004_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/wimg004
       DB_ALIAS_YBR_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/ybr
-      AFILIACIONES_ENGINE_STATE_PATH: /tmp/afiliaciones_engine_state.json
+      AFILIACIONES_ENGINE_STATE_PATH: ${AFILIACIONES_ENGINE_STATE_PATH:-/data/compat/afiliaciones_engine_state.json}
+      AFILIACIONES_926_HISTORY_DIR: ${AFILIACIONES_926_HISTORY_DIR:-/data/compat/926_history}
+      AFILIACIONES_ORACLE_FLATFILE: ${AFILIACIONES_ORACLE_FLATFILE:-/data/raw/BkCargue_reference.txt}
       AI_RAG_BACKEND: postgres
       AI_RAG_DB_ALIAS: temporal
       AI_RAG_DB_TABLE: nova_rag_chunks
@@ -113,6 +115,7 @@ services:
       timeout: 10s
       retries: 6
     volumes:
+      - ./data:/data
       - ./shared_downloads:/host_downloads:ro
     networks:
       - imagine_net

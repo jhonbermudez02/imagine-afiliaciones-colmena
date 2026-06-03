@@ -1,0 +1,397 @@
+{
+  "source_mdb": "/Users/escobar/Downloads/Afiliaciones.mdb",
+  "generated_at": "2026-05-11T13:12:38.107014+00:00",
+  "catalogs": {
+    "empresa_forma_pago": [],
+    "empresa_tipo_aportante": [],
+    "empresa_vinculador_laboral": [],
+    "empresa_regimen": [],
+    "empresa_naturaleza": [],
+    "empresa_clase_sociedad": [],
+    "empresa_tamano": [],
+    "empresa_grupo": [],
+    "empresa_tipo_localizacion": [],
+    "empresa_zona_localizacion": [],
+    "sede_tipo_localizacion": [],
+    "sede_grado": [],
+    "tipo_cotizante": [
+      "1",
+      "19"
+    ],
+    "subtipo_cotizante": [
+      "999"
+    ],
+    "tipo_novedad": [
+      "00",
+      "08"
+    ],
+    "novedad_estado": [
+      "1"
+    ],
+    "novedad_autoliquidacion": [
+      "N"
+    ],
+    "novedad_origen": [
+      "C"
+    ]
+  },
+  "source_map": {
+    "empresa_forma_pago": [
+      {
+        "table": "afi_empresa_local",
+        "field": "emp_forma_pago",
+        "values_found": 0
+      },
+      {
+        "table": "afi_empresa_local__",
+        "field": "emp_forma_pago",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_Tmp",
+        "field": "cod_forma_pago",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_TmpN",
+        "field": "cod_forma_pago",
+        "values_found": 0
+      }
+    ],
+    "empresa_tipo_aportante": [
+      {
+        "table": "afi_empresa_local",
+        "field": "emp_aportante",
+        "values_found": 0
+      },
+      {
+        "table": "afi_empresa_local__",
+        "field": "emp_aportante",
+        "values_found": 0
+      },
+      {
+        "table": "afi_empresa_local",
+        "field": "cod_clase_aportante",
+        "values_found": 0
+      },
+      {
+        "table": "afi_empresa_local__",
+        "field": "cod_clase_aportante",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_Tmp",
+        "field": "cod_tipo_aportante",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_TmpN",
+        "field": "cod_tipo_aportante",
+        "values_found": 0
+      }
+    ],
+    "empresa_vinculador_laboral": [
+      {
+        "table": "afi_empresa_local",
+        "field": "emp_vinculador",
+        "values_found": 0
+      },
+      {
+        "table": "afi_empresa_local__",
+        "field": "emp_vinculador",
+        "values_found": 0
+      }
+    ],
+    "empresa_regimen": [
+      {
+        "table": "afi_empresa_local",
+        "field": "emp_regimen",
+        "values_found": 0
+      },
+      {
+        "table": "afi_empresa_local__",
+        "field": "emp_regimen",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_Tmp",
+        "field": "cod_regimen",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_TmpN",
+        "field": "cod_regimen",
+        "values_found": 0
+      }
+    ],
+    "empresa_naturaleza": [
+      {
+        "table": "afi_empresa_local",
+        "field": "emp_cod_naturaleza",
+        "values_found": 0
+      },
+      {
+        "table": "afi_empresa_local__",
+        "field": "emp_cod_naturaleza",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_Tmp",
+        "field": "cod_naturaleza_empresa",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_TmpN",
+        "field": "cod_naturaleza_empresa",
+        "values_found": 0
+      }
+    ],
+    "empresa_clase_sociedad": [
+      {
+        "table": "afi_empresa_local",
+        "field": "emp_cod_clase_soc",
+        "values_found": 0
+      },
+      {
+        "table": "afi_empresa_local__",
+        "field": "emp_cod_clase_soc",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_Tmp",
+        "field": "cod_clase_sociedad",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_TmpN",
+        "field": "cod_clase_sociedad",
+        "values_found": 0
+      }
+    ],
+    "empresa_tamano": [
+      {
+        "table": "afi_empresa_local",
+        "field": "emp_cod_tam_empresa",
+        "values_found": 0
+      },
+      {
+        "table": "afi_empresa_local__",
+        "field": "emp_cod_tam_empresa",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_Tmp",
+        "field": "cod_tamano_empresa",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_TmpN",
+        "field": "cod_tamano_empresa",
+        "values_found": 0
+      }
+    ],
+    "empresa_grupo": [
+      {
+        "table": "afi_empresa_local",
+        "field": "emp_cod_grupo_emp",
+        "values_found": 0
+      },
+      {
+        "table": "afi_empresa_local__",
+        "field": "emp_cod_grupo_emp",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_Tmp",
+        "field": "cod_grupo_empresarial",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_TmpN",
+        "field": "cod_grupo_empresarial",
+        "values_found": 0
+      }
+    ],
+    "empresa_tipo_localizacion": [
+      {
+        "table": "afi_empresa_local",
+        "field": "emp_cod_tipo_loc",
+        "values_found": 0
+      },
+      {
+        "table": "afi_empresa_local__",
+        "field": "emp_cod_tipo_loc",
+        "values_found": 0
+      },
+      {
+        "table": "afi_centros_local",
+        "field": "cen_cod_tipo_loc",
+        "values_found": 0
+      },
+      {
+        "table": "afi_centros_local__",
+        "field": "cen_cod_tipo_loc",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_Tmp",
+        "field": "cod_tipo_localizacion",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_TmpN",
+        "field": "cod_tipo_localizacion",
+        "values_found": 0
+      }
+    ],
+    "empresa_zona_localizacion": [
+      {
+        "table": "afi_empresa_local",
+        "field": "emp_cod_zona_loc",
+        "values_found": 0
+      },
+      {
+        "table": "afi_empresa_local__",
+        "field": "emp_cod_zona_loc",
+        "values_found": 0
+      },
+      {
+        "table": "afi_centros_local",
+        "field": "cen_cod_zona_loc",
+        "values_found": 0
+      },
+      {
+        "table": "afi_centros_local__",
+        "field": "cen_cod_zona_loc",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_Tmp",
+        "field": "cod_zona_localizacion",
+        "values_found": 0
+      },
+      {
+        "table": "Plano_Emp_TmpN",
+        "field": "cod_zona_localizacion",
+        "values_found": 0
+      }
+    ],
+    "sede_tipo_localizacion": [
+      {
+        "table": "afi_centros_local",
+        "field": "cen_cod_tipo_loc",
+        "values_found": 0
+      },
+      {
+        "table": "afi_centros_local__",
+        "field": "cen_cod_tipo_loc",
+        "values_found": 0
+      },
+      {
+        "table": "afi_empresa_local",
+        "field": "emp_cod_tipo_loc",
+        "values_found": 0
+      },
+      {
+        "table": "afi_empresa_local__",
+        "field": "emp_cod_tipo_loc",
+        "values_found": 0
+      }
+    ],
+    "sede_grado": [
+      {
+        "table": "afi_centros_local",
+        "field": "cen_grado",
+        "values_found": 0
+      },
+      {
+        "table": "afi_centros_local__",
+        "field": "cen_grado",
+        "values_found": 0
+      }
+    ],
+    "tipo_cotizante": [
+      {
+        "table": "afi_medio_local",
+        "field": "afi_tipo_cotizante",
+        "values_found": 2
+      },
+      {
+        "table": "afi_medio_local__",
+        "field": "afi_tipo_cotizante",
+        "values_found": 1
+      }
+    ],
+    "subtipo_cotizante": [
+      {
+        "table": "afi_medio_local",
+        "field": "afi_subtipo_cotizante",
+        "values_found": 1
+      },
+      {
+        "table": "afi_medio_local__",
+        "field": "afi_subtipo_cotizante",
+        "values_found": 1
+      }
+    ],
+    "tipo_novedad": [
+      {
+        "table": "Plano_Nov_Tmp",
+        "field": "cod_tipo_novedad_trabajador",
+        "values_found": 2
+      }
+    ],
+    "novedad_estado": [
+      {
+        "table": "Plano_Nov_Tmp",
+        "field": "cod_estado_novedad",
+        "values_found": 1
+      }
+    ],
+    "novedad_autoliquidacion": [
+      {
+        "table": "Plano_Nov_Tmp",
+        "field": "bln_autoliquidacion",
+        "values_found": 1
+      }
+    ],
+    "novedad_origen": [
+      {
+        "table": "Plano_Nov_Tmp",
+        "field": "origen",
+        "values_found": 1
+      }
+    ]
+  },
+  "tables": {
+    "afi_empresa_local": {
+      "rows": 0
+    },
+    "afi_empresa_local__": {
+      "rows": 0
+    },
+    "Plano_Emp_Tmp": {
+      "rows": 0
+    },
+    "Plano_Emp_TmpN": {
+      "rows": 0
+    },
+    "afi_centros_local": {
+      "rows": 0
+    },
+    "afi_centros_local__": {
+      "rows": 0
+    },
+    "afi_medio_local": {
+      "rows": 15
+    },
+    "afi_medio_local__": {
+      "rows": 141
+    },
+    "Plano_Nov_Tmp": {
+      "rows": 127
+    }
+  },
+  "warnings": [],
+  "note": "Los catálogos vacíos provienen de tablas MDB sin registros; el sistema no inventa valores para esos campos."
+}

@@ -1,170 +1,194 @@
 [
   {
-    "codigo": "",
-    "nombre": "NO SUMINISTRADO",
-    "na": 1,
-    "activo": false
+    "codigo": "12",
+    "cod_afp": "12",
+    "nombre": "CAJA NACIONAL DE PREVISION SOCIAL",
+    "estado": true,
+    "source": "tabla_afp.csv",
+    "cod_afp_mps": "25-ago",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "899999010",
+    "nid_consecutivo": "18",
+    "cod_superbancaria": "0"
   },
   {
-    "codigo": "",
-    "nombre": "DESCONOCIDO",
-    "na": 2,
-    "activo": false
-  },
-  {
-    "codigo": 1,
-    "nombre": "COLPATRIA",
-    "na": 3,
-    "activo": true
-  },
-  {
-    "codigo": 10,
-    "nombre": "COLFONDOS",
-    "na": 4,
-    "activo": true
-  },
-  {
-    "codigo": 11,
-    "nombre": "INVERTIR",
-    "na": 5,
-    "activo": false
-  },
-  {
-    "codigo": 12,
-    "nombre": "ING",
-    "na": 6,
-    "activo": false
-  },
-  {
-    "codigo": 13,
-    "nombre": "OLD MUTUAL",
-    "na": 7,
-    "activo": false
-  },
-  {
-    "codigo": 14,
-    "nombre": "PROTECCION",
-    "na": 8,
-    "activo": true
-  },
-  {
-    "codigo": 16,
-    "nombre": "CALDAS",
-    "na": 9,
-    "activo": false
-  },
-  {
-    "codigo": 19,
-    "nombre": "PENSIONAR",
-    "na": 10,
-    "activo": false
-  },
-  {
-    "codigo": 2,
-    "nombre": "COLPENSIONES",
-    "na": 11,
-    "activo": true
-  },
-  {
-    "codigo": 20,
-    "nombre": "FONPRENOR",
-    "na": 12,
-    "activo": false
-  },
-  {
-    "codigo": 23,
-    "nombre": "CAJANAL",
-    "na": 13,
-    "activo": false
-  },
-  {
-    "codigo": 24,
-    "nombre": "PENSIONADOS",
-    "na": 14,
-    "activo": false
-  },
-  {
-    "codigo": 25,
-    "nombre": "BONSALUD",
-    "na": 15,
-    "activo": false
-  },
-  {
-    "codigo": 3,
+    "codigo": "1",
+    "cod_afp": "1",
     "nombre": "PORVENIR",
-    "na": 16,
-    "activo": false
+    "estado": true,
+    "source": "tabla_afp.csv",
+    "cod_afp_mps": "230301",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800144331",
+    "nid_consecutivo": "1",
+    "cod_superbancaria": "2303"
   },
   {
-    "codigo": 4,
+    "codigo": "10",
+    "cod_afp": "10",
+    "nombre": "I.S.S.",
+    "estado": true,
+    "source": "tabla_afp.csv",
+    "cod_afp_mps": "25-nov",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "860013816",
+    "nid_consecutivo": "140",
+    "cod_superbancaria": "5"
+  },
+  {
+    "codigo": "4",
+    "cod_afp": "4",
+    "nombre": "PROTECCION",
+    "estado": true,
+    "source": "tabla_afp.csv",
+    "cod_afp_mps": "230201",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800138188",
+    "nid_consecutivo": "2798",
+    "cod_superbancaria": "2302"
+  },
+  {
+    "codigo": "13",
+    "cod_afp": "13",
+    "nombre": "CAPRECOM",
+    "estado": true,
+    "source": "tabla_afp.csv",
+    "cod_afp_mps": "25-abr",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "899999026",
+    "nid_consecutivo": "110",
+    "cod_superbancaria": "0"
+  },
+  {
+    "codigo": "11",
+    "cod_afp": "11",
     "nombre": "SKANDIA",
-    "na": 17,
-    "activo": false
+    "estado": true,
+    "source": "tabla_afp.csv",
+    "cod_afp_mps": "230901",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800148514",
+    "nid_consecutivo": "2755",
+    "cod_superbancaria": "2309"
   },
   {
-    "codigo": 5,
+    "codigo": "9",
+    "cod_afp": "9",
     "nombre": "HORIZONTE",
-    "na": 18,
-    "activo": false
+    "estado": true,
+    "source": "tabla_afp.csv",
+    "cod_afp_mps": "230501",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800231967",
+    "nid_consecutivo": "2351",
+    "cod_superbancaria": "2305"
   },
   {
-    "codigo": 50,
-    "nombre": "MUNICIPIO",
-    "na": 19,
-    "activo": false
+    "codigo": "8",
+    "cod_afp": "8",
+    "nombre": "COLFONDOS",
+    "estado": true,
+    "source": "tabla_afp.csv",
+    "cod_afp_mps": "231001",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800149496",
+    "nid_consecutivo": "2756",
+    "cod_superbancaria": "2310"
   },
   {
-    "codigo": 6,
-    "nombre": "GANADERA",
-    "na": 20,
-    "activo": false
-  },
-  {
-    "codigo": 73,
-    "nombre": "CONSORCIO  FIDUFOSYGA",
-    "na": 21,
-    "activo": false
-  },
-  {
-    "codigo": 75,
-    "nombre": "CAJA DE PREVISION SOCIAL UNIV.DCT",
-    "na": 22,
-    "activo": false
-  },
-  {
-    "codigo": 77,
-    "nombre": "SERV. DE SALUD DE LA UNIV. DEL CAUCA",
-    "na": 23,
-    "activo": false
-  },
-  {
-    "codigo": 8,
-    "nombre": "DAVIVIR",
-    "na": 24,
-    "activo": false
-  },
-  {
-    "codigo": 9,
+    "codigo": "6",
+    "cod_afp": "6",
     "nombre": "SKANDIA",
-    "na": 25,
-    "activo": false
+    "estado": true,
+    "source": "tabla_afp.csv",
+    "cod_afp_mps": "230904",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800148514",
+    "nid_consecutivo": "8119",
+    "cod_superbancaria": "2309"
   },
   {
-    "codigo": 95,
-    "nombre": "CAJA DE PREVISION SOCIAL STAFE DE BOGOTA",
-    "na": 26,
-    "activo": false
-  },
-  {
-    "codigo": 98,
-    "nombre": "CAPRECUNDI",
-    "na": 27,
-    "activo": false
-  },
-  {
-    "codigo": 99,
+    "codigo": "999",
+    "cod_afp": "999",
     "nombre": "SIN AFP",
-    "na": 28,
-    "activo": false
+    "estado": true,
+    "source": "tabla_afp.csv",
+    "cod_afp_mps": "0",
+    "cod_tipo_identificacion": "999",
+    "nid_numero_identificacion": "0",
+    "nid_consecutivo": "0",
+    "cod_superbancaria": "0"
+  },
+  {
+    "codigo": "7",
+    "cod_afp": "7",
+    "nombre": "SANTANDER",
+    "estado": true,
+    "source": "tabla_afp.csv",
+    "cod_afp_mps": "230801",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800148959",
+    "nid_consecutivo": "2352",
+    "cod_superbancaria": "2308"
+  },
+  {
+    "codigo": "18",
+    "cod_afp": "18",
+    "nombre": "PORVENIR SA",
+    "estado": true,
+    "source": "tabla_afp.csv",
+    "cod_afp_mps": "230301",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800224808",
+    "nid_consecutivo": "2758",
+    "cod_superbancaria": "2303"
+  },
+  {
+    "codigo": "14",
+    "cod_afp": "14",
+    "nombre": "PROTECCION",
+    "estado": true,
+    "source": "tabla_afp.csv",
+    "cod_afp_mps": "230201",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800229739",
+    "nid_consecutivo": "8185",
+    "cod_superbancaria": "2302"
+  },
+  {
+    "codigo": "15",
+    "cod_afp": "15",
+    "nombre": "COLFONDOS",
+    "estado": true,
+    "source": "tabla_afp.csv",
+    "cod_afp_mps": "231001",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800227940",
+    "nid_consecutivo": "8186",
+    "cod_superbancaria": "2310"
+  },
+  {
+    "codigo": "16",
+    "cod_afp": "16",
+    "nombre": "SANTANDER",
+    "estado": true,
+    "source": "tabla_afp.csv",
+    "cod_afp_mps": "230801",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800224827",
+    "nid_consecutivo": "8187",
+    "cod_superbancaria": "2300"
+  },
+  {
+    "codigo": "17",
+    "cod_afp": "17",
+    "nombre": "COLPENSIONES",
+    "estado": true,
+    "source": "tabla_afp.csv",
+    "cod_afp_mps": "25-14",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "900336004",
+    "nid_consecutivo": "9044",
+    "cod_superbancaria": "2514"
   }
 ]

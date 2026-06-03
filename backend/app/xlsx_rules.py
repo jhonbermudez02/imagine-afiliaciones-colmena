@@ -8,6 +8,15 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
 
+from .afilega_legacy_mdb import (
+    ALLOWED_TIPO_COTIZANTE,
+    DEFAULT_SUBTIPO_COTIZANTE,
+    FIELD_LIMITS as AFILEGA_MDB_FIELD_LIMITS,
+    MDB_VERSION as AFILEGA_MDB_VERSION,
+    WORKER_FIELD_LIMITS as AFILEGA_MDB_WORKER_FIELD_LIMITS,
+    calculate_nit_dv,
+    validate_nit_dv,
+)
 
 def normalize_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
@@ -155,7 +164,7 @@ PRIMARY_REQUIRED_TRASLADO = [
 ]
 
 ALLOWED_TIPO_TRAMITE = {"afiliacion", "afiliación", "traslado", "terminacion de la afiliacion", "terminación de la afiliación"}
-ALLOWED_DOCUMENT_TYPES = {"CC", "CD", "CE", "PE", "PT", "RC", "SC", "TI", "NI"}
+ALLOWED_DOCUMENT_TYPES = {"CC", "CD", "CE", "PE", "PT", "RC", "SC", "TI", "NI", "NIT"}
 ALLOWED_ESTADO_CUENTA = {"al día", "al dia", "en mora", "acuerdo de pago", "incumplimiento de acuerdo de pago"}
 SMMLV_TABLE_PATH = Path(__file__).resolve().parents[2] / "data" / "evals" / "smmlv_table.json"
 EPS_CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "evals" / "eps_catalog.json"
@@ -382,6 +391,15 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
         if not normalize_text(value):
             missing_fields.append(field)
             continue
+        legacy_limit = AFILEGA_MDB_FIELD_LIMITS.get(field)
+        if legacy_limit and len(normalize_text(value)) > legacy_limit:
+            blockers.append(
+                {
+                    "code": "MDB_PRIMARY_FIELD_TOO_LONG",
+                    "severity": "blocker",
+                    "message": f"El campo '{field}' excede el máximo del MDB AFILEGA v{AFILEGA_MDB_VERSION} ({legacy_limit} caracteres).",
+                }
+            )
         if field_type == "numero" and not only_digits(value):
             blockers.append(
                 {
@@ -416,6 +434,32 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                 "code": "XLSX_PRIMARY_INVALID_DOC_TYPE",
                 "severity": "blocker",
                 "message": "El campo 'empleador_tipo_documento' del XLSX no tiene un valor permitido.",
+            }
+        )
+
+    nit_value = (
+        form_fields.get("empleador_numero_documento_nit")
+        or profile.get("documento_empleador")
+        or profile.get("nit")
+        or ""
+    )
+    dv_value = (
+        form_fields.get("digito_verificacion")
+        or form_fields.get("empleador_digito_verificacion")
+        or form_fields.get("emp_digito")
+        or profile.get("digito_verificacion")
+        or profile.get("nit_dv")
+        or ""
+    )
+    if normalize_text(dv_value) and not validate_nit_dv(nit_value, dv_value):
+        blockers.append(
+            {
+                "code": "MDB_NIT_DV_INVALID",
+                "severity": "blocker",
+                "message": (
+                    f"El dígito de verificación del NIT no coincide con el MDB AFILEGA v{AFILEGA_MDB_VERSION}. "
+                    f"Esperado: {calculate_nit_dv(nit_value) or 'n/d'}."
+                ),
             }
         )
 
@@ -661,6 +705,9 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
         )
 
     invalid_worker_documents = []
+    overlong_worker_fields = []
+    invalid_tipo_cotizante = []
+    invalid_subtipo_cotizante = []
     for record in records[:1000]:
         raw_document = _worker_document_raw(record)
         if raw_document and not _is_strict_numeric_value(raw_document):
@@ -673,6 +720,33 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
             )
             if len(invalid_worker_documents) >= 10:
                 break
+        for field, legacy_limit in AFILEGA_MDB_WORKER_FIELD_LIMITS.items():
+            raw_value = normalize_text(record.get(field, ""))
+            if raw_value and len(raw_value) > legacy_limit:
+                overlong_worker_fields.append(
+                    (
+                        only_digits(raw_document) or raw_document,
+                        field,
+                        len(raw_value),
+                        legacy_limit,
+                        normalize_text(record.get("_sheet", "")),
+                        normalize_text(record.get("_row", "")),
+                    )
+                )
+                if len(overlong_worker_fields) >= 10:
+                    break
+        tipo_cotizante = only_digits(record.get("tipo_cotizante") or record.get("afi_tipo_cotizante") or "")
+        if tipo_cotizante and tipo_cotizante not in ALLOWED_TIPO_COTIZANTE:
+            invalid_tipo_cotizante.append(
+                (only_digits(raw_document), tipo_cotizante, normalize_text(record.get("_sheet", "")), normalize_text(record.get("_row", "")))
+            )
+        subtipo_cotizante = only_digits(record.get("subtipo_cotizante") or record.get("afi_subtipo_cotizante") or "")
+        if subtipo_cotizante and subtipo_cotizante != DEFAULT_SUBTIPO_COTIZANTE:
+            invalid_subtipo_cotizante.append(
+                (only_digits(raw_document), subtipo_cotizante, normalize_text(record.get("_sheet", "")), normalize_text(record.get("_row", "")))
+            )
+        if len(overlong_worker_fields) >= 10:
+            break
     if invalid_worker_documents:
         blockers.append(
             {
@@ -682,6 +756,57 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
                 + "; ".join(
                     " | ".join(part for part in [doc, sheet, f"fila {row}" if row else ""] if part)
                     for doc, sheet, row in invalid_worker_documents
+                )
+                + ".",
+            }
+        )
+    if overlong_worker_fields:
+        blockers.append(
+            {
+                "code": "MDB_WORKER_FIELD_TOO_LONG",
+                "severity": "blocker",
+                "message": "Se identifican campos de trabajadores que exceden el tamaño del MDB AFILEGA v"
+                + AFILEGA_MDB_VERSION
+                + ": "
+                + "; ".join(
+                    " | ".join(
+                        part
+                        for part in [
+                            doc or "n/d",
+                            field,
+                            f"{length}>{limit}",
+                            sheet,
+                            f"fila {row}" if row else "",
+                        ]
+                        if part
+                    )
+                    for doc, field, length, limit, sheet, row in overlong_worker_fields
+                )
+                + ".",
+            }
+        )
+    if invalid_tipo_cotizante:
+        blockers.append(
+            {
+                "code": "MDB_TIPO_COTIZANTE_INVALID",
+                "severity": "blocker",
+                "message": "Tipo de cotizante inválido frente al MDB AFILEGA; solo se observaron/permiten 1 y 19: "
+                + "; ".join(
+                    " | ".join(part for part in [doc or "n/d", tipo, sheet, f"fila {row}" if row else ""] if part)
+                    for doc, tipo, sheet, row in invalid_tipo_cotizante[:10]
+                )
+                + ".",
+            }
+        )
+    if invalid_subtipo_cotizante:
+        blockers.append(
+            {
+                "code": "MDB_SUBTIPO_COTIZANTE_INVALID",
+                "severity": "blocker",
+                "message": f"Subtipo de cotizante inválido frente al MDB AFILEGA; debe ser {DEFAULT_SUBTIPO_COTIZANTE}: "
+                + "; ".join(
+                    " | ".join(part for part in [doc or "n/d", subtipo, sheet, f"fila {row}" if row else ""] if part)
+                    for doc, subtipo, sheet, row in invalid_subtipo_cotizante[:10]
                 )
                 + ".",
             }

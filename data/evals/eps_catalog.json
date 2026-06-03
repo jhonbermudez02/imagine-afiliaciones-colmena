@@ -1,467 +1,1731 @@
 [
   {
-    "codigo": 9,
-    "nombre": "ESP SURAMERICANA",
-    "na": 82
-  },
-  {
-    "codigo": 1,
-    "nombre": "ALIANSALUD",
-    "na": 1
-  },
-  {
-    "codigo": 2,
-    "nombre": "SALUD TOTAL",
-    "na": 69
-  },
-  {
-    "codigo": 2,
-    "nombre": "SALUD TOTAL EPS",
-    "na": 69
-  },
-  {
-    "codigo": 3,
-    "nombre": "MEDIMAS",
-    "na": 63
-  },
-  {
-    "codigo": 4,
-    "nombre": "FONDO DE PRESTACIONES SOCIALES DEL MAGISTERIO",
-    "na": 57
-  },
-  {
-    "codigo": 5,
-    "nombre": "SANITAS",
-    "na": 73
-  },
-  {
-    "codigo": 5,
-    "nombre": "SANITAS EPS",
-    "na": 73
-  },
-  {
-    "codigo": 6,
-    "nombre": "ISS",
-    "na": 62
-  },
-  {
-    "codigo": 7,
-    "nombre": "UNIMEC",
-    "na": 83
-  },
-  {
-    "codigo": 8,
-    "nombre": "COMPENSAR",
-    "na": 37
-  },
-  {
-    "codigo": 9,
-    "nombre": "SURA",
-    "na": 82
-  },
-  {
-    "codigo": 9,
-    "nombre": "SURA EPS",
-    "na": 82
-  },
-  {
-    "codigo": 10,
-    "nombre": "SALUDCOOP",
-    "na": 71
-  },
-  {
-    "codigo": 11,
-    "nombre": "COLSEGUROS",
-    "na": 20
-  },
-  {
-    "codigo": 12,
-    "nombre": "COMFENALCO VALLE",
-    "na": 33
-  },
-  {
-    "codigo": 13,
-    "nombre": "COMFENALCO SANTANDER",
-    "na": 35
-  },
-  {
-    "codigo": 14,
-    "nombre": "FONDO DE PASIVO SOCIAL DE F.N.C.",
-    "na": 56
-  },
-  {
-    "codigo": 15,
-    "nombre": "HOSPITAL MILITAR CENTRAL",
-    "na": 60
-  },
-  {
-    "codigo": 16,
-    "nombre": "COMFENALCO ANTIOQUIA",
-    "na": 34
-  },
-  {
-    "codigo": 17,
-    "nombre": "COMFACOR",
-    "na": 13
-  },
-  {
-    "codigo": 18,
-    "nombre": "SOS",
-    "na": 81
-  },
-  {
-    "codigo": 20,
-    "nombre": "CAPRECOM SUBSIDIADO",
-    "na": 18
-  },
-  {
-    "codigo": 20,
-    "nombre": "SANIDAD MILITAR",
-    "na": 46
-  },
-  {
-    "codigo": 22,
-    "nombre": "CONVIDA",
-    "na": 40
-  },
-  {
-    "codigo": 23,
-    "nombre": "COOMEVA",
-    "na": 41
-  },
-  {
-    "codigo": 24,
-    "nombre": "CRUZ BLANCA",
-    "na": 44
-  },
-  {
-    "codigo": 26,
-    "nombre": "SOLSALUD",
-    "na": 80
-  },
-  {
-    "codigo": 29,
-    "nombre": "UNISALUD",
-    "na": 84
-  },
-  {
-    "codigo": 30,
-    "nombre": "POLICIA NACIONAL",
-    "na": 64
-  },
-  {
-    "codigo": 31,
-    "nombre": "SELVASALUD",
-    "na": 75
-  },
-  {
-    "codigo": 34,
-    "nombre": "UNIV DEL CAUCA UNIDAD SERVICIO DE SALUD",
-    "na": 85
-  },
-  {
-    "codigo": 35,
-    "nombre": "FIDUFOSYGA",
-    "na": 39
-  },
-  {
-    "codigo": 36,
-    "nombre": "UNIVERSIDAD DE ANTIOQUIA",
-    "na": 86
-  },
-  {
-    "codigo": 37,
-    "nombre": "NUEVA EPS",
-    "na": 66
-  },
-  {
-    "codigo": 38,
-    "nombre": "MULTIMEDICA",
-    "na": 65
-  },
-  {
-    "codigo": 39,
-    "nombre": "GOLDEN GROUP",
-    "na": 59
-  },
-  {
-    "codigo": 41,
-    "nombre": "COMFANDI",
-    "na": 29
-  },
-  {
-    "codigo": 42,
-    "nombre": "SALUDVIDA",
-    "na": 72
-  },
-  {
-    "codigo": 49,
-    "nombre": "FUNDACION MEDICOPREVENTIVO",
-    "na": 58
-  },
-  {
-    "codigo": 51,
-    "nombre": "SERVICIO MEDICO",
-    "na": 76
-  },
-  {
-    "codigo": 53,
-    "nombre": "RED SALUD ATENCION HUMANA",
-    "na": 67
-  },
-  {
-    "codigo": 55,
-    "nombre": "SALUD MIA",
-    "na": 88
-  },
-  {
-    "codigo": 60,
-    "nombre": "COMFACHOCO",
-    "na": 22
-  },
-  {
-    "codigo": 61,
-    "nombre": "EMSANAR",
-    "na": 51
-  },
-  {
-    "codigo": 62,
-    "nombre": "CONFAMILIAR NARINO",
-    "na": 38
-  },
-  {
-    "codigo": 63,
-    "nombre": "CAPITAL SALUD",
-    "na": 16
-  },
-  {
-    "codigo": 64,
-    "nombre": "SISBEN",
-    "na": 79
-  },
-  {
-    "codigo": 65,
-    "nombre": "COSMITET",
-    "na": 43
-  },
-  {
-    "codigo": 66,
-    "nombre": "SAVIA SALUD",
-    "na": 74
-  },
-  {
-    "codigo": 71,
-    "nombre": "ASOCIACION MUTUAL SER",
-    "na": 9
-  },
-  {
-    "codigo": 72,
-    "nombre": "ASMET SALUD",
-    "na": 3
-  },
-  {
-    "codigo": 74,
-    "nombre": "COMFAORIENTE",
-    "na": 30
-  },
-  {
-    "codigo": 76,
-    "nombre": "ASOCIACION MUTUAL BARRIOS UNIDOS DE QUIBDO",
-    "na": 8
-  },
-  {
-    "codigo": 77,
-    "nombre": "ANAS WAYUU",
-    "na": 2
-  },
-  {
-    "codigo": 78,
-    "nombre": "COMFAMILIAR DE PEREIRA",
-    "na": 27
-  },
-  {
-    "codigo": 79,
-    "nombre": "UNIVERSIDAD DEL VALLE",
-    "na": 87
-  },
-  {
-    "codigo": 80,
-    "nombre": "SALUDCOLOMBIA",
-    "na": 70
-  },
-  {
-    "codigo": 86,
-    "nombre": "EMPRESAS PUBLICAS DE MEDELLIN",
-    "na": 50
-  },
-  {
-    "codigo": 92,
-    "nombre": "SALUD COLPATRIA",
-    "na": 68
-  },
-  {
-    "codigo": 93,
-    "nombre": "COMFENALCO",
-    "na": 32
-  },
-  {
-    "codigo": 94,
+    "codigo": "19",
+    "cod_eps": "19",
     "nombre": "FAMISANAR",
-    "na": 55
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS017",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "830003564",
+    "nid_consecutivo": "134",
+    "cod_superbancaria": "17",
+    "cod_estado": "1"
   },
   {
-    "codigo": 95,
+    "codigo": "30",
+    "cod_eps": "30",
+    "nombre": "CONDOR",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "814000608",
+    "nid_consecutivo": "2337",
+    "cod_superbancaria": "30",
+    "cod_estado": "2"
+  },
+  {
+    "codigo": "46",
+    "cod_eps": "46",
+    "nombre": "COMFENALCO QUINDIO",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS009",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "890900842",
+    "nid_consecutivo": "8091",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "12",
+    "cod_eps": "12",
+    "nombre": "COMFENALCO QUINDIO",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS009",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "890900842",
+    "nid_consecutivo": "120",
+    "cod_superbancaria": "9",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "34",
+    "cod_eps": "34",
+    "nombre": "SALUDCOLOMBIA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS034",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "805021984",
+    "nid_consecutivo": "2340",
+    "cod_superbancaria": "34",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "33",
+    "cod_eps": "33",
+    "nombre": "SALUDVIDA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS033",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "830074184",
+    "nid_consecutivo": "2339",
+    "cod_superbancaria": "NULL",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "31",
+    "cod_eps": "31",
+    "nombre": "SELVASALUD",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "846000244",
+    "nid_consecutivo": "2338",
+    "cod_superbancaria": "31",
+    "cod_estado": "2"
+  },
+  {
+    "codigo": "26",
+    "cod_eps": "26",
+    "nombre": "SOLSALUD",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS026",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "804001273",
+    "nid_consecutivo": "148",
+    "cod_superbancaria": "26",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "27",
+    "cod_eps": "27",
+    "nombre": "SUSALUD",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS010",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800088702",
+    "nid_consecutivo": "150",
+    "cod_superbancaria": "10",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "39",
+    "cod_eps": "39",
+    "nombre": "UNIMEC",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800140680",
+    "nid_consecutivo": "2343",
+    "cod_superbancaria": "0",
+    "cod_estado": "2"
+  },
+  {
+    "codigo": "22",
+    "cod_eps": "22",
+    "nombre": "I.S.S.",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS006",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "860013816",
+    "nid_consecutivo": "140",
+    "cod_superbancaria": "6",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "21",
+    "cod_eps": "21",
     "nombre": "HUMANA VIVIR",
-    "na": 61
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS014",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "830006404",
+    "nid_consecutivo": "138",
+    "cod_superbancaria": "14",
+    "cod_estado": "1"
   },
   {
-    "codigo": 98,
+    "codigo": "35",
+    "cod_eps": "35",
+    "nombre": "RED SALUD",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS035",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "830096513",
+    "nid_consecutivo": "2341",
+    "cod_superbancaria": "35",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "42",
+    "cod_eps": "42",
+    "nombre": "RISALDA LTDA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "816000373",
+    "nid_consecutivo": "2345",
+    "cod_superbancaria": "0",
+    "cod_estado": "2"
+  },
+  {
+    "codigo": "9",
+    "cod_eps": "9",
+    "nombre": "SALUD COLPATRIA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS015",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "860512237",
+    "nid_consecutivo": "4284",
+    "cod_superbancaria": "15",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "25",
+    "cod_eps": "25",
+    "nombre": "SALUD TOTAL",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS002",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800130907",
+    "nid_consecutivo": "146",
+    "cod_superbancaria": "2",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "999",
+    "cod_eps": "999",
+    "nombre": "SIN EPS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "0",
+    "cod_tipo_identificacion": "0",
+    "nid_numero_identificacion": "0",
+    "nid_consecutivo": "0",
+    "cod_superbancaria": "0",
+    "cod_estado": "2"
+  },
+  {
+    "codigo": "99999",
+    "cod_eps": "99999",
+    "nombre": "SIN PERSONA JURIDICA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "999",
+    "nid_numero_identificacion": "0",
+    "nid_consecutivo": "0",
+    "cod_superbancaria": "999",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "18",
+    "cod_eps": "18",
+    "nombre": "ENTIDAD PROMOTORA DE SALUD DE CALDAS S.A.",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "810000878",
+    "nid_consecutivo": "132",
+    "cod_superbancaria": "0",
+    "cod_estado": "2"
+  },
+  {
+    "codigo": "44",
+    "cod_eps": "44",
+    "nombre": "FUERZAS MILITARES",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "830039670",
+    "nid_consecutivo": "2347",
+    "cod_superbancaria": "0",
+    "cod_estado": "2"
+  },
+  {
+    "codigo": "41",
+    "cod_eps": "41",
+    "nombre": "LA NACIONAL",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "860005439",
+    "nid_consecutivo": "199",
+    "cod_superbancaria": "0",
+    "cod_estado": "2"
+  },
+  {
+    "codigo": "43",
+    "cod_eps": "43",
+    "nombre": "CORPORANONIMAS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "860007395",
+    "nid_consecutivo": "2346",
+    "cod_superbancaria": "0",
+    "cod_estado": "2"
+  },
+  {
+    "codigo": "45",
+    "cod_eps": "45",
+    "nombre": "UNIVERSIDAD DE ANTIOQUIA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "890980040",
+    "nid_consecutivo": "6390",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "7",
+    "cod_eps": "7",
+    "nombre": "CAJA DE PREVISION SOCIAL DE COMUNICACIONES CAPRECOM",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS020",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "899999026",
+    "nid_consecutivo": "110",
+    "cod_superbancaria": "20",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "47",
+    "cod_eps": "47",
+    "nombre": "UNIVERSIDAD NACIONAL DE COLOMBIA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EAS021",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "899999063",
+    "nid_consecutivo": "6386",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "4",
+    "cod_eps": "4",
+    "nombre": "SERVICIO MEDICO Y ODONTOLOGICO DE LA EMPRESA DE ACUEDUCTO Y ALCANTARILLADO DE BO",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "899999094",
+    "nid_consecutivo": "104",
+    "cod_superbancaria": "0",
+    "cod_estado": "2"
+  },
+  {
+    "codigo": "40",
+    "cod_eps": "40",
+    "nombre": "BONSALUD",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800045138",
+    "nid_consecutivo": "2344",
+    "cod_superbancaria": "0",
+    "cod_estado": "2"
+  },
+  {
+    "codigo": "2",
+    "cod_eps": "2",
     "nombre": "CAJANAL",
-    "na": 15
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "899999010",
+    "nid_consecutivo": "18",
+    "cod_superbancaria": "24",
+    "cod_estado": "2"
   },
   {
-    "codigo": 99,
-    "nombre": "SIN AFILIACION",
-    "na": 77
+    "codigo": "6",
+    "cod_eps": "6",
+    "nombre": "CAJANAL",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "899999010",
+    "nid_consecutivo": "108",
+    "cod_superbancaria": "24",
+    "cod_estado": "2"
   },
   {
-    "codigo": 188,
-    "nombre": "ASOC MUTUAL EMPRESA SOLIDARIA DE SALUD DE NARINO",
-    "na": 4
+    "codigo": "38",
+    "cod_eps": "38",
+    "nombre": "CALISALUD",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "805004565",
+    "nid_consecutivo": "1929",
+    "cod_superbancaria": "28",
+    "cod_estado": "2"
   },
   {
-    "codigo": 189,
-    "nombre": "ASOCIACION MUTUAL SER ESS CONTRIBUTIVO",
-    "na": 7
-  },
-  {
-    "codigo": 200,
-    "nombre": "MALLAMAS",
-    "na": 53
-  },
-  {
-    "codigo": 201,
-    "nombre": "COMFAMILIAR CARTAGENA",
-    "na": 25
-  },
-  {
-    "codigo": 202,
-    "nombre": "COMFABOY",
-    "na": 21
-  },
-  {
-    "codigo": 203,
-    "nombre": "COMFACOR",
-    "na": 23
-  },
-  {
-    "codigo": 204,
-    "nombre": "CAFAM",
-    "na": 12
-  },
-  {
-    "codigo": 205,
-    "nombre": "COMFAMILIAR DE LA GUAJIRA",
-    "na": 26
-  },
-  {
-    "codigo": 206,
-    "nombre": "COMFASUCRE",
-    "na": 31
-  },
-  {
-    "codigo": 207,
-    "nombre": "COMFACUNDI",
-    "na": 24
-  },
-  {
-    "codigo": 208,
-    "nombre": "CAJACOPI",
-    "na": 14
-  },
-  {
-    "codigo": 209,
-    "nombre": "COLSUBSIDIO",
-    "na": 11
-  },
-  {
-    "codigo": 210,
+    "codigo": "32",
+    "cod_eps": "32",
     "nombre": "CAPRESOCA",
-    "na": 19
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "891856000",
+    "nid_consecutivo": "2336",
+    "cod_superbancaria": "25",
+    "cod_estado": "2"
   },
   {
-    "codigo": 211,
-    "nombre": "DUSAKA",
-    "na": 5
+    "codigo": "11",
+    "cod_eps": "11",
+    "nombre": "COLSEGUROS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "860027404",
+    "nid_consecutivo": "118",
+    "cod_superbancaria": "11",
+    "cod_estado": "2"
   },
   {
-    "codigo": 212,
-    "nombre": "CABILDOS INDIGENAS DEL RESGUARDO INDIGENA ZENU",
-    "na": 10
+    "codigo": "13",
+    "cod_eps": "13",
+    "nombre": "COMFENALCO VALLE",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS012",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "890303093",
+    "nid_consecutivo": "122",
+    "cod_superbancaria": "12",
+    "cod_estado": "1"
   },
   {
-    "codigo": 213,
-    "nombre": "ASOCIACION INDIGENA DEL CAUCA",
-    "na": 6
+    "codigo": "15",
+    "cod_eps": "15",
+    "nombre": "COMPENSAR",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS008",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "860066942",
+    "nid_consecutivo": "126",
+    "cod_superbancaria": "8",
+    "cod_estado": "1"
   },
   {
-    "codigo": 214,
-    "nombre": "PIJAO SALUD",
-    "na": 52
+    "codigo": "16",
+    "cod_eps": "16",
+    "nombre": "COOMEVA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS016",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "805000427",
+    "nid_consecutivo": "128",
+    "cod_superbancaria": "16",
+    "cod_estado": "1"
   },
   {
-    "codigo": 215,
-    "nombre": "COOSALUD",
-    "na": 42
+    "codigo": "17",
+    "cod_eps": "17",
+    "nombre": "CRUZ BLANCA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS023",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "830009783",
+    "nid_consecutivo": "130",
+    "cod_superbancaria": "23",
+    "cod_estado": "1"
   },
   {
-    "codigo": 216,
-    "nombre": "ECOOPSOS",
-    "na": 47
+    "codigo": "24",
+    "cod_eps": "24",
+    "nombre": "SALUDCOOP",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS013",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800250119",
+    "nid_consecutivo": "144",
+    "cod_superbancaria": "13",
+    "cod_estado": "1"
   },
   {
-    "codigo": 217,
-    "nombre": "COMPARTA",
-    "na": 36
+    "codigo": "23",
+    "cod_eps": "23",
+    "nombre": "SERVICIO OCCIDENTAL DE SALUD",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS018",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "805001157",
+    "nid_consecutivo": "142",
+    "cod_superbancaria": "NULL",
+    "cod_estado": "1"
   },
   {
-    "codigo": 218,
-    "nombre": "CAPRECOM",
-    "na": 17
+    "codigo": "3",
+    "cod_eps": "3",
+    "nombre": "SANITAS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS005",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800251440",
+    "nid_consecutivo": "116",
+    "cod_superbancaria": "5",
+    "cod_estado": "1"
   },
   {
-    "codigo": 1024,
-    "nombre": "COMFAMILIAR HUILA",
-    "na": 28
+    "codigo": "28",
+    "cod_eps": "28",
+    "nombre": "EAS MUNICIPIO SANTIAGO DE CALI",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "890399011",
+    "nid_consecutivo": "152",
+    "cod_superbancaria": "0",
+    "cod_estado": "2"
   },
   {
-    "codigo": 1025,
-    "nombre": "FUNDACION SALUD MIA",
-    "na": 54
+    "codigo": "20",
+    "cod_eps": "20",
+    "nombre": "FONDO PASIVO NACIONAL DE FERROCARRILES DE COLOMBIA S.A.",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EAS027",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800112806",
+    "nid_consecutivo": "136",
+    "cod_superbancaria": "NULL",
+    "cod_estado": "1"
   },
   {
-    "codigo": 1026,
-    "nombre": "ECOPETROL",
-    "na": 48
+    "codigo": "48",
+    "cod_eps": "48",
+    "nombre": "ALIANSALUD",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS001",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "830113831",
+    "nid_consecutivo": "8202",
+    "cod_superbancaria": "1",
+    "cod_estado": "1"
   },
   {
-    "codigo": 2002,
-    "nombre": "EMP. MUTUAL PARA EL DES. INTE. DE SALUD EMDISALUD",
-    "na": 49
+    "codigo": "49",
+    "cod_eps": "49",
+    "nombre": "NUEVA EPS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS037",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "900156264",
+    "nid_consecutivo": "8970",
+    "cod_superbancaria": "37",
+    "cod_estado": "1"
   },
   {
-    "codigo": 27000,
-    "nombre": "DIRECCION DEPARTAMANETAL DE SALUD DEL CHOCO",
-    "na": 45
+    "codigo": "36",
+    "cod_eps": "36",
+    "nombre": "CONVIDA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS000",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "899999107",
+    "nid_consecutivo": "2335",
+    "cod_superbancaria": "22",
+    "cod_estado": "1"
   },
   {
-    "nombre": "ASMET SALUD - ASOCIACIÓN MUTUA",
-    "codigo": "",
-    "na": ""
+    "codigo": "8",
+    "cod_eps": "8",
+    "nombre": "SALUD COLMENA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS001",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800106339",
+    "nid_consecutivo": "112",
+    "cod_superbancaria": "1",
+    "cod_estado": "2"
   },
   {
-    "nombre": "ASMET SALUD - ASOCIACIÓN MUTUAL LA ESPERANZA",
-    "codigo": "",
-    "na": ""
+    "codigo": "29",
+    "cod_eps": "29",
+    "nombre": "CONSORCIO FIDUCIARIO FISALUD",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "MIN001",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "830079672",
+    "nid_consecutivo": "157",
+    "cod_superbancaria": "0",
+    "cod_estado": "2"
+  },
+  {
+    "codigo": "50",
+    "cod_eps": "50",
+    "nombre": "MULTIMEDICAS EPS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS038",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "900112778",
+    "nid_consecutivo": "8983",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "51",
+    "cod_eps": "51",
+    "nombre": "GOLDEN GROUP EPS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS039",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "900074992",
+    "nid_consecutivo": "8986",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "54",
+    "cod_eps": "54",
+    "nombre": "ASOCIACION MUTUAL EMPRESA SOLIDARIA DE SALUD EMSSANAR ESS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "ESSC18",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "814000337",
+    "nid_consecutivo": "9092",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "70",
+    "cod_eps": "70",
+    "nombre": "COOSALUD ESS EPSS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "ESSC24",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800249241",
+    "nid_consecutivo": "100252",
+    "cod_superbancaria": "24",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "89",
+    "cod_eps": "89",
+    "nombre": "COMPARTA COOPERATIVA DE SALUD COMUNITARIA COMPARTA EPS S",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "ESSC33",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "804002105",
+    "nid_consecutivo": "9113",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "90",
+    "cod_eps": "90",
+    "nombre": "ASMET ASOCIACION MUTUAL LA ESPERANZA DE EL TAMBO ASMET ESS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "ESSC62",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "817000248",
+    "nid_consecutivo": "9114",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "91",
+    "cod_eps": "91",
+    "nombre": "ALIANZA MEDELLIN ANTIOQUIA EPS S.A.S. SAVIA SALUD EPS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS040",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "900604350",
+    "nid_consecutivo": "9115",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "92",
+    "cod_eps": "92",
+    "nombre": "CAPITAL SALUD EPSS S.A.S.",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSC34",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "900298372",
+    "nid_consecutivo": "9119",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "94",
+    "cod_eps": "94",
+    "nombre": "ASOCIACION MUTUAL BARRIOS UNIDOS DE QUIBDO AMBUQ EPSS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "ESSC76",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "818000140",
+    "nid_consecutivo": "9121",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "95",
+    "cod_eps": "95",
+    "nombre": "ASOCIACION MUTUAL SER EMPRESA SOLIDARIA DE SALUD ESS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "ESSC07",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "806008394",
+    "nid_consecutivo": "9122",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "102",
+    "cod_eps": "102",
+    "nombre": "ASOCIACION DE CABILDOS INDIGENAS DEL CESAR DUSAKAWI",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSIC1",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "824001398",
+    "nid_consecutivo": "9131",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "103",
+    "cod_eps": "103",
+    "nombre": "ASOCIACION INDIGENA DEL CAUCA AICQ",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSIC3",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "817001773",
+    "nid_consecutivo": "9133",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "104",
+    "cod_eps": "104",
+    "nombre": "ENTIDAD PROMOTORA DE SALUD ANAS WAYUU EPSI",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSIC4",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "839000495",
+    "nid_consecutivo": "9134",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "105",
+    "cod_eps": "105",
+    "nombre": "ENTIDAD PROMOTORA DE SALUD PIJAOSALUD EPSI",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSIC6",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "809008362",
+    "nid_consecutivo": "9136",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "106",
+    "cod_eps": "106",
+    "nombre": "EMPRESEA MUTUAL PARA EL DESARROLLO INTEGRAL DE LA SALUD E.S.S. EMDISALUD ESS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "ESSC02",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "811004055",
+    "nid_consecutivo": "9137",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "107",
+    "cod_eps": "107",
+    "nombre": "ASOCIACION DE CABILDOS INDIGENAS DEL RESGUARDO INDIGENA ZENU DE SAN ANDRES DE SOTAVENTO CORDOBA SUCRE",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSIC2",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "812002376",
+    "nid_consecutivo": "9132",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "109",
+    "cod_eps": "109",
+    "nombre": "ENTIDAD PROMOTORA DE SALUD MALLAMAS EPSI",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSIC5",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "837000084",
+    "nid_consecutivo": "9135",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "131",
+    "cod_eps": "131",
+    "nombre": "SUBSIDIADO CAJA DE PREVISION SOCIAL DE COMUNICACIONES CAPRECOM",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS020",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "899999026",
+    "nid_consecutivo": "110",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "142",
+    "cod_eps": "142",
+    "nombre": "SUBSIDIADO SANITAS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSS05",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800251440",
+    "nid_consecutivo": "116",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "145",
+    "cod_eps": "145",
+    "nombre": "SUBSIDIADO COMFENALCO VALLE",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSS12",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "890303093",
+    "nid_consecutivo": "122",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "143",
+    "cod_eps": "143",
+    "nombre": "SUBSIDIADO COMPENSAR",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSS08",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "860066942",
+    "nid_consecutivo": "126",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "147",
+    "cod_eps": "147",
+    "nombre": "SUBSIDIADO COOMEVA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSS16",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "805000427",
+    "nid_consecutivo": "128",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "150",
+    "cod_eps": "150",
+    "nombre": "SUBSIDIADO CRUZ BLANCA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSS23",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "830009783",
+    "nid_consecutivo": "130",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "148",
+    "cod_eps": "148",
+    "nombre": "SUBSIDIADO FAMISANAR",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSS17",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "830003564",
+    "nid_consecutivo": "134",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "149",
+    "cod_eps": "149",
+    "nombre": "SUBSIDIADO SERVICIO OCCIDENTAL DE SALUD",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSS18",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "805001157",
+    "nid_consecutivo": "142",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "146",
+    "cod_eps": "146",
+    "nombre": "SUBSIDIADO SALUDCOOP",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSS13",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800250119",
+    "nid_consecutivo": "144",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "141",
+    "cod_eps": "141",
+    "nombre": "SUBSIDIADO SALUD TOTAL",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSS02",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800130907",
+    "nid_consecutivo": "146",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "144",
+    "cod_eps": "144",
+    "nombre": "SUBSIDIADO SUSALUD",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSS10",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800088702",
+    "nid_consecutivo": "150",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "64",
+    "cod_eps": "64",
+    "nombre": "CAJA COLOMBIANA DE SUBSIDIO FAMILIAR COLSUBSIDIO S.A.",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCFC10",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "860007336",
+    "nid_consecutivo": "153",
+    "cod_superbancaria": "10",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "120",
+    "cod_eps": "120",
+    "nombre": "SUBSIDIADO CAJA COLOMBIANA DE SUBSIDIO FAMILIAR COLSUBSIDIO S.A.",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCF101",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "860007336",
+    "nid_consecutivo": "153",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "60",
+    "cod_eps": "60",
+    "nombre": "CAJA DE COMPENSACION FAMILIAR CAFAM S.A.",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCFC18",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "860013570",
+    "nid_consecutivo": "154",
+    "cod_superbancaria": "18",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "117",
+    "cod_eps": "117",
+    "nombre": "SUBSIDIADO CAJA DE COMPENSACION FAMILIAR CAFAM S.A.",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCF018",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "860013570",
+    "nid_consecutivo": "154",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "123",
+    "cod_eps": "123",
+    "nombre": "SUBSIDIADO CAPRESOCA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS025",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "891856000",
+    "nid_consecutivo": "2336",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "158",
+    "cod_eps": "158",
+    "nombre": "SUBSIDIADO SALUDVIDA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSS33",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "830074184",
+    "nid_consecutivo": "2339",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "122",
+    "cod_eps": "122",
+    "nombre": "SUBSIDIADO CONVIDA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS022",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "899999107",
+    "nid_consecutivo": "2787",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "164",
+    "cod_eps": "164",
+    "nombre": "SUBSIDIADO SALUD COLPATRIA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSS15",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "860512237",
+    "nid_consecutivo": "4284",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "56",
+    "cod_eps": "56",
+    "nombre": "CAJA DE COMPENSACION FAMILIAR DE ANTIOQUIA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCFC02",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "890900841",
+    "nid_consecutivo": "6485",
+    "cod_superbancaria": "2",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "121",
+    "cod_eps": "121",
+    "nombre": "SUBSIDIADO CAJA DE COMPENSACION FAMILIAR DE ANTIOQUIA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCF002",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "890900841",
+    "nid_consecutivo": "6485",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "62",
+    "cod_eps": "62",
+    "nombre": "CAJACOPI",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCFC55",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "890102044",
+    "nid_consecutivo": "7374",
+    "cod_superbancaria": "55",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "119",
+    "cod_eps": "119",
+    "nombre": "SUBSIDIADO CAJACOPI",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCF055",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "890102044",
+    "nid_consecutivo": "7374",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "140",
+    "cod_eps": "140",
+    "nombre": "SUBSIDIADO ALIANSALUD",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSS01",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "830113831",
+    "nid_consecutivo": "8202",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "151",
+    "cod_eps": "151",
+    "nombre": "SUBSIDIADO NUEVA EPS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSS37",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "900156264",
+    "nid_consecutivo": "8970",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "152",
+    "cod_eps": "152",
+    "nombre": "SUBSIDIADO GOLDEN GROUP EPS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSS39",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "900074992",
+    "nid_consecutivo": "8986",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "58",
+    "cod_eps": "58",
+    "nombre": "COMFAMILIAR CARTAGENA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCFC07",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "890480110",
+    "nid_consecutivo": "9025",
+    "cod_superbancaria": "7",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "116",
+    "cod_eps": "116",
+    "nombre": "SUBSIDIADO COMFAMILIAR CARTAGENA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCF007",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "890480110",
+    "nid_consecutivo": "9025",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "137",
+    "cod_eps": "137",
+    "nombre": "SUBSIDIADO ASOCIACION MUTUAL EMPRESA SOLIDARIA DE SALUD EMSSANAR ESS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "ESS118",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "814000337",
+    "nid_consecutivo": "9092",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "138",
+    "cod_eps": "138",
+    "nombre": "SUBSIDIADO COMPARTA COOPERATIVA DE SALUD COMUNITARIA COMPARTA EPS S",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "ESS133",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "804002105",
+    "nid_consecutivo": "9113",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "134",
+    "cod_eps": "134",
+    "nombre": "SUBSIDIADO ASMET ASOCIACION MUTUAL LA ESPERANZA DE EL TAMBO ASMET ESS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "ESS062",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "817000248",
+    "nid_consecutivo": "9114",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "130",
+    "cod_eps": "130",
+    "nombre": "SUBSIDIADO CAPITAL SALUD EPSS S.A.S.",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSS34",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "900298372",
+    "nid_consecutivo": "9119",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "93",
+    "cod_eps": "93",
+    "nombre": "COMFAMILIAR HUILA E.P.S.",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCFC24",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "891180008",
+    "nid_consecutivo": "9120",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "118",
+    "cod_eps": "118",
+    "nombre": "SUBSIDIADO COMFAMILIAR HUILA E.P.S.",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCF024",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "891180008",
+    "nid_consecutivo": "9120",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "135",
+    "cod_eps": "135",
+    "nombre": "SUBSIDIADO ASOCIACION MUTUAL BARRIOS UNIDOS DE QUIBDO AMBUQ EPSS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "ESS076",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "818000140",
+    "nid_consecutivo": "9121",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "139",
+    "cod_eps": "139",
+    "nombre": "SUBSIDIADO ASOCIACION MUTUAL SER EMPRESA SOLIDARIA DE SALUD ESS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "ESS207",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "806008394",
+    "nid_consecutivo": "9122",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "124",
+    "cod_eps": "124",
+    "nombre": "SUBSIDIADO ASOCIACION DE CABILDOS INDIGENAS DEL CESAR DUSAKAWI",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSI01",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "824001398",
+    "nid_consecutivo": "9131",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "125",
+    "cod_eps": "125",
+    "nombre": "SUBSIDIADO ASOCIACION DE CABILDOS INDIGENAS DEL RESGUARDO INDIGENA ZENU DE SAN ANDRES DE SOTAVENTO CORDOBA SUCRE",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSI02",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "812002376",
+    "nid_consecutivo": "9132",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "126",
+    "cod_eps": "126",
+    "nombre": "SUBSIDIADO ASOCIACION INDIGENA DEL CAUCA AICQ",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSI03",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "817001773",
+    "nid_consecutivo": "9133",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "127",
+    "cod_eps": "127",
+    "nombre": "SUBSIDIADO ENTIDAD PROMOTORA DE SALUD ANAS WAYUU EPSI",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSI04",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "839000495",
+    "nid_consecutivo": "9134",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "128",
+    "cod_eps": "128",
+    "nombre": "SUBSIDIADO ENTIDAD PROMOTORA DE SALUD MALLAMAS EPSI",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSI05",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "837000084",
+    "nid_consecutivo": "9135",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "129",
+    "cod_eps": "129",
+    "nombre": "SUBSIDIADO ENTIDAD PROMOTORA DE SALUD PIJAOSALUD EPSI",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSI06",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "809008362",
+    "nid_consecutivo": "9136",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "132",
+    "cod_eps": "132",
+    "nombre": "SUBSIDIADO EMPRESEA MUTUAL PARA EL DESARROLLO INTEGRAL DE LA SALUD E.S.S. EMDISALUD ESS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "ESS002",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "811004055",
+    "nid_consecutivo": "9137",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "108",
+    "cod_eps": "108",
+    "nombre": "ENTIDAD COOPERATIVA SOLIDARIA DE SALUD ECOOPSOS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "ESSC91",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "832000760",
+    "nid_consecutivo": "9138",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "136",
+    "cod_eps": "136",
+    "nombre": "SUBSIDIADO ENTIDAD COOPERATIVA SOLIDARIA DE SALUD ECOOPSOS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "ESS091",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "832000760",
+    "nid_consecutivo": "9138",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "111",
+    "cod_eps": "111",
+    "nombre": "SUBSIDIADO COMFACOR EPS - CCF DE CÓRDOBA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCF015",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "891080005",
+    "nid_consecutivo": "9139",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "159",
+    "cod_eps": "159",
+    "nombre": "COMFACOR EPS - CCF DE CÓRDOBA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCFC15",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "891080005",
+    "nid_consecutivo": "9139",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "113",
+    "cod_eps": "113",
+    "nombre": "SUBSIDIADO COMFACHOCO - CCF DEL CHOCÓ",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCF102",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "891600091",
+    "nid_consecutivo": "9140",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "163",
+    "cod_eps": "163",
+    "nombre": "COMFACHOCO - CCF DEL CHOCÓ",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCFC20",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "891600091",
+    "nid_consecutivo": "9140",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "112",
+    "cod_eps": "112",
+    "nombre": "SUBSIDIADO COMFAMILIAR DE NARIÑO EPS CCF",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCF027",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "891280008",
+    "nid_consecutivo": "9142",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "160",
+    "cod_eps": "160",
+    "nombre": "COMFAMILIAR DE NARIÑO EPS CCF",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCFC27",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "891280008",
+    "nid_consecutivo": "9142",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "115",
+    "cod_eps": "115",
+    "nombre": "SUBSIDIADO COMPASUCRE EPSUBSIDIADO CCF DE SUCRE",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCF033",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "892200015",
+    "nid_consecutivo": "9143",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "161",
+    "cod_eps": "161",
+    "nombre": "COMPASUCRE EPSUBSIDIADO CCF DE SUCRE",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCFC33",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "892200015",
+    "nid_consecutivo": "9143",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "110",
+    "cod_eps": "110",
+    "nombre": "SUBSIDIADO COMFACUNDI - CCF DE CUNDINAMARCA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCF053",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "860045904",
+    "nid_consecutivo": "9144",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "162",
+    "cod_eps": "162",
+    "nombre": "COMFACUNDI - CCF DE CUNDINAMARCA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCFC53",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "860045904",
+    "nid_consecutivo": "9144",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "155",
+    "cod_eps": "155",
+    "nombre": "SUBSIDIADO COMFABOY EPSUBSIDIADO CCF DE BOYACA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCF009",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "891800213",
+    "nid_consecutivo": "9231",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "156",
+    "cod_eps": "156",
+    "nombre": "COMFABOY EPSUBSIDIADO CCF DE BOYACA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "CCFC09",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "891800213",
+    "nid_consecutivo": "9232",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "133",
+    "cod_eps": "133",
+    "nombre": "SUBSIDIADO COOSALUD ESS EPSS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "ESS024",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800249241",
+    "nid_consecutivo": "100252",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "114",
+    "cod_eps": "114",
+    "nombre": "CAJA DE COMPENSACIÓN FAMILIAR DE LA GUAJIRA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "NULL",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "892115006",
+    "nid_consecutivo": "9141",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "100",
+    "cod_eps": "100",
+    "nombre": "UNIVERSIDAD DE CÓRDOBA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "RES012",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "891080031",
+    "nid_consecutivo": "9129",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "101",
+    "cod_eps": "101",
+    "nombre": "UNIVERSIDAD PEDAGÓGICA Y TECNOLÓGICA DE OLOMBIA - UPTC",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "RES014",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "891800330",
+    "nid_consecutivo": "9130",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "99",
+    "cod_eps": "99",
+    "nombre": "UNIVERSIDAD DEL CAUCA",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "RES009",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "891500319",
+    "nid_consecutivo": "9128",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "98",
+    "cod_eps": "98",
+    "nombre": "UNIVERSIDAD DEL VALLE",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "RES007",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "890399010",
+    "nid_consecutivo": "9127",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "97",
+    "cod_eps": "97",
+    "nombre": "UNIVERSIDAD DEL ATLÁNTICO",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "RES005",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "890102257",
+    "nid_consecutivo": "9126",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "96",
+    "cod_eps": "96",
+    "nombre": "EMPRESAS PÚBLICAS DE MEDELLÍN DEPARTAMENTO MÉDICO",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EAS016",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "890904996",
+    "nid_consecutivo": "9125",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "52",
+    "cod_eps": "52",
+    "nombre": "CAPRUIS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "RES006",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "890203183",
+    "nid_consecutivo": "8995",
+    "cod_superbancaria": "NULL",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "170",
+    "cod_eps": "170",
+    "nombre": "MEDIMAS",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS044",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "901097473",
+    "nid_consecutivo": "9362",
+    "cod_superbancaria": "0",
+    "cod_estado": "1"
+  },
+  {
+    "codigo": "1",
+    "cod_eps": "1",
+    "nombre": "CAFESALUD",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS003",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800140949",
+    "nid_consecutivo": "17",
+    "cod_superbancaria": "3",
+    "cod_estado": "2"
+  },
+  {
+    "codigo": "157",
+    "cod_eps": "157",
+    "nombre": "SUBSIDIADO CAFESALUD",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPSS03",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800140949",
+    "nid_consecutivo": "106",
+    "cod_superbancaria": "0",
+    "cod_estado": "2"
+  },
+  {
+    "codigo": "5",
+    "cod_eps": "5",
+    "nombre": "CAFESALUD",
+    "estado": true,
+    "source": "tabla_eps.csv",
+    "cod_eps_mps": "EPS003",
+    "cod_tipo_identificacion": "3",
+    "nid_numero_identificacion": "800140949",
+    "nid_consecutivo": "106",
+    "cod_superbancaria": "3",
+    "cod_estado": "2"
   }
 ]
