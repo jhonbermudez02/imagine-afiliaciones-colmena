@@ -8759,19 +8759,22 @@ def _extract_todos_intermediarios(doc: Dict[str, Any]) -> List[Dict[str, str]]:
         return results
     tabla_text = text[tabla_start.end():]
     fila_pattern = re.compile(
-        r"\b(0?[1-4])\s+([\d]{6,12})\s+([\w\s\-\.]{4,60}?)\s+(\d{1,3})\s*%?(?=\s|$)",
+        r"\b(0?[1-4])\s+(\d[\d.]{4,15}\d(?:-\d)?)\s+([\w\s\-\.]{4,60}?)\s+(\d{1,3})\s*%?(?=\s|$)",
         re.IGNORECASE
     )
     for m in fila_pattern.finditer(tabla_text):
         codigo_raw = only_digits(m.group(1))
+        vendedor_documento = only_digits(m.group(2))
         if codigo_raw == "2":
+            continue
+        if not 6 <= len(vendedor_documento) <= 12:
             continue
         codigo_plano = {"1": "2", "3": "3", "4": "4"}.get(codigo_raw, "2")
         nombre = m.group(3).strip() if m.group(3) else ""
         results.append({
             "codigo_intermediario": codigo_raw,
             "codigo_vendedor": codigo_plano,
-            "vendedor_documento": only_digits(m.group(2)),
+            "vendedor_documento": vendedor_documento,
             "nombre_intermediario": nombre,
             "porcentaje_venta": m.group(4),
         })
@@ -8861,11 +8864,18 @@ def _extract_intermediario_codigo_y_porcentaje(doc: Dict[str, Any]) -> Dict[str,
         or fields.get("participacion")
         or ""
     )
+    vendedor_documento = only_digits(
+        fields.get("vendedor_documento")
+        or fields.get("cedula")
+        or fields.get("documento")
+        or fields.get("numero_documento")
+        or ""
+    )
     text = normalize_text(doc.get("ocr_text") or doc.get("text_preview") or "")
 
     # Patron CPS-F-11: tabla CODIGO | NRO DOCUMENTO | NOMBRE | % PARTICIPACION
     tabla_cpsf11 = re.search(
-        r"(?:c[oó]digo|c\u00f3digo)[^\n]{0,80}(?:documento|nro)[^\n]{0,80}(?:nombre|apellido)[^\n]{0,80}(?:participaci[oó]n|participaci\u00f3n|porcentaje)[^\n]{0,40}?\s*([1-4])\s+(\d{7,12})\s+[\w][\w\s]{5,60}?\s+(\d{2,3})\b",
+        r"(?:c[oó]digo|c\u00f3digo)[^\n]{0,80}(?:documento|nro)[^\n]{0,80}(?:nombre|apellido)[^\n]{0,80}(?:participaci[oó]n|participaci\u00f3n|porcentaje)[^\n]{0,40}?\s*([1-4])\s+(\d[\d.]{4,15}\d(?:-\d)?)\s+[\w][\w\s]{5,60}?\s+(\d{2,3})\b",
         text, flags=re.IGNORECASE
     )
     if tabla_cpsf11:
@@ -8901,12 +8911,14 @@ def _extract_intermediario_codigo_y_porcentaje(doc: Dict[str, Any]) -> Dict[str,
         # Buscar bloque después de encabezado de tabla de comisiones
         tabla_match = re.search(
             r"(?:codigo|código)[\s\S]{0,80}?(?:documento|nro)[\s\S]{0,80}?(?:nombre|apellido)[\s\S]{0,80}?(?:participaci[oó]n|porcentaje)"
-            r"[\s\S]{0,20}?\n?\s*(\d{1,2})\s+(\d{6,12})\s+[A-ZÁÉÍÓÚÑ][\w\s\.áéíóúñÁÉÍÓÚÑ]{5,60}?\s+(\d{1,3}(?:[.,]\d{1,2})?)",
+            r"[\s\S]{0,20}?\n?\s*(\d{1,2})\s+(\d[\d.]{4,15}\d(?:-\d)?)\s+[A-ZÁÉÍÓÚÑ][\w\s\.áéíóúñÁÉÍÓÚÑ]{5,60}?\s+(\d{1,3}(?:[.,]\d{1,2})?)",
             text, flags=re.IGNORECASE
         )
         if tabla_match:
             if not codigo:
                 codigo = only_digits(tabla_match.group(1))
+            if not vendedor_documento:
+                vendedor_documento = only_digits(tabla_match.group(2))
             if not porcentaje:
                 porcentaje = normalize_text(tabla_match.group(3))
 
@@ -8914,7 +8926,7 @@ def _extract_intermediario_codigo_y_porcentaje(doc: Dict[str, Any]) -> Dict[str,
     # "1 1000409427 CAROLINA MARULANDA GOMEZ 100"
     if not codigo or not porcentaje:
         direct_match = re.search(
-            r"\b(\d{1,2})\s+(\d{7,12})\s+[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]{8,50}\s+(\d{1,3})\b",
+            r"\b(\d{1,2})\s+(\d[\d.]{4,15}\d(?:-\d)?)\s+[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]{8,50}\s+(\d{1,3})\b",
             text
         )
         if direct_match:
@@ -8923,6 +8935,8 @@ def _extract_intermediario_codigo_y_porcentaje(doc: Dict[str, Any]) -> Dict[str,
             if candidate_codigo in {"1","2","3","4"} and int(candidate_pct or 0) <= 100:
                 if not codigo:
                     codigo = candidate_codigo
+                if not vendedor_documento:
+                    vendedor_documento = only_digits(direct_match.group(2))
                 if not porcentaje:
                     porcentaje = candidate_pct
 
@@ -8943,6 +8957,7 @@ def _extract_intermediario_codigo_y_porcentaje(doc: Dict[str, Any]) -> Dict[str,
     return {
         "codigo_intermediario": codigo,
         "porcentaje_venta": porcentaje,
+        "vendedor_documento": vendedor_documento,
     }
 
 

@@ -1238,6 +1238,15 @@ async function handleCaseAction(action, caseId, file) {
         activeCaseId = caseId;
         switchView('clasificacion');
         loadClassifForCase(caseId);
+    } else if (action === 'descargar926') {
+        const btn = document.querySelector(`[data-action="descargar926"][data-case="${caseId}"]`);
+        const original = btn?.textContent || 'Descargar plano';
+        if (btn) { btn.textContent = 'Descargando...'; btn.disabled = true; }
+        try {
+            await download926(caseId, file || btn?.dataset?.file || 'archivo_926.txt');
+        } finally {
+            if (btn) { btn.textContent = original; btn.disabled = false; }
+        }
     } else if (action === 'recuperar') {
         activeCaseId = caseId;
         const btn = document.querySelector(`[data-action="recuperar"][data-case="${caseId}"]`);
@@ -1278,16 +1287,23 @@ async function loadActiveCaseFull(caseId) {
 }
 
 async function download926(caseId, filename) {
+    if (!caseId) return;
     try {
-        const r = await fetch(case926Url(caseId));
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const r = await fetchWithRetry(case926Url(caseId));
         const blob = await r.blob();
+        const disposition = r.headers.get('Content-Disposition') || '';
+        const match = disposition.match(/filename="?([^"]+)"?/i);
+        const resolvedFilename = filename || match?.[1] || 'archivo_926.txt';
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url; a.download = filename || 'archivo_926.txt';
+        a.href = url; a.download = resolvedFilename;
         document.body.appendChild(a); a.click(); a.remove();
         URL.revokeObjectURL(url);
-    } catch(e) { console.error('download926:', e); }
+        showToast('Plano descargado', 'ok');
+    } catch(e) {
+        console.error('download926:', e);
+        showToast('No se pudo descargar el plano: ' + e.message, 'err');
+    }
 }
 
 function resetFlujoView() {
