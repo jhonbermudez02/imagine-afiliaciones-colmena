@@ -1580,9 +1580,6 @@ class LegacyCompatEngine:
             if comisiones_written:
                 return
             for com in wdcom_rows:
-                codigo_vendedor = as_text(com.get("codigo_vendedor")).strip()
-                if codigo_vendedor == "3":
-                    continue
                 por = _format_pct_926(com.get("porcentaje"))
                 t4 = (
                     "4"

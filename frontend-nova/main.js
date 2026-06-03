@@ -588,25 +588,25 @@ function resolveContractNumber(analysis, item = {}) {
 function resolveManualApproval(item) {
     const a = item?.analysis || {};
     const wf = a.workflow_run || {};
-    const decision = a.decision || {};
     const approval = item?.manual_approval || a.manual_approval || {};
     if (approval && approval.approved) return approval;
+    const output926 = wf.output_926 || a.output_926 || {};
+    const legacy926 = output926.legacy || {};
+    const draft926 = output926.draft || {};
+    const revokedReason = normalizeText(approval?.revoked_reason || '');
+    if (
+        approval &&
+        normalizeText(approval.status || '') === 'revoked' &&
+        approval.approved_at &&
+        revokedReason.includes('reproceso de validaciones') &&
+        (legacy926.ok || legacy926.available || draft926.content)
+    ) {
+        return { ...approval, approved: true, status: 'approved', source: 'legacy_reprocess_recovery' };
+    }
     const status = normalizeText(item?.status || wf.status || '');
     const finalStatus = normalizeText(item?.final_status || '');
     if (status === 'approved' || finalStatus === 'aprobado') {
         return { approved: true, status: 'approved', source: 'status' };
-    }
-    const decisionStatus = normalizeText(decision.recommended_status || '');
-    const validationOk = Boolean(a.validacion_resumen?.ok || a.validacion_resumen?.precheck?.approved);
-    const workflowStatus = normalizeText(wf.status || '');
-    const report = wf.executive_report_final || wf.executive_report_precheck || a.reporte_ejecutivo || {};
-    const estado = normalizeText(report?.resumen_ejecutivo?.estado || '');
-    if (
-        decisionStatus === 'aprobable' ||
-        estado === 'aprobado' ||
-        (validationOk && workflowStatus === 'completed')
-    ) {
-        return { approved: true, status: 'approved', source: 'workflow' };
     }
     return null;
 }
@@ -1569,9 +1569,9 @@ function renderWorkflowResult(payload) {
     const isAprobable = isCaseAprobableAfterManualExceptions(payload, estado, decisionStatus);
     const isNoAprobado = !isAprobable && normalizeText(wf.status||'') === 'stopped_prevalidacion';
 
-    const stateClass = approved ? 'ok' : 'err';
-    const stateLabel = approved ? 'Aprobado' : 'No aprobado';
-    const stateIcon = approved ? '✓' : '✗';
+    const stateClass = approved ? 'ok' : (isAprobable ? 'warn' : 'err');
+    const stateLabel = approved ? 'Aprobado' : (isAprobable ? 'Aprobable' : 'No aprobado');
+    const stateIcon = approved ? '✓' : (isAprobable ? '!' : '✗');
 
     el.innerHTML = `
         <div class="result-header">
@@ -1847,7 +1847,11 @@ function bindComisionManualPanel(item, payload, root = document) {
     
     if (!comisionRows || !saveBtn || !saveTipoNegocioBtn) return;
 
-    const existingComisiones = payload?.analysis?.manual_review?.comisiones?.[item.file] || [];
+    const matchIntermediarios = payload?.analysis?.validacion_resumen?.matches?.entrega_documentos_intermediario?.todos_intermediarios;
+    const reviewIntermediarios = payload?.analysis?.manual_review?.entrega_documentos_intermediario?.todos_intermediarios;
+    const existingComisiones = Array.isArray(matchIntermediarios)
+        ? matchIntermediarios
+        : (Array.isArray(reviewIntermediarios) ? reviewIntermediarios : []);
     const rawTipoNegocio = payload?.analysis?.xlsx_profile?.profile?.tipo_negocio_detectado || '';
 
     function collectComisionRows() {
@@ -1862,6 +1866,8 @@ function bindComisionManualPanel(item, payload, root = document) {
         const div = document.createElement('div');
         div.className = 'comision-row';
         const codigo = String(data.codigo || data.codigo_intermediario || '').replace(/^0+/, '') || '';
+        const cedula = data.cedula || data.vendedor_documento || data.documento || '';
+        const porcentaje = data.porcentaje || data.porcentaje_venta || '100';
         const isValidCodigo = ['1', '3'].includes(codigo);
         const invalidCodigoOption = codigo && !isValidCodigo
             ? `<option value="${escapeHtml(codigo)}" selected>${escapeHtml(codigo.padStart(2, '0'))} - No válido, selecciona 01 o 03</option>`
@@ -1873,8 +1879,8 @@ function bindComisionManualPanel(item, payload, root = document) {
                 <option value="1" ${isValidCodigo && codigo==='1'?'selected':''}>01 - Consultor</option>
                 <option value="3" ${isValidCodigo && codigo==='3'?'selected':''}>03 - Corredor</option>
             </select>
-            <input class="field-input comision-cedula" placeholder="Nro. documento" value="${escapeHtml(data.cedula||'')}">
-            <input class="field-input comision-pct" placeholder="%" value="${escapeHtml(data.porcentaje||'100')}">
+            <input class="field-input comision-cedula" placeholder="Nro. documento" value="${escapeHtml(cedula)}">
+            <input class="field-input comision-pct" placeholder="%" value="${escapeHtml(porcentaje)}">
             <button class="btn-icon comision-remove-row" type="button">✕</button>
         `;
         div.querySelector('.comision-remove-row')?.addEventListener('click', async () => {
@@ -3863,35 +3869,16 @@ function commissionDocumentPriority(item) {
 
 function renderComisionesInfoContent(payload) {
     const a = payload?.analysis || {};
-    const mr = a.manual_review || {};
-    const comisionesManuales = mr.comisiones || {};
     const intermediarios = a.validacion_resumen?.matches?.entrega_documentos_intermediario || {};
     const todosInterm = Array.isArray(intermediarios.todos_intermediarios) ? intermediarios.todos_intermediarios : [];
     const docs = buildDocItems(payload).filter(item => commissionDocumentPriority(item) > 0)
         .sort((left, right) => commissionDocumentPriority(left) - commissionDocumentPriority(right));
 
     let tableHtml = '';
-    if (Object.keys(comisionesManuales).length) {
-        tableHtml = Object.entries(comisionesManuales).map(([fname, rows]) => `
-            <section class="commission-info-section">
-                <div class="company-info-section-title">${escapeHtml(fname)} · Manual</div>
-                <table class="blocker-table commission-info-table">
-                    <thead><tr><th>Código</th><th>Documento</th><th>Nombre</th><th>%</th></tr></thead>
-                    <tbody>${(rows || []).map(row => `
-                        <tr>
-                            <td>${escapeHtml(String(row.codigo || ''))}</td>
-                            <td>${escapeHtml(String(row.cedula || ''))}</td>
-                            <td>${escapeHtml(String(row.nombre || ''))}</td>
-                            <td>${escapeHtml(String(row.porcentaje || ''))}%</td>
-                        </tr>
-                    `).join('')}</tbody>
-                </table>
-            </section>
-        `).join('');
-    } else if (todosInterm.length) {
+    if (todosInterm.length) {
         tableHtml = `
             <section class="commission-info-section">
-                <div class="company-info-section-title">Comisiones leídas del OCR</div>
+                <div class="company-info-section-title">Comisiones registradas</div>
                 <table class="blocker-table commission-info-table">
                     <thead><tr><th>Código</th><th>Documento</th><th>Nombre</th><th>%</th></tr></thead>
                     <tbody>${todosInterm.map(row => `
@@ -3966,8 +3953,8 @@ function renderFormularioReporte(container, payload) {
     const { hasActiveBlockers } = getCaseBlockerRecords(payload);
     const isNoAprobado = hasActiveBlockers && (estadoNorm.includes('no aprob') || estadoNorm.includes('rechaz') || normalizeText(wf.status || '') === 'stopped_prevalidacion');
     const isAprobable = isCaseAprobableAfterManualExceptions(payload, estado, decisionStatus);
-    const stateClass = approved ? 'aprobado' : 'bloqueado';
-    const stateLabel = approved ? 'APROBADO' : 'NO APROBADO';
+    const stateClass = approved ? 'aprobado' : (isAprobable ? 'observado' : 'bloqueado');
+    const stateLabel = approved ? 'APROBADO' : (isAprobable ? 'APROBABLE' : 'NO APROBADO');
     const fecha = resumen.fecha_proceso_human || formatDateTime(payload.updated_at);
 
     const totalSedes = formFields.a_numero_sedes || formFields.b_numero_sedes || profile.numero_sedes || resumen.numero_sedes || 'n/d';
@@ -4206,8 +4193,8 @@ function renderReporte(container, payload) {
     const approved = isCaseManuallyApproved(payload);
     const isAprobable = isCaseAprobableAfterManualExceptions(payload, estado, decisionStatus);
     const isNoAprobado = !isAprobable && (normalizeText(wf.status||'') === 'stopped_prevalidacion' || estadoNorm.includes('no aprob'));
-    const stateClass = approved ? 'aprobado' : 'bloqueado';
-    const stateLabel = approved ? 'APROBADO' : 'NO APROBADO';
+    const stateClass = approved ? 'aprobado' : (isAprobable ? 'observado' : 'bloqueado');
+    const stateLabel = approved ? 'APROBADO' : (isAprobable ? 'APROBABLE' : 'NO APROBADO');
 
     // Extraer datos de comparación de razón social
     const vrMatches = (a.validacion_resumen?.matches || a.reporte_ejecutivo?.matches || {});
@@ -4840,11 +4827,10 @@ function renderReporte(container, payload) {
                 }
             } else if (panelType === 'comisiones') {
                 // Panel de comisiones con visor de documento
-                const mr = a.manual_review || {};
-                const comisionesManuales = mr.comisiones || {};
                 const docs = a.documents || [];
                 const entregaDocs = docs.filter(d => d.document_type === 'entrega_documentos');
                 const intermediarios = a.validacion_resumen?.matches?.entrega_documentos_intermediario || {};
+                const todosInterm = Array.isArray(intermediarios.todos_intermediarios) ? intermediarios.todos_intermediarios : [];
 
                 let comisionHTML = `
                     <div class="blocker-panel-head">
@@ -4853,21 +4839,18 @@ function renderReporte(container, payload) {
                     </div>
                     <div style="padding:12px;max-height:500px;overflow-y:auto">`;
 
-                if (Object.keys(comisionesManuales).length) {
-                    comisionHTML += `<div style="font-size:12px;font-weight:600;margin-bottom:8px">Comisiones registradas manualmente:</div>`;
-                    for (const [fname, rows] of Object.entries(comisionesManuales)) {
-                        comisionHTML += `<div style="font-size:11px;color:var(--c-text-2);margin-bottom:4px">📄 ${escapeHtml(fname)}</div>`;
-                        comisionHTML += `<table class="blocker-table" style="margin-bottom:12px">
-                            <thead><tr><th>Código</th><th>Documento</th><th>Porcentaje</th><th></th></tr></thead>
-                            <tbody>${(rows||[]).map((r, idx) => `<tr>
-                                <td>${escapeHtml(String(r.codigo||''))}</td>
-                                <td>${escapeHtml(String(r.cedula||''))}</td>
-                                <td>${escapeHtml(String(r.porcentaje||''))}%</td>
-                                <td><button class="table-action-link table-action-danger delete-manual-comision" data-file="${escapeHtml(fname)}" data-index="${idx}" type="button">Eliminar</button></td>
+                if (todosInterm.length) {
+                    comisionHTML += `<div style="font-size:12px;font-weight:600;margin-bottom:8px">Comisiones registradas:</div>
+                        <table class="blocker-table" style="margin-bottom:12px">
+                            <thead><tr><th>Código</th><th>Documento</th><th>Nombre</th><th>% Participación</th></tr></thead>
+                            <tbody>${todosInterm.map(r => `<tr>
+                                <td>${escapeHtml(String(r.codigo_intermediario||''))}</td>
+                                <td>${escapeHtml(String(r.vendedor_documento||''))}</td>
+                                <td>${escapeHtml(String(r.nombre_intermediario||''))}</td>
+                                <td>${escapeHtml(String(r.porcentaje_venta||''))}%</td>
                             </tr>`).join('')}</tbody></table>`;
-                    }
                 } else if (intermediarios.codigo_intermediario) {
-                    comisionHTML += `<div style="font-size:12px;font-weight:600;margin-bottom:8px">Comisiones leídas del OCR:</div>
+                    comisionHTML += `<div style="font-size:12px;font-weight:600;margin-bottom:8px">Comisiones registradas:</div>
                         <table class="blocker-table"><thead><tr><th>Código</th><th>% Participación</th><th>Archivo</th></tr></thead>
                         <tbody><tr>
                             <td>${escapeHtml(String(intermediarios.codigo_intermediario||''))}</td>
@@ -4898,13 +4881,6 @@ function renderReporte(container, payload) {
                 dataPanel.classList.add('hidden');
                 document.getElementById('btnComisiones')?.classList.remove('active');
             });
-            dataPanel.querySelectorAll('.delete-manual-comision').forEach(btn => {
-                btn.addEventListener('click', async () => {
-                    const rows = comisionesManuales?.[btn.dataset.file] || [];
-                    try { await deleteManualComision(caseId, btn.dataset.file, rows, Number(btn.dataset.index), () => loadReporteForCase(caseId)); }
-                    catch(e) { showToast('No pude eliminar la comisión: ' + e.message, 'err'); }
-                });
-            });
             dataPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         });
     });
@@ -4922,29 +4898,14 @@ function renderReporte(container, payload) {
         dataPanel.classList.remove('hidden');
         this.classList.add('active');
 
-        const mr = a.manual_review || {};
-        const comisionesManuales = mr.comisiones || {};
         const docs = a.documents || [];
         const entregaDocs = docs.filter(d => d.document_type === 'entrega_documentos');
         const intermediarios = a.validacion_resumen?.matches?.entrega_documentos_intermediario || {};
-        const todosInterm = intermediarios.todos_intermediarios || [];
+        const todosInterm = Array.isArray(intermediarios.todos_intermediarios) ? intermediarios.todos_intermediarios : [];
 
         // Construir tabla de intermediarios
         let tablaHTML = '';
-        if (Object.keys(comisionesManuales).length) {
-            for (const [fname, rows] of Object.entries(comisionesManuales)) {
-                tablaHTML += `<div style="font-size:11px;color:var(--c-text-2);margin-bottom:4px">📄 ${escapeHtml(fname)} (manual)</div>
-                    <table class="blocker-table" style="margin-bottom:12px">
-                    <thead><tr><th>Código</th><th>Documento</th><th>Nombre</th><th>% Participación</th><th></th></tr></thead>
-                    <tbody>${(rows||[]).map((r, idx) => `<tr>
-                        <td>${escapeHtml(String(r.codigo||''))}</td>
-                        <td>${escapeHtml(String(r.cedula||''))}</td>
-                        <td>${escapeHtml(String(r.nombre||''))}</td>
-                        <td>${escapeHtml(String(r.porcentaje||''))}%</td>
-                        <td><button class="table-action-link table-action-danger delete-manual-comision" data-file="${escapeHtml(fname)}" data-index="${idx}" type="button">Eliminar</button></td>
-                    </tr>`).join('')}</tbody></table>`;
-            }
-        } else if (todosInterm.length) {
+        if (todosInterm.length) {
             tablaHTML += `<table class="blocker-table" style="margin-bottom:12px">
                 <thead><tr><th>Código</th><th>Documento</th><th>Nombre</th><th>% Participación</th></tr></thead>
                 <tbody>${todosInterm.map(r => `<tr>
@@ -4991,13 +4952,6 @@ function renderReporte(container, payload) {
         dataPanel.querySelector('#dataPanelClose2')?.addEventListener('click', () => {
             dataPanel.classList.add('hidden');
             document.getElementById('btnComisiones')?.classList.remove('active');
-        });
-        dataPanel.querySelectorAll('.delete-manual-comision').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const rows = comisionesManuales?.[btn.dataset.file] || [];
-                try { await deleteManualComision(caseId, btn.dataset.file, rows, Number(btn.dataset.index), () => loadReporteForCase(caseId)); }
-                catch(e) { showToast('No pude eliminar la comisión: ' + e.message, 'err'); }
-            });
         });
         dataPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
@@ -5139,7 +5093,7 @@ async function loadProduccion() {
             const { status, finalStatus } = resolveCase(c);
             return isApprovedCaseStatus(status, finalStatus);
         });
-        const selectableCaseIds = new Set(cases.filter(item => resolveCase(item).has926).map(item => item.id).filter(Boolean));
+        const selectableCaseIds = new Set(cases.map(item => item.id).filter(Boolean));
         selectedColmenaCaseIds = new Set([...selectedColmenaCaseIds].filter(id => selectableCaseIds.has(id)));
         cases.sort((a,b) => String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
         if (!cases.length) { el.innerHTML = `<div class="empty-state">No hay contratos aprobados para ${escapeHtml(currentOperation().name)}</div>`; return; }
@@ -5161,8 +5115,8 @@ async function loadProduccion() {
                     </div>
                     <div class="prod-card-actions">
                         <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer">
-                            <input type="checkbox" data-colmena-case="${escapeHtml(id)}" ${selectedColmenaCaseIds.has(id)?'checked':''} ${has926 ? '' : 'disabled'}>
-                            ${has926 ? 'Incluir en lote' : 'Sin 926 para lote'}
+                            <input type="checkbox" data-colmena-case="${escapeHtml(id)}" ${selectedColmenaCaseIds.has(id)?'checked':''}>
+                            Incluir en lote
                         </label>
                         <button class="btn-secondary" data-action="reporte" data-case="${escapeHtml(id)}" type="button">Reporte</button>
                         <button class="btn-secondary" data-action="clasificacion" data-case="${escapeHtml(id)}" type="button">Docs</button>

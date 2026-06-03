@@ -630,6 +630,31 @@ def _is_aprobable_case(payload: Dict[str, Any]) -> bool:
     return bool(precheck.get("approved")) and normalize_haystack(workflow.get("status")) == "completed"
 
 
+def _has_926_output(payload: Dict[str, Any]) -> bool:
+    analysis = payload.get("analysis") or {}
+    workflow = analysis.get("workflow_run") or {}
+    output_926 = workflow.get("output_926") or analysis.get("output_926") or {}
+    legacy = output_926.get("legacy") or {}
+    draft = output_926.get("draft") or {}
+    return bool(legacy.get("ok") or legacy.get("available") or draft.get("content"))
+
+
+def _was_manual_approval_revoked_by_generation(payload: Dict[str, Any]) -> bool:
+    analysis = payload.get("analysis") or {}
+    approval = payload.get("manual_approval") or analysis.get("manual_approval") or {}
+    if not isinstance(approval, dict):
+        return False
+    if approval.get("approved"):
+        return False
+    revoked_reason = normalize_haystack(approval.get("revoked_reason") or "")
+    return (
+        normalize_haystack(approval.get("status") or "") == "revoked"
+        and bool(approval.get("approved_at"))
+        and "reproceso de validaciones" in revoked_reason
+        and _has_926_output(payload)
+    )
+
+
 def _case_operation(payload: Dict[str, Any]) -> str:
     return normalize_operation(payload.get("operation") or payload.get("validation_profile"))
 
@@ -2877,11 +2902,10 @@ async def cases_production_summary(operation: str = Query(default="colima")):
         legacy = output_926.get("legacy") or {}
         draft = output_926.get("draft") or {}
         manual_approval = payload.get("manual_approval") or analysis.get("manual_approval") or {}
-        approved = is_case_manually_approved(payload)
-        effective_approved = approved or _is_aprobable_case(payload)
-        status = "approved" if effective_approved else str(workflow.get("status") or payload.get("status") or "n/d")
+        approved = is_case_manually_approved(payload) or _was_manual_approval_revoked_by_generation(payload)
+        status = "approved" if approved else str(workflow.get("status") or payload.get("status") or "n/d")
         contract_number = _resolve_case_contract_number(payload)
-        final_status = "APROBADO" if effective_approved else "NO APROBADO"
+        final_status = "APROBADO" if approved else "NO APROBADO"
         item = {
             "id": payload.get("id"),
             "label": payload.get("label"),
@@ -3379,9 +3403,14 @@ async def consolidated_926(request: Consolidated926Request):
 
     chunks: List[str] = []
     selected_cases: List[str] = []
+    missing_926: List[str] = []
+    not_approved: List[str] = []
     for case_id in case_ids:
         payload = load_case(case_id)
         _ensure_case_operation(payload, operation_key)
+        if not (is_case_manually_approved(payload) or _was_manual_approval_revoked_by_generation(payload)):
+            not_approved.append(case_id)
+            continue
         analysis = payload.get("analysis") or {}
         workflow = analysis.get("workflow_run") or {}
         output_926 = workflow.get("output_926") or analysis.get("output_926") or {}
@@ -3389,6 +3418,15 @@ async def consolidated_926(request: Consolidated926Request):
         draft = output_926.get("draft") or {}
         content = str(legacy.get("content") or draft.get("content") or "").strip()
         if not content:
+            payload = run_case_workflow(case_id)
+            analysis = payload.get("analysis") or {}
+            workflow = analysis.get("workflow_run") or {}
+            output_926 = workflow.get("output_926") or analysis.get("output_926") or {}
+            legacy = output_926.get("legacy") or {}
+            draft = output_926.get("draft") or {}
+            content = str(legacy.get("content") or draft.get("content") or "").strip()
+        if not content:
+            missing_926.append(case_id)
             continue
         resumen = (workflow.get("executive_report_final") or workflow.get("executive_report_precheck") or {}).get("resumen_ejecutivo") or {}
         profile = ((analysis.get("xlsx_profile") or {}).get("profile") or {})
@@ -3397,8 +3435,12 @@ async def consolidated_926(request: Consolidated926Request):
         chunks.append(content)
         selected_cases.append(case_id)
 
+    if not_approved:
+        raise HTTPException(status_code=400, detail=f"Estos contratos no están aprobados y no se pueden consolidar: {', '.join(not_approved)}")
     if not chunks:
         raise HTTPException(status_code=400, detail="Los contratos seleccionados no tienen un 926 disponible para consolidar.")
+    if missing_926:
+        raise HTTPException(status_code=400, detail=f"No pude generar el 926 para estos contratos: {', '.join(missing_926)}")
 
     filename = f"lote_{operation_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     return Response(

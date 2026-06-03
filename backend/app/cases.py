@@ -1187,6 +1187,21 @@ def _validate_asesor_en_tabla(cedula: str, codigo_intermediario: str) -> bool:
     return True
 
 
+def _lookup_asesor_colmena(cedula: Any, codigo_intermediario: Any) -> Dict[str, Any]:
+    cedula_clean = only_digits(str(cedula or ""))
+    if not cedula_clean:
+        return {}
+    asesores = _load_asesores_colmena()
+    if not asesores.get("loaded"):
+        return {}
+    codigo = only_digits(str(codigo_intermediario or "")).lstrip("0") or ""
+    bucket = "comerciales" if codigo == "1" else "intermediarios" if codigo == "3" else ""
+    if not bucket:
+        return {}
+    row = asesores.get(bucket, {}).get(cedula_clean)
+    return row if isinstance(row, dict) else {}
+
+
 def _asesor_tipo_nombre(codigo_intermediario: Any) -> str:
     codigo = only_digits(str(codigo_intermediario or ""))
     return {"1": "Consultor", "01": "Consultor", "3": "Corredor/Agencia", "03": "Corredor/Agencia"}.get(codigo, "Intermediario")
@@ -1256,6 +1271,78 @@ def _validate_comisiones_asesores_en_tabla(comisiones: List[Dict[str, Any]], fil
         seen.add(key)
         invalid.append(validation)
     return invalid
+
+
+def _normalize_intermediario_row(row: Dict[str, Any]) -> Dict[str, str]:
+    codigo_raw = only_digits(str(row.get("codigo_intermediario") or row.get("codigo") or "")).lstrip("0") or ""
+    codigo_vendedor = str(row.get("codigo_vendedor") or "").strip()
+    if not codigo_vendedor:
+        codigo_vendedor = {"1": "2", "3": "3", "4": "4"}.get(codigo_raw, "2")
+    vendedor_documento = only_digits(str(row.get("vendedor_documento") or row.get("cedula") or row.get("documento") or ""))
+    asesor_tabla = _lookup_asesor_colmena(vendedor_documento, codigo_raw)
+    return {
+        "codigo_intermediario": codigo_raw,
+        "codigo_vendedor": codigo_vendedor,
+        "vendedor_documento": vendedor_documento,
+        "nombre_intermediario": normalize_text(asesor_tabla.get("nombre") or row.get("nombre_intermediario") or row.get("nombre") or ""),
+        "porcentaje_venta": str(row.get("porcentaje_venta") or row.get("porcentaje") or "100").strip() or "100",
+    }
+
+
+def _manual_intermediario_review(manual_review: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(manual_review, dict):
+        return {}
+    data = manual_review.get("entrega_documentos_intermediario") or {}
+    return data if isinstance(data, dict) else {}
+
+
+def _apply_manual_intermediarios_to_validation_summary(validation_summary: Dict[str, Any], manual_review: Dict[str, Any]) -> Dict[str, Any]:
+    manual_data = _manual_intermediario_review(manual_review)
+    rows = manual_data.get("todos_intermediarios")
+    if not isinstance(rows, list):
+        return validation_summary
+    normalized_rows = [_normalize_intermediario_row(row) for row in rows if isinstance(row, dict)]
+    normalized_rows = [row for row in normalized_rows if row.get("vendedor_documento")]
+    filename = str(manual_data.get("filename") or "")
+    matches = validation_summary.setdefault("matches", {})
+    first = normalized_rows[0] if normalized_rows else {}
+    matches["entrega_documentos_intermediario"] = {
+        "codigo_intermediario": str(first.get("codigo_intermediario") or "").zfill(2) if first else "",
+        "porcentaje_venta": str(first.get("porcentaje_venta") or "") if first else "",
+        "filename": filename,
+        "ok": True,
+        "todos_intermediarios": normalized_rows,
+        "source": "manual_review_override",
+    }
+    alerts = validation_summary.setdefault("alerts", [])
+    invalid = _validate_comisiones_asesores_en_tabla(normalized_rows, filename=filename, source="manual")
+    invalid.extend(
+        {
+            "code": "COMISION_MANUAL_PARTICIPACION_SUMA",
+            "status": "ALERTA",
+            "severity": "blocker",
+            "message": f"{err} Archivo: {filename}." if filename else err,
+        }
+        for err in _validate_participacion_por_tipo(normalized_rows)
+    )
+    alerts.extend(invalid)
+    precheck = validation_summary.setdefault("precheck", {})
+    reasons = list(precheck.get("motivos_de_rechazo") or [])
+    existing = {
+        (item.get("code", ""), item.get("message", ""))
+        for item in reasons
+        if isinstance(item, dict)
+    }
+    for item in invalid:
+        key = (item.get("code", ""), item.get("message", ""))
+        if key in existing:
+            continue
+        reasons.append(item)
+        existing.add(key)
+    precheck["motivos_de_rechazo"] = reasons
+    precheck["approved"] = not reasons
+    validation_summary["ok"] = bool(precheck.get("approved")) and bool(validation_summary.get("ok", True))
+    return validation_summary
 
 
 def load_case(case_id: str) -> Dict[str, Any]:
@@ -1441,24 +1528,35 @@ def save_manual_review(
 
     # Corrección manual de comisiones
     if normalize_haystack(kind) == "comisiones" and comisiones is not None:
-        comisiones_store = review_store.setdefault("comisiones", {})
         normalized_comisiones = [
-            {
-                "codigo": only_digits(str(c.get("codigo") or "1")),
-                "cedula": only_digits(str(c.get("cedula") or "")),
-                "porcentaje": str(c.get("porcentaje") or "100"),
-            }
-            for c in comisiones if c.get("cedula")
+            _normalize_intermediario_row(c)
+            for c in comisiones if isinstance(c, dict) and (c.get("cedula") or c.get("vendedor_documento") or c.get("documento"))
         ]
         validation_store = review_store.setdefault("comisiones_validation", {})
         if not normalized_comisiones:
-            comisiones_store.pop(str(filename), None)
+            review_store.pop("entrega_documentos_intermediario", None)
             validation_store.pop(str(filename), None)
+            matches = analysis.setdefault("validacion_resumen", {}).setdefault("matches", {})
+            matches.pop("entrega_documentos_intermediario", None)
             payload["updated_at"] = utc_now()
             save_case(payload)
             return review_store
 
-        comisiones_store[str(filename)] = normalized_comisiones
+        review_store["entrega_documentos_intermediario"] = {
+            "filename": str(filename),
+            "todos_intermediarios": normalized_comisiones,
+            "updated_at": utc_now(),
+        }
+        matches = analysis.setdefault("validacion_resumen", {}).setdefault("matches", {})
+        first = normalized_comisiones[0] if normalized_comisiones else {}
+        matches["entrega_documentos_intermediario"] = {
+            "codigo_intermediario": str(first.get("codigo_intermediario") or "").zfill(2) if first else "",
+            "porcentaje_venta": str(first.get("porcentaje_venta") or "") if first else "",
+            "filename": str(filename),
+            "ok": True,
+            "todos_intermediarios": normalized_comisiones,
+            "source": "manual_review_override",
+        }
         invalid_asesores = _validate_comisiones_asesores_en_tabla(normalized_comisiones, filename=str(filename), source="manual")
         validation_store[str(filename)] = {
             "ok": not invalid_asesores,
@@ -1977,16 +2075,6 @@ def refresh_case_validations(case_id: str) -> Dict[str, Any]:
     validation_started = perf_counter()
     _apply_manual_document_review_overrides(analysis)
     docs = analysis.get("documents") or docs
-    manual_comisiones = manual_review.get("comisiones") if isinstance(manual_review, dict) else {}
-    if isinstance(manual_comisiones, dict):
-        for doc in docs:
-            if not isinstance(doc, dict):
-                continue
-            fname = str(doc.get("filename") or "")
-            if fname in manual_comisiones and manual_comisiones[fname]:
-                doc["_manual_comisiones"] = manual_comisiones[fname]
-            else:
-                doc.pop("_manual_comisiones", None)
     _canonicalize_document_types(docs)
 
     required_docs = _apply_conditional_required_documents(_build_required_documents(xlsx_profile), docs)
@@ -2021,6 +2109,7 @@ def refresh_case_validations(case_id: str) -> Dict[str, Any]:
         if isinstance(item, dict) and item.get("satisfied") and item.get("filename")
     )
     validation_summary = _build_validation_summary(xlsx_profile, docs, missing_docs)
+    validation_summary = _apply_manual_intermediarios_to_validation_summary(validation_summary, manual_review)
     validation_summary = _apply_validation_exceptions(validation_summary, manual_review)
     blocker_records = [
         dict(item)
@@ -2071,7 +2160,14 @@ def refresh_case_validations(case_id: str) -> Dict[str, Any]:
             "validacion_resumen": validation_summary,
             "decision": decision,
             "reporte_ejecutivo": _build_executive_report(payload.get("label", case_id), xlsx_profile, checklist, decision, validation_summary),
-            "output_926": _build_926_output(case_id, xlsx_profile, checklist, decision, docs=docs),
+            "output_926": _build_926_output(
+                case_id,
+                xlsx_profile,
+                checklist,
+                decision,
+                docs=docs,
+                intermediarios_override=validation_summary.get("matches", {}).get("entrega_documentos_intermediario", {}).get("todos_intermediarios"),
+            ),
             "manual_review": manual_review,
         }
     )
@@ -8311,29 +8407,6 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
 
     entrega_porcentaje_issue = None
     for doc in docs:
-        if str(doc.get("document_type") or "") != "comision":
-            continue
-        manual_comisiones = doc.get("_manual_comisiones") or []
-        if not manual_comisiones:
-            continue
-        filename = str(doc.get("filename") or "")
-        for invalid_validation in _validate_comisiones_asesores_en_tabla(manual_comisiones, filename=filename, source="manual"):
-            validations.append(invalid_validation)
-            alerts.append(invalid_validation)
-        errores_participacion = _validate_participacion_por_tipo(manual_comisiones)
-        for err in errores_participacion:
-            message = f"{err} Archivo: {filename}." if filename else err
-            validations.append(
-                {
-                    "code": "COMISION_MANUAL_PARTICIPACION_SUMA",
-                    "status": "ALERTA",
-                    "severity": "blocker",
-                    "message": message,
-                }
-            )
-            alerts.append(validations[-1])
-
-    for doc in docs:
         if str(doc.get("document_type") or "") != "entrega_documentos":
             continue
         # Extraer todos los intermediarios y validar suma por tipo
@@ -8541,68 +8614,62 @@ def _build_926_draft(profile: Dict[str, Any], checklist: Dict[str, Any], decisio
 
 
 
-def _push_comisiones_to_legacy(lote: str, docs: List[Dict[str, Any]], base: str = "temporal") -> bool:
+def _push_comisiones_to_legacy(
+    lote: str,
+    docs: List[Dict[str, Any]],
+    base: str = "temporal",
+    intermediarios_override: Optional[List[Dict[str, Any]]] = None,
+) -> bool:
     if not lote:
         return False
     base_url = str(settings.legacy_backend_url or "").strip().rstrip("/")
     if not base_url:
         return False
+    comision_rows = []
+    linea = 0
+    override_rows = [_normalize_intermediario_row(row) for row in (intermediarios_override or []) if isinstance(row, dict)]
+    override_rows = [row for row in override_rows if row.get("vendedor_documento")]
+    if override_rows:
+        for interm in override_rows:
+            linea += 1
+            comision_rows.append({
+                "lote": lote, "linea": str(linea), "sr": "1",
+                "vendedor": interm.get("vendedor_documento") or interm.get("codigo_intermediario"),
+                "codigo_vendedor": interm.get("codigo_vendedor", "2"), "venta": "1",
+                "porcentaje": interm.get("porcentaje_venta", "100"),
+            })
     comision_docs = [d for d in docs if str(d.get("document_type") or "") == "comision"]
     entrega_docs = [d for d in docs if str(d.get("document_type") or "") == "entrega_documentos"]
     source_docs = comision_docs or entrega_docs
-    if not source_docs:
+    if not override_rows and not source_docs:
         return False
-    # Buscar correcciones manuales de comisiones en el payload
-    manual_comisiones: Dict[str, List[Dict[str, str]]] = {}
-    for doc in source_docs:
-        fname = str(doc.get("filename") or "")
-        mc = doc.get("_manual_comisiones") or []
-        if mc:
-            manual_comisiones[fname] = mc
-    comision_rows = []
-    linea = 0
-    for doc in source_docs:
-        fname = str(doc.get("filename") or "")
-        # Preferir correcciones manuales del operador sobre OCR
-        if fname in manual_comisiones:
-            for mc in manual_comisiones[fname]:
-                codigo_raw = only_digits(str(mc.get("codigo") or "1"))
-                if codigo_raw in {"2", "3"}:
-                    continue
-                codigo_plano = {"1": "2", "3": "3", "4": "4"}.get(codigo_raw, "2")
-                linea += 1
-                comision_rows.append({
-                    "lote": lote, "linea": str(linea), "sr": "1",
-                    "vendedor": only_digits(str(mc.get("cedula") or codigo_raw)),
-                    "codigo_vendedor": codigo_plano, "venta": "1",
-                    "porcentaje": str(mc.get("porcentaje") or "100"),
-                })
-            continue
-        intermediarios = _extract_todos_intermediarios(doc)
-        if not intermediarios:
-            data = _extract_intermediario_codigo_y_porcentaje(doc)
-            codigo = only_digits(data.get("codigo_intermediario") or "")
-            if codigo and codigo not in {"2", "3"}:
-                codigo_plano = {"1": "2", "3": "3", "4": "4"}.get(codigo, "2")
-                linea += 1
-                comision_rows.append({
-                    "lote": lote, "linea": str(linea), "sr": "1",
-                    "vendedor": only_digits(data.get("vendedor_documento") or codigo),
-                    "codigo_vendedor": codigo_plano, "venta": "1",
-                    "porcentaje": only_digits(data.get("porcentaje_venta") or "100"),
-                })
-        else:
-            for interm in intermediarios:
-                codigo_intermediario = only_digits(str(interm.get("codigo_intermediario") or interm.get("codigo_vendedor") or ""))
-                if codigo_intermediario in {"2", "3"} or str(interm.get("codigo_vendedor") or "").strip() == "3":
-                    continue
-                linea += 1
-                comision_rows.append({
-                    "lote": lote, "linea": str(linea), "sr": "1",
-                    "vendedor": interm.get("vendedor_documento") or interm.get("codigo_intermediario"),
-                    "codigo_vendedor": interm.get("codigo_vendedor", "2"), "venta": "1",
-                    "porcentaje": interm.get("porcentaje_venta", "100"),
-                })
+    if not override_rows:
+        for doc in source_docs:
+            intermediarios = _extract_todos_intermediarios(doc)
+            if not intermediarios:
+                data = _extract_intermediario_codigo_y_porcentaje(doc)
+                codigo = only_digits(data.get("codigo_intermediario") or "")
+                if codigo in {"1", "3"}:
+                    codigo_plano = {"1": "2", "3": "3", "4": "4"}.get(codigo, "2")
+                    linea += 1
+                    comision_rows.append({
+                        "lote": lote, "linea": str(linea), "sr": "1",
+                        "vendedor": only_digits(data.get("vendedor_documento") or codigo),
+                        "codigo_vendedor": codigo_plano, "venta": "1",
+                        "porcentaje": only_digits(data.get("porcentaje_venta") or "100"),
+                    })
+            else:
+                for interm in intermediarios:
+                    codigo_intermediario = only_digits(str(interm.get("codigo_intermediario") or ""))
+                    if codigo_intermediario not in {"1", "3"}:
+                        continue
+                    linea += 1
+                    comision_rows.append({
+                        "lote": lote, "linea": str(linea), "sr": "1",
+                        "vendedor": interm.get("vendedor_documento") or interm.get("codigo_intermediario"),
+                        "codigo_vendedor": interm.get("codigo_vendedor", "2"), "venta": "1",
+                        "porcentaje": interm.get("porcentaje_venta", "100"),
+                    })
     if not comision_rows:
         return False
     try:
@@ -8617,7 +8684,14 @@ def _push_comisiones_to_legacy(lote: str, docs: List[Dict[str, Any]], base: str 
         return False
 
 
-def _build_926_output(case_id: str, xlsx_profile: Dict[str, Any], checklist: Dict[str, Any], decision: Dict[str, Any], docs: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+def _build_926_output(
+    case_id: str,
+    xlsx_profile: Dict[str, Any],
+    checklist: Dict[str, Any],
+    decision: Dict[str, Any],
+    docs: Optional[List[Dict[str, Any]]] = None,
+    intermediarios_override: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     if decision.get("recommended_status") != "aprobable":
         return {
             "available": False,
@@ -8632,7 +8706,7 @@ def _build_926_output(case_id: str, xlsx_profile: Dict[str, Any], checklist: Dic
     legacy_result = {"available": False, "ok": False, "error": "Sin lote para bridge legacy."}
     if lote:
         # Insertar datos de comisiones del Entrega Doc antes de generar el plano
-        _push_comisiones_to_legacy(lote=lote, docs=docs or [], base="temporal")
+        _push_comisiones_to_legacy(lote=lote, docs=docs or [], base="temporal", intermediarios_override=intermediarios_override)
         legacy_result = generate_legacy_flatfile_926_http(lote=lote)
         if not legacy_result.get("ok"):
             state_result = generate_legacy_flatfile_926(lote=lote)
@@ -9624,7 +9698,13 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
         gen926_started = perf_counter()
         # Insertar comisiones del Entrega Doc antes de generar el plano
         _workflow_docs = (analysis.get("documents") or [])
-        _push_comisiones_to_legacy(lote=lote, docs=_workflow_docs, base=base)
+        _workflow_intermediarios = (
+            (analysis.get("validacion_resumen") or {})
+            .get("matches", {})
+            .get("entrega_documentos_intermediario", {})
+            .get("todos_intermediarios")
+        )
+        _push_comisiones_to_legacy(lote=lote, docs=_workflow_docs, base=base, intermediarios_override=_workflow_intermediarios)
         generated_926 = _legacy_build_926_http(
             lote=lote,
             base=base,
@@ -9813,12 +9893,6 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
 
     # Aplicar correcciones manuales del operador (sobreescriben el clasificador OCR)
     manual_docs = (previous_manual_review or {}).get("documents") or {}
-    # Inyectar correcciones manuales de comisiones en los documentos
-    manual_comisiones = (previous_manual_review or {}).get("comisiones") or {}
-    for doc in docs:
-        fname = str(doc.get("filename") or "")
-        if fname in manual_comisiones:
-            doc["_manual_comisiones"] = manual_comisiones[fname]
     if manual_docs:
         for doc in docs:
             fname = str(doc.get("filename") or "")
@@ -9830,22 +9904,6 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
     _canonicalize_document_types(docs)
 
     _ensure_entrega_comision_duplicate(case_id, payload, docs)
-
-    auto_comisiones = previous_manual_review.get("comisiones") or {}
-    for doc in docs:
-        if str(doc.get("document_type") or "") != "comision":
-            continue
-        fname = str(doc.get("filename") or "")
-        if not fname:
-            continue
-        if fname in auto_comisiones:
-            doc["_manual_comisiones"] = auto_comisiones[fname]
-            continue
-        extracted_comisiones = _extract_comisiones_participacion_keyword(doc)
-        if extracted_comisiones:
-            previous_manual_review.setdefault("comisiones", auto_comisiones)
-            auto_comisiones[fname] = extracted_comisiones
-            doc["_manual_comisiones"] = extracted_comisiones
 
     for doc in docs:
         fields = doc.get("fields") or {}
@@ -9922,6 +9980,7 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
     mismatches: List[str] = []
 
     validation_summary = _build_validation_summary(xlsx_profile, docs, missing_docs)
+    validation_summary = _apply_manual_intermediarios_to_validation_summary(validation_summary, previous_manual_review)
     validation_summary = _apply_validation_exceptions(validation_summary, previous_manual_review)
     blocker_records = [
         dict(item)
@@ -9971,7 +10030,14 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
         "next_step": next_step,
     }
     executive_report = _build_executive_report(payload.get("label", case_id), xlsx_profile, checklist, decision, validation_summary)
-    output_926 = _build_926_output(case_id, xlsx_profile, checklist, decision, docs=docs)
+    output_926 = _build_926_output(
+        case_id,
+        xlsx_profile,
+        checklist,
+        decision,
+        docs=docs,
+        intermediarios_override=validation_summary.get("matches", {}).get("entrega_documentos_intermediario", {}).get("todos_intermediarios"),
+    )
     validation_duration_ms = int((perf_counter() - validation_started) * 1000)
 
     analysis = {
