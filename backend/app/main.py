@@ -722,7 +722,7 @@ def _append_compare_926_history(entry: Dict[str, object]) -> None:
 
 def _resolve_926_content(case_id: Optional[str], content: Optional[str]) -> str:
     if content:
-        return str(content)
+        return _apply_926_download_overrides(str(content))
     if not case_id:
         return ""
     payload = load_case(case_id)
@@ -730,10 +730,42 @@ def _resolve_926_content(case_id: Optional[str], content: Optional[str]) -> str:
     legacy = output_926.get("legacy") or {}
     draft = output_926.get("draft") or (payload.get("analysis") or {}).get("draft_926") or {}
     if legacy.get("ok") and legacy.get("content"):
-        return str(legacy.get("content"))
+        return _apply_926_download_overrides(str(legacy.get("content")))
     if draft.get("content"):
-        return str(draft.get("content"))
+        return _apply_926_download_overrides(str(draft.get("content")))
     return ""
+
+
+def _patch_fixed_position(line: str, start_1based: int, value: str) -> str:
+    start = max(int(start_1based or 1) - 1, 0)
+    end = start + len(value)
+    if len(line) < end:
+        line = line + (" " * (end - len(line)))
+    return line[:start] + value + line[end:]
+
+
+def _apply_926_download_overrides(content: Any) -> str:
+    text = str(content or "")
+    if not text:
+        return ""
+    linebreak = "\r\n" if "\r\n" in text else "\n"
+    trailing_newline = text.endswith(("\n", "\r"))
+    patched_lines: List[str] = []
+    for line in text.splitlines():
+        if line.startswith("3") and len(line) >= 163 and line[162:163] == "D":
+            line = _patch_fixed_position(line, 511, "0")
+            line = _patch_fixed_position(line, 512, "00000")
+        elif line.startswith("5"):
+            line = _patch_fixed_position(line, 205, "19050101")
+        elif line.startswith("7"):
+            line = _patch_fixed_position(line, 98, "N")
+            line = _patch_fixed_position(line, 404, "S")
+            line = _patch_fixed_position(line, 411, "2")
+        patched_lines.append(line)
+    patched = linebreak.join(patched_lines)
+    if trailing_newline:
+        patched += linebreak
+    return patched
 
 
 def _resolve_case_identity(case_id: Optional[str]) -> Dict[str, str]:
@@ -3432,7 +3464,7 @@ async def consolidated_926(request: Consolidated926Request):
         profile = ((analysis.get("xlsx_profile") or {}).get("profile") or {})
         company = str(resumen.get("empresa") or profile.get("empresa") or case_id)
         nit = str(resumen.get("nit") or profile.get("nit") or "")
-        chunks.append(content)
+        chunks.append(_apply_926_download_overrides(content).strip())
         selected_cases.append(case_id)
 
     if not_approved:
@@ -3444,7 +3476,7 @@ async def consolidated_926(request: Consolidated926Request):
 
     filename = f"lote_{operation_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     return Response(
-        content="\n\n".join(chunks),
+        content="\n".join(chunks),
         media_type="text/plain; charset=utf-8",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
@@ -3543,10 +3575,10 @@ async def case_926(case_id: str):
         legacy = output_926.get("legacy") or {}
         draft = output_926.get("draft") or (payload.get("analysis") or {}).get("draft_926")
         if legacy.get("ok") and legacy.get("content"):
-            return PlainTextResponse(content=str(legacy.get("content", "")), media_type="text/plain")
+            return PlainTextResponse(content=_apply_926_download_overrides(legacy.get("content", "")), media_type="text/plain")
         if not draft:
             raise HTTPException(status_code=409, detail="El caso aun no esta listo para borrador 926.")
-        return PlainTextResponse(content=str(draft.get("content", "")), media_type="text/plain")
+        return PlainTextResponse(content=_apply_926_download_overrides(draft.get("content", "")), media_type="text/plain")
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
 

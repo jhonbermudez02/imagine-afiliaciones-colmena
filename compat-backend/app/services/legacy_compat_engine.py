@@ -1669,9 +1669,6 @@ class LegacyCompatEngine:
                 lines.append(self._line_926(line1))
 
             if tp == "S":
-                sede_code_raw = as_text(wh.get("f62")).strip()
-                sede_name_raw = as_text(wh.get("f71")).strip().upper()
-                sede_emision = "1" if sede_code_raw in {"1", "01", "001"} or "PRINCIPAL" in sede_name_raw else "2"
                 line7 = (
                     "7"
                     + self._vb_text(wh.get("f62"), 6)
@@ -1680,7 +1677,7 @@ class LegacyCompatEngine:
                     + self._vb_text(wh.get("f12"), 34)
                     + self._vb_num(wh.get("f14"), 10)
                     + "0000000"
-                    + "2"
+                    + "N"
                     + " " * 7
                     + " "
                     + "  "
@@ -1692,9 +1689,9 @@ class LegacyCompatEngine:
                     + (as_text(wh.get("zona")).strip()[:1] or "U")
                     + self._vb_text(wh.get("f20"), 60)
                     + self._vb_text(wh.get("f18"), 125)
-                    + "N"
+                    + "S"
                     + " " * 6
-                    + sede_emision
+                    + "2"
                     + " " * 266
                 )
                 lines.append(self._line_926(line7))
@@ -1810,7 +1807,6 @@ class LegacyCompatEngine:
                         wd_cel = as_text(wd.get("celular")).strip()
                         tel1_source = wd_tel if wd_tel not in ("", "0") else "0"
                         cel_source = wd_cel if wd_cel not in ("", "0") else as_text(wh.get("f20"))
-                        worker_activity_ref = "".join(ch for ch in ct_codigoactividad if ch.isdigit()) or "0"
                         line3 = (
                             "3"
                             + self._vb_num(wd.get("f29"), 1)
@@ -1839,7 +1835,7 @@ class LegacyCompatEngine:
                             + self._vb_text(p_row.get("subtipocodigo") or "0", 5)
                             + modalidad
                             + " " * 4
-                            + self._vb_num(worker_activity_ref, 6)
+                            + "000000"
                             + self._code1(wd.get("zona"), default="U")
                             + self._vb_text(wd.get("localidad"), 100)
                             + jornada
