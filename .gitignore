@@ -40,3 +40,5 @@ offline_bundle/
 imagine-afiliaciones/
 
 *.log
+
+files_migration/

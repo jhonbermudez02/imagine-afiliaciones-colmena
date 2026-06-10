@@ -8997,6 +8997,320 @@ def _legacy_post(path: str, payload: Dict[str, Any], timeout: float = 120.0) -> 
     return response.json()
 
 
+LEGACY_DELIVERY_TABLES = [
+    "brempresasarp",
+    "brafiliadosarp",
+    "brwddias",
+    "brcentrot",
+    "brwdestudiantes",
+    "brwdindependientes",
+    "brwdcomisiones",
+    "bkempresasarp",
+    "bkafiliadosarp",
+    "bkwddias",
+    "bkcentrot",
+    "bkwdestudiantes",
+    "bkwdindependientes",
+    "bkwdcomisiones",
+]
+
+LEGACY_LOTE_FIELD_BY_TABLE = {
+    "brempresasarp": "lt",
+    "brafiliadosarp": "lt",
+    "brwddias": "lote",
+    "brcentrot": "lote",
+    "brwdestudiantes": "lote",
+    "brwdindependientes": "lote",
+    "brwdcomisiones": "lote",
+    "bkempresasarp": "lt",
+    "bkafiliadosarp": "lt",
+    "bkwddias": "lote",
+    "bkcentrot": "lote",
+    "bkwdestudiantes": "lote",
+    "bkwdindependientes": "lote",
+    "bkwdcomisiones": "lote",
+}
+
+LEGACY_TRANSFER_TARGETS = [
+    ("ybr", "brempresasarp"),
+    ("ybr", "brafiliadosarp"),
+    ("ybr", "brwddias"),
+    ("ybr", "brcentrot"),
+    ("ybr", "brwdestudiantes"),
+    ("ybr", "brwdindependientes"),
+    ("ybr", "brwdcomisiones"),
+    ("wimg004", "bkempresasarp"),
+    ("wimg004", "bkafiliadosarp"),
+    ("wimg004", "bkwddias"),
+    ("wimg004", "bkcentrot"),
+    ("wimg004", "bkwdestudiantes"),
+    ("wimg004", "bkwdindependientes"),
+    ("wimg004", "bkwdcomisiones"),
+]
+
+
+def _sql_literal(value: Any) -> str:
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (int, float, Decimal)):
+        return str(value)
+    text = str(value)
+    if text == "":
+        return "''"
+    return "'" + text.replace("'", "''") + "'"
+
+
+def _sql_identifier(value: str) -> str:
+    clean = re.sub(r"[^A-Za-z0-9_]", "", str(value or "").strip())
+    if not clean:
+        raise ValueError("Identificador SQL vacío.")
+    return clean.lower()
+
+
+def _insert_sql(table: str, row: Dict[str, Any]) -> str:
+    cols = [_sql_identifier(k) for k in row.keys()]
+    vals = [_sql_literal(row.get(k)) for k in row.keys()]
+    return f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(vals)});"
+
+
+def _case_lote_and_contract(payload: Dict[str, Any]) -> Dict[str, str]:
+    analysis = payload.get("analysis") or {}
+    profile = ((analysis.get("xlsx_profile") or {}).get("profile") or {})
+    flat_pairs = ((analysis.get("xlsx_profile") or {}).get("flat_pairs") or {})
+    lote = normalize_text(profile.get("lote") or profile.get("idtramite") or payload.get("id") or "")
+    contrato = only_digits(
+        flat_pairs.get("numerocontrato")
+        or profile.get("numero_contrato")
+        or payload.get("numero_contrato")
+        or payload.get("contract_number")
+        or ""
+    )
+    fecha_proceso = only_digits(profile.get("fecha_proceso") or payload.get("fecha_proceso") or "")[:8]
+    if len(fecha_proceso) != 8:
+        fecha_proceso = datetime.now().strftime("%Y%m%d")
+    return {"lote": lote, "contrato": contrato, "fecha_proceso": fecha_proceso}
+
+
+def _legacy_delivery_sql_log(payload: Dict[str, Any]) -> Dict[str, Any]:
+    meta = _case_lote_and_contract(payload)
+    lote = meta["lote"]
+    if not lote:
+        raise ValueError("No hay lote/idtrámite para generar entrega legacy.")
+
+    exported: Dict[str, Any] = {}
+    export_error = ""
+    tables: Dict[str, List[Dict[str, Any]]] = {}
+    try:
+        exported = _legacy_post(
+            "legacy/db/export-lote",
+            {
+                "base": "temporal",
+                "lote": lote,
+                "include_empty": True,
+                "tables": LEGACY_DELIVERY_TABLES,
+            },
+            timeout=120.0,
+        )
+        raw_tables = ((exported.get("payload") or {}).get("tables") or {})
+        if isinstance(raw_tables, dict):
+            for name, rows in raw_tables.items():
+                if isinstance(rows, list):
+                    tables[_sql_identifier(name)] = [r for r in rows if isinstance(r, dict)]
+    except Exception as exc:
+        export_error = f"{type(exc).__name__}: {exc}"
+        try:
+            exported = _legacy_post(
+                "legacy/db/export-lote",
+                {
+                    "base": "temporal",
+                    "lote": lote,
+                    "include_empty": True,
+                    "tables": LEGACY_DELIVERY_TABLES[:7],
+                },
+                timeout=120.0,
+            )
+            raw_tables = ((exported.get("payload") or {}).get("tables") or {})
+            if isinstance(raw_tables, dict):
+                for name, rows in raw_tables.items():
+                    if isinstance(rows, list):
+                        tables[_sql_identifier(name)] = [r for r in rows if isinstance(r, dict)]
+            export_error = f"{export_error}; fallback_br_export_ok"
+        except Exception as fallback_exc:
+            export_error = f"{export_error}; fallback_br_export_failed={type(fallback_exc).__name__}: {fallback_exc}"
+
+    sr_values: List[int] = []
+    for row in tables.get("brempresasarp", []):
+        try:
+            sr_values.append(int(float(str(row.get("sr") or "0"))))
+        except ValueError:
+            continue
+        if not meta["contrato"] and normalize_text(row.get("tp")).upper() == "P":
+            meta["contrato"] = only_digits(row.get("f01") or "")
+    sr_min = min(sr_values) if sr_values else None
+    sr_max = max(sr_values) if sr_values else None
+
+    now = datetime.now()
+    lines = [
+        "-- NOVA legacy delivery dry-run",
+        f"-- case_id: {payload.get('id')}",
+        f"-- lote: {lote}",
+        f"-- contrato: {meta['contrato'] or 'pendiente'}",
+        f"-- generated_at: {now.isoformat(timespec='seconds')}",
+        f"-- execute_sql: {bool(settings.legacy_delivery_execute_sql)}",
+    ]
+    if export_error:
+        lines.append(f"-- export_lote_warning: {export_error}")
+    lines.extend(["", "BEGIN;", ""])
+
+    lines.append("-- 1. Limpieza staging BR equivalente a Guardar")
+    for table in LEGACY_DELIVERY_TABLES[:7]:
+        field = LEGACY_LOTE_FIELD_BY_TABLE[table]
+        lines.append(f"DELETE FROM temporal.{table} WHERE {field} = {_sql_literal(lote)};")
+    lines.append("")
+
+    lines.append("-- 2. Inserciones staging exportadas desde el compat backend")
+    for table in LEGACY_DELIVERY_TABLES[:7]:
+        for row in tables.get(table, []):
+            lines.append(_insert_sql(f"temporal.{table}", row))
+    if not any(tables.get(t) for t in LEGACY_DELIVERY_TABLES[:7]):
+        lines.append("-- Sin filas BR exportadas todavía; revisar que run-workflow haya poblado temporal.br*.")
+    lines.append("")
+
+    lines.append("-- 3. Limpieza/inserción backup BK equivalente a Guardarbk")
+    if sr_min is not None and sr_max is not None:
+        for table in LEGACY_DELIVERY_TABLES[7:]:
+            lines.append(f"DELETE FROM temporal.{table} WHERE sr BETWEEN {sr_min} AND {sr_max};")
+    for table in LEGACY_DELIVERY_TABLES[7:]:
+        field = LEGACY_LOTE_FIELD_BY_TABLE[table]
+        lines.append(f"DELETE FROM temporal.{table} WHERE {field} = {_sql_literal(lote)};")
+    for table in LEGACY_DELIVERY_TABLES[7:]:
+        for row in tables.get(table, []):
+            lines.append(_insert_sql(f"temporal.{table}", row))
+    if not any(tables.get(t) for t in LEGACY_DELIVERY_TABLES[7:]):
+        lines.append("-- Sin filas BK exportadas. Si se requiere backup histórico, falta poblar bk* antes del reproceso.")
+    lines.append("")
+
+    lines.append("-- 4. Estadístico equivalente a General-Estadistico")
+    counts = exported.get("counts") if isinstance(exported.get("counts"), dict) else {}
+    planillas = len([r for r in tables.get("brempresasarp", []) if normalize_text(r.get("tp")).upper() == "P"])
+    sedes = len([r for r in tables.get("brempresasarp", []) if normalize_text(r.get("tp")).upper() == "S"])
+    anexos = len([r for r in tables.get("brempresasarp", []) if normalize_text(r.get("tp")).upper() != "P"])
+    detalles = int(counts.get("brafiliadosarp") or len(tables.get("brafiliadosarp", [])) or 0)
+    centrot = int(counts.get("brcentrot") or len(tables.get("brcentrot", [])) or 0)
+    usuario = normalize_text((payload.get("manual_approval") or {}).get("operator") or "nova_case_workflow")[:15]
+    lines.append(f"DELETE FROM temporal.estadistico WHERE lote = {_sql_literal(lote)};")
+    lines.append(
+        "INSERT INTO temporal.estadistico(lote, fecha, familia, planillas, anexos, detalles, usuario, fecha_entrega, sede, centrot) "
+        f"VALUES ({_sql_literal(lote)}, {_sql_literal(meta['fecha_proceso'])}, 'Afa', {planillas}, {anexos}, {detalles}, "
+        f"{_sql_literal(usuario)}, {_sql_literal(now.strftime('%Y-%m-%d %H:%M:%S'))}, {sedes}, {centrot});"
+    )
+    lines.append("")
+
+    lines.append("-- 5. Reproceso: limpieza destino y copia temporal -> destino")
+    for db, table in LEGACY_TRANSFER_TARGETS:
+        field = LEGACY_LOTE_FIELD_BY_TABLE[table]
+        lines.append(f"DELETE FROM {db}.{table} WHERE {field} = {_sql_literal(lote)};")
+    lines.append(f"DELETE FROM wimg004.estadistico WHERE lote = {_sql_literal(lote)};")
+    if sr_min is not None and sr_max is not None:
+        lines.append(f"DELETE FROM wimg004.afi_devoluciones WHERE dev_sr BETWEEN {sr_min} AND {sr_max};")
+    lines.append(f"DELETE FROM wimg004.tr WHERE nl = {_sql_literal(lote)};")
+    for db, table in LEGACY_TRANSFER_TARGETS:
+        field = LEGACY_LOTE_FIELD_BY_TABLE[table]
+        lines.append(f"INSERT INTO {db}.{table} SELECT * FROM temporal.{table} WHERE {field} = {_sql_literal(lote)};")
+    lines.append(f"INSERT INTO wimg004.estadistico SELECT * FROM temporal.estadistico WHERE lote = {_sql_literal(lote)};")
+    if meta["contrato"]:
+        lines.append(
+            "UPDATE wimg004.afi_rad dst SET "
+            "afi_rad_fechadigitacion = src.afi_rad_fechadigitacion, "
+            "afi_rad_estado = src.afi_rad_estado "
+            "FROM temporal.afi_rad src "
+            f"WHERE src.afi_rad_contrato = {_sql_literal(meta['contrato'])} "
+            f"AND dst.afi_rad_contrato = {_sql_literal(meta['contrato'])} "
+            "AND dst.afi_rad_estado != 'Devolucion';"
+        )
+        lines.append(f"INSERT INTO wimg004.afa_autorizacionarl (contrato) VALUES ({_sql_literal(meta['contrato'])});")
+    else:
+        lines.append("-- Contrato no identificado; pendiente UPDATE afi_rad e INSERT afa_autorizacionarl.")
+    lines.append("")
+
+    lines.append("-- 6. Limpieza temporal posterior a entrega")
+    for table in LEGACY_DELIVERY_TABLES[:7]:
+        field = LEGACY_LOTE_FIELD_BY_TABLE[table]
+        lines.append(f"DELETE FROM temporal.{table} WHERE {field} = {_sql_literal(lote)};")
+    for table in LEGACY_DELIVERY_TABLES[7:]:
+        field = LEGACY_LOTE_FIELD_BY_TABLE[table]
+        lines.append(f"DELETE FROM temporal.{table} WHERE {field} = {_sql_literal(lote)};")
+    lines.append(f"DELETE FROM temporal.estadistico WHERE lote = {_sql_literal(lote)};")
+    if sr_min is not None and sr_max is not None:
+        lines.append(f"DELETE FROM temporal.afi_devoluciones WHERE dev_sr BETWEEN {sr_min} AND {sr_max};")
+    lines.append(f"DELETE FROM temporal.lc WHERE fileid = {_sql_literal(lote)};")
+    lines.append(f"DELETE FROM temporal.tr WHERE nl = {_sql_literal(lote)};")
+    lines.extend(["", "COMMIT;", ""])
+
+    sql_text = "\n".join(lines)
+    log_dir = get_case_dir(str(payload.get("id") or "case")) / "legacy_delivery"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"delivery_{now.strftime('%Y%m%d_%H%M%S')}.sql"
+    log_path.write_text(sql_text, encoding="utf-8")
+    return {
+        "ok": not bool(export_error),
+        "mode": "execute" if settings.legacy_delivery_execute_sql else "dry_run",
+        "lote": lote,
+        "contrato": meta["contrato"],
+        "sr_min": sr_min,
+        "sr_max": sr_max,
+        "counts": counts,
+        "export_error": export_error,
+        "sql_log_path": str(log_path),
+        "sql_preview": "\n".join(lines[:80]),
+        "queries_total": sum(1 for line in lines if line.strip().endswith(";")),
+        "executed": False,
+    }
+
+
+def attach_legacy_delivery_plan(case_id: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if not settings.legacy_delivery_enabled:
+        payload = payload or load_case(case_id)
+        analysis = payload.setdefault("analysis", {}) or {}
+        result = {"ok": False, "skipped": True, "reason": "legacy_delivery_enabled=false"}
+        analysis["legacy_delivery"] = result
+        payload["analysis"] = analysis
+        payload["updated_at"] = utc_now()
+        return save_case(payload)
+    payload = payload or load_case(case_id)
+    analysis = payload.setdefault("analysis", {}) or {}
+    try:
+        result = _legacy_delivery_sql_log(payload)
+    except Exception as exc:
+        result = {
+            "ok": False,
+            "mode": "dry_run",
+            "error": f"{type(exc).__name__}: {exc}",
+            "executed": False,
+        }
+    analysis["legacy_delivery"] = result
+    workflow = analysis.get("workflow_run")
+    if isinstance(workflow, dict):
+        steps = workflow.setdefault("steps", [])
+        if isinstance(steps, list) and not any((s or {}).get("name") == "legacy_delivery_sql" for s in steps if isinstance(s, dict)):
+            steps.append(
+                _workflow_step(
+                    "legacy_delivery_sql",
+                    "Entrega legacy SQL",
+                    "ok" if result.get("ok") else "warn",
+                    "Plan SQL dry-run generado." if result.get("ok") else (result.get("error") or result.get("export_error") or "Plan SQL con advertencias."),
+                    {"legacy_delivery": result},
+                    duration_ms=0,
+                )
+            )
+            workflow["current_step"] = workflow.get("current_step") or "legacy_delivery_sql"
+    payload["analysis"] = analysis
+    payload["updated_at"] = utc_now()
+    return save_case(payload)
+
+
 def _legacy_build_926_http(
     lote: str,
     base: str = "temporal",
@@ -9830,7 +10144,7 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
     payload["analysis"]["workflow_run"] = workflow
     payload["updated_at"] = utc_now()
     save_case(payload)
-    return payload
+    return attach_legacy_delivery_plan(case_id, payload)
 
 
 def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[str, Any]:

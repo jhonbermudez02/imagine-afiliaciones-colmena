@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     legacy_project_root: str = "/compat-backend"
     legacy_state_path: str = "/tmp/afiliaciones_engine_state.json"
     legacy_backend_url: str = "http://imagine_compat_backend:8000/api/v1/afiliaciones"
+    legacy_delivery_enabled: bool = True
+    legacy_delivery_execute_sql: bool = False
     search_limit: int = 4
     chunk_size: int = 900
     chunk_overlap: int = 120
