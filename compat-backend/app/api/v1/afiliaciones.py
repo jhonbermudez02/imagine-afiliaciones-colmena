@@ -546,17 +546,30 @@ def _persist_926_history_entry(
     return entry
 
 
+def _norm_lote_key(value: str) -> str:
+    # Postgres almacena `lt`/`lote` como integer/numeric (sin ceros a la izquierda),
+    # pero el "lote usuario" generado por la app nueva viene con padding (ej "000000000004").
+    # Sin esta normalizacion, la comparacion de igualdad de texto nunca calza y los
+    # filtros por lote descartan todas las filas reales sincronizadas desde la DB.
+    v = value.strip()
+    if v.isdigit():
+        return str(int(v))
+    return v
+
+
 def _rows_in_lote(table: str, lote: str) -> list[dict[str, Any]]:
     rows = LEGACY_ENGINE._rows(table)
     if not lote:
         return rows
+
+    target = _norm_lote_key(lote)
 
     def in_lote(row: dict[str, Any]) -> bool:
         lt = as_text(row.get("lt")).strip()
         lo = as_text(row.get("lote")).strip()
         if lt == "" and lo == "":
             return True
-        return lt == lote or lo == lote
+        return _norm_lote_key(lt) == target or _norm_lote_key(lo) == target
 
     return [r for r in rows if in_lote(r)]
 
@@ -578,18 +591,22 @@ def _sede_salary_totals_from_engine(lote: str = "") -> dict[str, int]:
     wd_rows = _rows_in_lote("wd", lote=lote)
     wdest_rows = _rows_in_lote("wdestudiantes", lote=lote)
     wdind_rows = _rows_in_lote("wdindependientes", lote=lote)
-    # En práctica legacy/clone, la relación de conciliación por sede debe seguir el
-    # SR de la sede en WH (2..N), no el código textual f62, que puede llegar repetido.
+    # La conciliación por sede debe usar el código REAL de sede (f62), que es el mismo
+    # que el Excel expone en el nombre de hoja (Sede05 -> "5"). Se normaliza como el lado
+    # Excel (str(int(...)), sin ceros a la izquierda) para que las claves crucen. Si f62
+    # no viniera (sede sin código), se cae al SR como respaldo.
     sr_to_sede: dict[str, str] = {}
     sede_rows = [r for r in wh_rows if _txt_norm(r.get("tp")).upper() == "S"]
     sede_rows_sorted = sorted(
         sede_rows,
         key=lambda r: _to_int_safe(_txt_norm(r.get("sr")), default=0),
     )
-    for idx, row in enumerate(sede_rows_sorted, start=1):
+    for row in sede_rows_sorted:
         sr = _txt_norm(row.get("sr"))
-        if sr:
-            sr_to_sede[sr] = str(idx)
+        if not sr:
+            continue
+        f62 = _txt_norm(row.get("f62"))
+        sr_to_sede[sr] = str(int(f62)) if f62.isdigit() else (f62 or sr)
 
     totals: dict[str, int] = {}
     for row in wd_rows:
@@ -644,6 +661,7 @@ def _sede_salary_totals_from_xlsx(excel_bytes: bytes) -> dict[str, Any]:
         }
 
     totals: dict[str, int] = {}
+    worker_totals: dict[str, int] = {}
     details: list[dict[str, Any]] = []
     sede_pat = re.compile(r"sede\s*0*(\d+)", re.IGNORECASE)
     sum_pat = re.compile(r"SUM\(\s*S(\d+)\s*:\s*S(\d+)\s*\)", re.IGNORECASE)
@@ -687,6 +705,7 @@ def _sede_salary_totals_from_xlsx(excel_bytes: bytes) -> dict[str, Any]:
             fb_total, fb_workers = _fallback_total_by_rows(ws)
             if fb_workers > 0:
                 totals[sede_code] = fb_total
+                worker_totals[sede_code] = fb_total
                 details.append(
                     {
                         "sede": sede_code,
@@ -718,6 +737,7 @@ def _sede_salary_totals_from_xlsx(excel_bytes: bytes) -> dict[str, Any]:
             fb_total, fb_workers = _fallback_total_by_rows(ws)
             if fb_workers > 0:
                 totals[sede_code] = fb_total
+                worker_totals[sede_code] = fb_total
                 details.append(
                     {
                         "sede": sede_code,
@@ -755,6 +775,12 @@ def _sede_salary_totals_from_xlsx(excel_bytes: bytes) -> dict[str, Any]:
                 numeric_rows += 1
         total = int(round(total_float))
 
+        # Suma real por filas de documento (independiente de la fórmula). Sirve para
+        # detectar y explicar cuándo la fórmula "Total salarios" del Excel viene con rango
+        # mal escrito (error humano: ej. =SUM(S40:S44) cuando hay un trabajador en la fila
+        # 39). NO se corrige en silencio: la discrepancia se reporta como bloqueante.
+        fb_total, fb_workers = _fallback_total_by_rows(ws)
+        worker_totals[sede_code] = fb_total
         totals[sede_code] = total
         details.append(
             {
@@ -764,10 +790,12 @@ def _sede_salary_totals_from_xlsx(excel_bytes: bytes) -> dict[str, Any]:
                 "range": f"S{r0}:S{r1}",
                 "rows_numeric": numeric_rows,
                 "total_salarios": total,
+                "total_por_documentos": fb_total,
+                "workers_detected": fb_workers,
             }
         )
 
-    return {"ok": True, "totals": totals, "details": details}
+    return {"ok": True, "totals": totals, "worker_totals": worker_totals, "details": details}
 
 
 def _prebuild_xlsx_sede_salary_check(lote: str, excel_bytes: bytes) -> dict[str, Any]:
@@ -782,6 +810,12 @@ def _prebuild_xlsx_sede_salary_check(lote: str, excel_bytes: bytes) -> dict[str,
         }
     imported_totals = _sede_salary_totals_from_engine(lote=lote)
     excel_totals: dict[str, int] = xlsx.get("totals", {})
+    excel_worker_totals: dict[str, int] = xlsx.get("worker_totals", {})
+    workers_by_sede = {
+        str(dd.get("sede")): int(dd.get("workers_detected") or 0)
+        for dd in xlsx.get("details", [])
+        if dd.get("sede") is not None
+    }
     all_codes = sorted(set(excel_totals.keys()) | set(imported_totals.keys()), key=lambda x: int(x) if x.isdigit() else 999999)
 
     rows: list[dict[str, Any]] = []
@@ -789,23 +823,46 @@ def _prebuild_xlsx_sede_salary_check(lote: str, excel_bytes: bytes) -> dict[str,
     for code in all_codes:
         total_excel = int(excel_totals.get(code, 0))
         total_importado = int(imported_totals.get(code, 0))
+        total_workers = int(excel_worker_totals.get(code, total_excel))
         diff = total_importado - total_excel
         ok = diff == 0
         row = {
             "sede": code,
             "total_excel": total_excel,
             "total_importado": total_importado,
+            "total_por_documentos": total_workers,
             "diferencia": diff,
             "estado": "OK" if ok else "ERROR",
         }
         rows.append(row)
         if not ok:
+            n_workers = workers_by_sede.get(code, 0)
+            # Distinguir la causa: si la suma real de los trabajadores del Excel coincide
+            # con lo importado, el problema es la FÓRMULA del Excel (rango mal escrito que
+            # deja trabajadores fuera). Si no, es una discrepancia real de importación.
+            if total_workers == total_importado and total_workers != total_excel:
+                message = (
+                    f"Sede {code}: el 'Total salarios' del Excel es {total_excel:,} pero la suma real de "
+                    f"sus {n_workers} trabajadores es {total_workers:,} (lo que se importó). La fórmula "
+                    f"'Total salarios' del Excel no cubre todos los trabajadores (rango mal escrito). "
+                    f"Corregir la fórmula del Excel para esta sede."
+                ).replace(",", ".")
+            else:
+                message = (
+                    f"Sede {code}: el total de salarios no coincide. Excel={total_excel:,} · "
+                    f"Importado={total_importado:,} · diferencia={diff:,}. Revisar los trabajadores "
+                    f"de la sede y sus salarios."
+                ).replace(",", ".")
             errors.append(
                 {
                     "type": "total_salario_sede_mismatch",
+                    "code": "SEDE_TOTAL_SALARIOS_MISMATCH",
+                    "severity": "blocker",
                     "sede": code,
+                    "message": message,
                     "total_excel": total_excel,
                     "total_importado": total_importado,
+                    "total_por_documentos": total_workers,
                     "diferencia": diff,
                 }
             )
@@ -1267,7 +1324,8 @@ def _in_lote(row: dict[str, Any], lote: str) -> bool:
     lo = as_text(row.get("lote")).strip()
     if lt == "" and lo == "":
         return True
-    return lt == lote or lo == lote
+    target = _norm_lote_key(lote)
+    return _norm_lote_key(lt) == target or _norm_lote_key(lo) == target
 
 
 def _reproceso_split_by_precheck(lote: str, precheck: dict[str, Any], apply: bool = False) -> dict[str, Any]:
@@ -2250,6 +2308,17 @@ def _yyyymmdd(value: Any) -> str:
     return "".join(ch for ch in txt if ch.isdigit())[:8]
 
 
+def _ddmmyyyy(value: Any) -> str:
+    yyyymmdd = _yyyymmdd(value)
+    if len(yyyymmdd) != 8:
+        return yyyymmdd
+    return yyyymmdd[6:8] + yyyymmdd[4:6] + yyyymmdd[0:4]
+
+
+def _today_yyyymmdd() -> str:
+    return datetime.now().strftime("%Y%m%d")
+
+
 def _split_name(full_name: str) -> tuple[str, str, str, str]:
     parts = [p for p in as_text(full_name).strip().split() if p]
     if not parts:
@@ -2273,14 +2342,6 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
         limit = 1
     if limit > 5000:
         limit = 5000
-    fecha_proceso_raw = as_text(payload.get("fecha_proceso")).strip()
-    fecha_proceso = ""
-    if fecha_proceso_raw:
-        digits = _only_digits(fecha_proceso_raw)
-        if len(digits) >= 8:
-            fecha_proceso = digits[:8]
-    if not fecha_proceso:
-        fecha_proceso = datetime.now().strftime("%Y%m%d")
 
     conditions = ["1=1"]
     params: dict[str, Any] = {"limit": limit}
@@ -2336,6 +2397,10 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
         comisiones_cols = {str(c).lower() for c in get_table_columns_by_alias(base, "proc_servicios_obtenercomisionestramite")}
     except (ValueError, SQLAlchemyError, NoSuchTableError):
         comisiones_cols = set()
+    try:
+        horas_cols = {str(c).lower() for c in get_table_columns_by_alias(base, "proc_servicios_obtenerhoraslaborales")}
+    except (ValueError, SQLAlchemyError, NoSuchTableError):
+        horas_cols = set()
 
     # Hardening: en varios esquemas legacy no existe t.fecha_insert.
     # Si existe, se usa para paridad de fechas de salida en plano.
@@ -2397,8 +2462,13 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
     ct_cot_expr = "NULL::text AS ct_montocotizacion"
     if "ct_montocotizacion" in trabajador_cols:
         ct_cot_expr = "w.ct_montocotizacion AS ct_montocotizacion"
+    ct_cant_trab_expr = "NULL::text AS ct_cantidadtrabajadores"
+    if "ct_cantidadtrabajadores" in trabajador_cols:
+        ct_cant_trab_expr = "w.ct_cantidadtrabajadores AS ct_cantidadtrabajadores"
     def _worker_col_expr(column: str) -> str:
         return f"w.{column} AS {column}" if column in trabajador_cols else f"NULL::text AS {column}"
+    def _empleador_col_expr(column: str) -> str:
+        return f"e.{column}::text AS {column}" if column in empleador_cols else f"NULL::text AS {column}"
     ciudad_trab_expr = "w.ciudadresidencia"
     if "municipioresidencia" in trabajador_cols:
         ciudad_trab_expr = "w.municipioresidencia"
@@ -2430,6 +2500,29 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
       e.tipoaportante,
       {arl_emp_expr},
       {sucursal_expr},
+      {_empleador_col_expr("tiponegociodetectado")},
+      {_empleador_col_expr("numerosedes")},
+      {_empleador_col_expr("numerocentrostrabajo")},
+      {_empleador_col_expr("numerotrabajadoresestudiantes")},
+      {_empleador_col_expr("valornomina")},
+      {_empleador_col_expr("autorizacion1")},
+      {_empleador_col_expr("autorizacion2")},
+      {_empleador_col_expr("autorizacion3")},
+      {_empleador_col_expr("departamentoempleador")},
+      {_empleador_col_expr("nombrelugar")},
+      {_empleador_col_expr("lugarafiliacion")},
+      {_empleador_col_expr("sedeprincipalcodigo")},
+      {_empleador_col_expr("sedeprincipalnombre")},
+      {_empleador_col_expr("numeroradicacion")},
+      {_empleador_col_expr("profilenumerotrabajadores")},
+      {_empleador_col_expr("respsedeprimerapellido")},
+      {_empleador_col_expr("respsedesegundoapellido")},
+      {_empleador_col_expr("respsedeprimernombre")},
+      {_empleador_col_expr("respsedesegundonombre")},
+      {_empleador_col_expr("respsedetipodocumento")},
+      {_empleador_col_expr("respsedenumerodocumento")},
+      {_empleador_col_expr("respsedecorreo")},
+      {_empleador_col_expr("sedeprincipalcorreo")},
       {empleador_fecha_insert_expr},
       w.idtrabajador,
       w.sr AS worker_sr,
@@ -2456,6 +2549,7 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
       {ct_codigo_expr},
       {ct_clase_expr},
       {ct_cot_expr},
+      {ct_cant_trab_expr},
       {_worker_col_expr("ct_ciudad")},
       {_worker_col_expr("ct_departamento")},
       {_worker_col_expr("ct_zona")},
@@ -2532,8 +2626,9 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
     wdest: list[dict[str, Any]] = []
     wdind: list[dict[str, Any]] = []
     wdcom: list[dict[str, Any]] = []
+    wddias: list[dict[str, Any]] = []
+    DAY_NAME_BY_NUM = {1: "lunes", 2: "martes", 3: "miercoles", 4: "jueves", 5: "viernes", 6: "sabado", 7: "domingo"}
     sr_counter = 1
-    wd_line_counter = 1
     city_cache: dict[str, str] = {}
     eps_cache: dict[str, str] = {}
     afp_cache: dict[str, str] = {}
@@ -2590,6 +2685,195 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                 pass
         city_cache[key] = ""
         return ""
+
+    # --- Resolución de ciudad/departamento contra los catálogos oficiales de img004 ---
+    # (ciudades: codigo=DANE 5díg, ciudad=nombre, coddep; departamentos: codigo=coddep,
+    #  nombre). Se cargan una vez y se resuelven en Python con normalización de tildes/ñ,
+    #  porque las tablas traen mayúsculas con acentos y el formulario puede o no traerlos.
+    geo_catalog: dict[str, Any] = {}
+
+    def _fix_mojibake(txt: str) -> str:
+        # El catálogo trae ñ/tildes doble-codificadas (UTF-8 releído como latin-1):
+        # 'NARIÑO' quedó como 'NARIÃ\x91O'. Revertirlo re-encodea latin-1 → utf-8.
+        # En strings limpios el decode falla y se conserva el original (no-op seguro).
+        try:
+            return txt.encode("latin-1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            return txt
+
+    def _norm_geo(value: Any) -> str:
+        txt = as_text(value).strip()
+        if not txt:
+            return ""
+        txt = _fix_mojibake(txt).upper()
+        txt = unicodedata.normalize("NFKD", txt)
+        txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+        # Colapsa puntuación/ruido (ej. 'BOGOTA, D.C.' → 'BOGOTA D C') a espacios.
+        txt = re.sub(r"[^A-Z0-9 ]", " ", txt)
+        return re.sub(r"\s+", " ", txt).strip()
+
+    def _load_geo_catalog() -> dict[str, Any]:
+        if geo_catalog:
+            return geo_catalog
+        cities: dict[str, list[dict[str, str]]] = {}
+        depts_by_name: dict[str, str] = {}
+        depts_by_code: dict[str, str] = {}
+        # El catálogo canónico vive en la BD real "img004", cuyo alias de conexión en
+        # este proyecto es "wimg004" (ver DB_ALIAS_WIMG004_URL); si no está, se intenta
+        # la base activa como respaldo.
+        for alias in ("wimg004", base):
+            try:
+                dep_rows = fetch_all_by_alias(alias, "SELECT codigo, nombre, coddep FROM departamentos")
+                ciu_rows = fetch_all_by_alias(alias, "SELECT codigo, ciudad, coddep FROM ciudades")
+            except (ValueError, SQLAlchemyError, NoSuchTableError):
+                continue
+            if not ciu_rows:
+                continue
+            for d in dep_rows or []:
+                coddep = as_text(d.get("coddep")).strip() or as_text(d.get("codigo")).strip()
+                nkey = _norm_geo(d.get("nombre"))
+                if nkey:
+                    depts_by_name[nkey] = coddep
+                dcode = as_text(d.get("codigo")).strip()
+                if dcode:
+                    depts_by_code[dcode] = coddep
+            for c in ciu_rows:
+                cities.setdefault(_norm_geo(c.get("ciudad")), []).append(
+                    {
+                        "codigo": as_text(c.get("codigo")).strip(),
+                        # Nombre reparado (el catálogo trae ñ/tildes doble-codificadas).
+                        "ciudad": _fix_mojibake(as_text(c.get("ciudad")).strip()),
+                        "coddep": as_text(c.get("coddep")).strip(),
+                    }
+                )
+            break
+        geo_catalog.update({"cities": cities, "depts_by_name": depts_by_name, "depts_by_code": depts_by_code})
+        return geo_catalog
+
+    def _dept_code_from_hint(hint: Any) -> str:
+        h = _norm_geo(hint)
+        if not h:
+            return ""
+        cat = _load_geo_catalog()
+        digits = "".join(ch for ch in h if ch.isdigit())
+        if len(digits) == 2 and digits in cat.get("depts_by_code", {}):
+            return cat["depts_by_code"][digits]
+        if h in cat.get("depts_by_name", {}):
+            return cat["depts_by_name"][h]
+        for name, code in cat.get("depts_by_name", {}).items():
+            if name and (name in h or h in name):
+                return code
+        return ""
+
+    def _resolve_geo(city_name: Any, dept_hint: Any = "", lugar: Any = "") -> Optional[dict[str, str]]:
+        """Devuelve {codigo, ciudad, coddep} del catálogo img004 para el nombre de
+        ciudad dado. Si hay homónimos, desambigua por departamento (dept_hint directo o
+        el token de departamento dentro de lugar_afiliacion 'Ciudad - Depto'/'Depto - Ciudad')."""
+        cat = _load_geo_catalog()
+        cities = cat.get("cities") or {}
+        key = _norm_geo(city_name)
+        if not key:
+            return None
+        candidates = cities.get(key)
+        if not candidates:
+            # Fallback por prefijo: 'BOGOTA' ↔ 'BOGOTA D C' ('BOGOTA, D.C.').
+            candidates = []
+            for nkey, items in cities.items():
+                if nkey.startswith(key + " ") or key.startswith(nkey + " "):
+                    candidates.extend(items)
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]
+        dept_code = _dept_code_from_hint(dept_hint)
+        if not dept_code and lugar:
+            # lugar_afiliacion = 'Ciudad - Departamento' o 'Departamento - Ciudad'. Se
+            # quita UNA aparición de la ciudad; el resto es el departamento (funciona
+            # aunque ciudad y departamento tengan el mismo nombre, ej. 'NARIÑO - NARIÑO').
+            tokens = [t for t in re.split(r"\s*-\s*", as_text(lugar)) if t.strip()]
+            for idx, tok in enumerate(tokens):
+                if _norm_geo(tok) == key:
+                    del tokens[idx]
+                    break
+            for tok in tokens:
+                dc = _dept_code_from_hint(tok)
+                if dc:
+                    dept_code = dc
+                    break
+        if dept_code:
+            filtered = [c for c in candidates if c["coddep"] == dept_code]
+            if filtered:
+                return filtered[0]
+        return candidates[0]
+
+    actividad_lookup_cache: dict[str, dict[str, str]] = {}
+
+    def _actividad_lookup(codigo: Any) -> dict[str, str]:
+        """Fila completa (nombre/claries/tasa/grado) del código de actividad económica
+        (f05), buscada en actividadeconomicaarp de img004 (alias 'wimg004'). Si la BD no
+        responde, cae al catálogo estático actividad_economica_arp.json (mismo origen)."""
+        code = "".join(ch for ch in as_text(codigo) if ch.isdigit())
+        if not code:
+            return {"nombre": "", "claries": "", "tasa": "", "grado": ""}
+        if code in actividad_lookup_cache:
+            return actividad_lookup_cache[code]
+        out = {"nombre": "", "claries": "", "tasa": "", "grado": ""}
+        try:
+            rows_act = fetch_all_by_alias(
+                "wimg004",
+                "SELECT nombre, claries, tasa, grado FROM actividadeconomicaarp WHERE codigo = :c LIMIT 1",
+                {"c": code},
+            )
+            if rows_act:
+                out = {
+                    "nombre": as_text(rows_act[0].get("nombre")).strip(),
+                    "claries": as_text(rows_act[0].get("claries")).strip(),
+                    "tasa": as_text(rows_act[0].get("tasa")).strip(),
+                    "grado": as_text(rows_act[0].get("grado")).strip(),
+                }
+        except (ValueError, SQLAlchemyError, NoSuchTableError):
+            out = {}
+        if not out.get("nombre"):
+            fallback = _activity_risk_profile_arp(code)
+            out = {
+                "nombre": as_text(fallback.get("nombre")).strip(),
+                "claries": as_text(fallback.get("clase")).strip(),
+                "tasa": as_text(fallback.get("tasa")).strip(),
+                "grado": as_text(fallback.get("grado")).strip(),
+            }
+        actividad_lookup_cache[code] = out
+        return out
+
+    def _actividad_descripcion(codigo: Any) -> str:
+        return _actividad_lookup(codigo).get("nombre", "")
+
+    arl_lookup_cache: dict[str, dict[str, str]] = {}
+
+    def _arl_lookup(codigo: Any) -> Optional[dict[str, str]]:
+        """{codigo, nombre} de arpriesgos (img004, alias 'wimg004') para el código real
+        de ARL (segundo número de 'b_arl_de_la_cual_se_traslada', ej. '14-11' -> '11')."""
+        code = "".join(ch for ch in as_text(codigo) if ch.isdigit())
+        if not code:
+            return None
+        if code in arl_lookup_cache:
+            return arl_lookup_cache[code] or None
+        try:
+            rows_arl = fetch_all_by_alias(
+                "wimg004",
+                "SELECT codigo, nombre FROM arpriesgos WHERE codigo = :c LIMIT 1",
+                {"c": code},
+            )
+            if rows_arl:
+                out = {
+                    "codigo": as_text(rows_arl[0].get("codigo")).strip(),
+                    "nombre": as_text(rows_arl[0].get("nombre")).strip(),
+                }
+                arl_lookup_cache[code] = out
+                return out
+        except (ValueError, SQLAlchemyError, NoSuchTableError):
+            pass
+        arl_lookup_cache[code] = {}
+        return None
 
     def _eps_code(value: Any) -> str:
         txt = as_text(value).strip()
@@ -2719,6 +3003,18 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
             return "1"
         return "2"
 
+    def _num_or_none(value: Any) -> Optional[int]:
+        digits = as_text(value).strip()
+        return int(digits) if digits.isdigit() else None
+
+    def _aut_flag(value: Any) -> int:
+        # Sin dato disponible (fuente legacy sin columna): mantener el default
+        # operativo histórico afirmativo para no romper casos ya vigentes.
+        txt = as_text(value).strip()
+        if txt == "":
+            return 1
+        return 1 if txt == "1" else 0
+
     def _is_aprendiz_worker(row: dict[str, Any]) -> bool:
         tipo_txt = as_text(row.get("tipo_trabajador_text")).strip().upper()
         cargo_txt = as_text(row.get("cargo")).strip().upper()
@@ -2764,16 +3060,83 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
         f49_code = _tipo_tramite_f49(row.get("tipoafiliacion"))
         if arl_emp == "" and f49_code == "1":
             arl_emp = "10"
+        # ARL anterior (f56/combo56): arl_emp trae solo el código real (segundo número de
+        # "14-11 Compañía..."); se valida contra arpriesgos (img004) para tomar codigo+nombre.
+        arl_lookup_p = _arl_lookup(arl_emp)
+        arl_codigo_p = arl_lookup_p["codigo"] if arl_lookup_p else ""
+        arl_nombre_p = arl_lookup_p["nombre"] if arl_lookup_p else ""
+        profile_num_trab_emp = _num_or_none(row.get("profilenumerotrabajadores"))
         localidad_emp = as_text(row.get("localidadempleador")).strip()
         if localidad_emp.upper() in {"NA", "N/A", "NULL", "0"}:
             localidad_emp = ""
+        tipo_negocio_word = as_text(row.get("tiponegociodetectado")).strip().upper() or "MICRO"
+        departamento_emp = as_text(row.get("departamentoempleador")).strip()
+        # Ciudad/departamento oficiales (catálogos img004): se busca por nombre_lugar y se
+        # desambigua con lugar_afiliacion. f15=ciudades.codigo, combo15=ciudades.ciudad,
+        # departamento=departamentos.coddep. Si no hay match, se conservan los fallbacks.
+        combo15_emp = as_text(row.get("ciudadempleador") or row.get("ciudad") or row.get("municipio"))
+        geo_p = _resolve_geo(
+            row.get("nombrelugar") or row.get("ciudadempleador") or row.get("municipio"),
+            dept_hint=departamento_emp,
+            lugar=row.get("lugarafiliacion"),
+        )
+        if geo_p:
+            ciudad_emp = geo_p["codigo"] or ciudad_emp
+            combo15_emp = geo_p["ciudad"] or combo15_emp
+            departamento_emp = geo_p["coddep"] or departamento_emp
+        numero_sedes_emp = _num_or_none(row.get("numerosedes"))
+        valor_nomina_emp = _num_or_none(row.get("valornomina"))
+        aut1 = _aut_flag(row.get("autorizacion1"))
+        aut2 = _aut_flag(row.get("autorizacion2"))
+        aut3 = _aut_flag(row.get("autorizacion3"))
+
+        # Sede principal (primera fila de proc_servicios_obtenersedetramite): solo se usa como
+        # respaldo si el contrato_clean del empleador no trae los campos directos de responsable/correo.
+        sede_rows: list[dict[str, Any]] = []
+        try:
+            sede_rows = fetch_all_by_alias(
+                base,
+                "SELECT * FROM proc_servicios_obtenersedetramite WHERE idtramite = :idtramite ORDER BY sr",
+                {"idtramite": idtramite_key},
+            )
+        except (ValueError, SQLAlchemyError):
+            sede_rows = []
+        if not sede_rows:
+            sede_rows = [{}]
+        primary_sede_row = sede_rows[0] or {}
+        resp_ap1_p = as_text(row.get("respsedeprimerapellido"))
+        resp_ap2_p = as_text(row.get("respsedesegundoapellido"))
+        resp_n1_p = as_text(row.get("respsedeprimernombre"))
+        resp_n2_p = as_text(row.get("respsedesegundonombre"))
+        resp_td_p = as_text(row.get("respsedetipodocumento") or primary_sede_row.get("tipodocumentoresponsable") or rep_tipodoc)
+        resp_doc_p = as_text(row.get("respsedenumerodocumento") or primary_sede_row.get("documentoresponsable") or rep_doc)
+        if resp_ap1_p or resp_n1_p:
+            resp_p1, resp_p2, resp_p3, resp_p4 = resp_ap1_p, resp_ap2_p, resp_n1_p, resp_n2_p
+        else:
+            resp_nom_p = as_text(primary_sede_row.get("nombreresponsable") or rep)
+            resp_p1, resp_p2, resp_p3, resp_p4 = _split_name(resp_nom_p)
+        correo_sede_p = (
+            as_text(row.get("sedeprincipalcorreo"))
+            or as_text(primary_sede_row.get("correo"))
+            or as_text(primary_sede_row.get("correosede"))
+            or as_text(primary_sede_row.get("correoelectronico"))
+            or correo_emp
+        )
+        correo_responsable_p = (
+            as_text(row.get("respsedecorreo"))
+            or as_text(primary_sede_row.get("correoresponsable"))
+            or correo_sede_p
+        )
+        sede_principal_nombre_p = as_text(row.get("sedeprincipalnombre")) or as_text(primary_sede_row.get("nombresede"))
+        sede_principal_codigo_p = as_text(row.get("sedeprincipalcodigo")) or as_text(primary_sede_row.get("codigosede"))
+        f05_code_p = as_text(row.get("actividadeconomicaempleador"))
 
         wh.append(
             {
                 "sr": sr_counter,
                 "lt": lote,
                 "tp": "P",
-                "clase": "Afa",
+                "clase": "Afiliacion",
                 "f01": contrato_num,
                 "f50": RULES_ENGINE.tipo_ident_empresa_codigo(tipodoc_emp),
                 "f48": numdoc_emp,
@@ -2787,52 +3150,91 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                 "carcont2": rep_p3,
                 "f70": rep_p4,
                 "nomcont2": rep_tipodoc,
-                "f05": as_text(row.get("actividadeconomicaempleador")),
-                "f49": f49_code,
-                "f56": arl_emp,
+                "nomcont1": resp_p1,
+                "carcont1": resp_p2,
+                "dircont1": resp_p3,
+                "ciucont1": resp_p4,
+                "nomciucont1": resp_td_p,
+                "depcont1": resp_doc_p,
+                "emailcont1": correo_responsable_p,
+                "emailcont2": correo_responsable_p,
+                "f05": f05_code_p,
+                "f49": "1",
+                "f56": arl_codigo_p,
+                "f16": 0,
+                "f63": 0,
+                "f24": 1,
+                "f08": 0,
+                "f10": 0,
+                "f07": 0,
+                "f11": 0,
+                "f64": 0,
+                "telcont1": 0,
+                "telcont21": 0,
+                "doccont2": 0,
+                "telcont2": 0,
+                "telcont22": 0,
+                "e1": 0, "e2": 0, "e3": 0, "e4": 0, "e5": 0,
+                "e6": 0, "e7": 0, "e8": 0, "e9": 0, "e10": 0,
+                "e11": 0, "e12": 0, "e13": 0, "e14": 0, "e15": 0,
+                "e16": 0, "e17": 0, "e18": 0, "e19": 0, "e20": 0,
                 "f18": razon_social_emp,
                 "f23": sucursal_codigo,
                 "f57": ciudad_emp,
-                "f09": _yyyymmdd(row.get("fecharegistro")),
-                "f59": _yyyymmdd(row.get("iniciocobertura")),
-                "f65": _yyyymmdd(row.get("fecharegistro")),
-                "fecesc": fecha_proceso,
-                "fecloc": fecha_proceso,
+                "f09": _ddmmyyyy(row.get("fecharegistro")),
+                "f59": _ddmmyyyy(row.get("iniciocobertura")),
+                "f65": _ddmmyyyy(row.get("fecharegistro")),
                 "f20": as_text(row.get("telefonocelularempleador") or row.get("telefonoprincipalempleador")),
-                "f55": correo_emp,
+                "f55": as_text(row.get("correoelectronicorepresentantelegal")),
+                "f03": 0,
+                "f19": 0,
+                "f02": _today_yyyymmdd(),
+                "f13": "0",
+                "f54": 0,
+                "f58": 1 if (profile_num_trab_emp or 0) >= 20 else 2,
+                "f60": 0,
+                "f61": 0,
+                "dev": 0,
+                "fp": _today_yyyymmdd(),
+                "ci": 2,
+                "cf": 2,
+                "vs": 50,
+                "d1": "",
+                "zo": 0,
+                "ob": "Plano generado",
+                "combo24": "CENTRALIZADO",
                 "tipoempresa": tipoempresa_value,
-                "grupoecono": "00000",
+                "grupoecono": "0",
                 "doccont1": "3",
                 "contratoant": "000000",
                 "tipoaportante": tipoaportante_raw,
-                "tipoafiliacion": "INDIVIDUAL",
+                "tipoafiliacion": "Individual",
                 "tipocodigo": "1",
                 "subtipocodigo": "0",
                 "tipoafiliado": "DEPENDIENTE",
-                "nomdepcont2": "MICRO",
+                "nomdepcont2": tipo_negocio_word.capitalize(),
                 "zona": RULES_ENGINE.normalize_zona(row.get("zonaempleador") or "U"),
                 "localidad": localidad_emp,
-                "aut46": "Verdadero",
-                "aut47": "Verdadero",
-                "aut48": "Verdadero",
+                "departamento": departamento_emp,
+                "combo05": _actividad_descripcion(f05_code_p),
+                "combo15": combo15_emp,
+                "combo56": arl_nombre_p,
+                "f27": numero_sedes_emp,
+                "f25": profile_num_trab_emp,
+                "f17": 0,
+                "f53": valor_nomina_emp,
+                "f62": sede_principal_codigo_p,
+                "f71": sede_principal_nombre_p,
+                "aut46": aut1,
+                "aut47": aut2,
+                "aut48": aut3,
             }
         )
         # Multi-sede: cada fila de proc_servicios_obtenersedetramite genera su WH tipo S.
-        sede_rows: list[dict[str, Any]] = []
-        try:
-            sede_rows = fetch_all_by_alias(
-                base,
-                "SELECT * FROM proc_servicios_obtenersedetramite WHERE idtramite = :idtramite ORDER BY sr",
-                {"idtramite": idtramite_key},
-            )
-        except (ValueError, SQLAlchemyError):
-            sede_rows = []
-        if not sede_rows:
-            sede_rows = [{}]
+        # (sede_rows ya se obtuvo arriba para poblar los campos de responsable/correo del tp='P')
 
         trabajadores = trabajadores_by_tramite.get(idtramite_key, [])
         trabajadores_by_ct: dict[str, list[dict[str, Any]]] = {}
-        trabajadores_by_proc_sr: dict[int, str] = {}
         trabajadores_by_proc_sr_codes: dict[int, list[str]] = {}
         for wr in trabajadores:
             ct = as_text(wr.get("codigoct")).strip()
@@ -2843,12 +3245,11 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                 ordered_ct_codes = trabajadores_by_proc_sr_codes.setdefault(sr_proc, [])
                 if ct not in ordered_ct_codes:
                     ordered_ct_codes.append(ct)
-                if sr_proc not in trabajadores_by_proc_sr:
-                    trabajadores_by_proc_sr[sr_proc] = ct
 
         cod_act, nom_act, clase_riesgo = _actividad_info(row.get("actividadeconomicaempleador"))
         sede_slots: list[dict[str, Any]] = []
         ct_to_sede_sr: dict[str, int] = {}
+        idtrab_to_sede_sr: dict[str, int] = {}
         first_sede_sr = sr_counter + 1
 
         for sede_idx, sede_row in enumerate(sede_rows):
@@ -2870,18 +3271,28 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
             )
             sede_nombre = as_text((sede_row or {}).get("nombresede") or f"SEDE {sede_idx + 1}")
             correo_sede = (
-                as_text((sede_row or {}).get("correosede"))
+                as_text((sede_row or {}).get("correo"))
+                or as_text((sede_row or {}).get("correosede"))
                 or as_text((sede_row or {}).get("correoelectronico"))
                 or correo_emp
             )
             sede_zona = RULES_ENGINE.normalize_zona((sede_row or {}).get("zona") or row.get("zonaempleador") or "U")
-            sede_localidad = as_text((sede_row or {}).get("localidad") or row.get("localidadempleador")).strip()
-            if sede_localidad.upper() in {"NA", "N/A", "NULL", "0"}:
-                sede_localidad = ""
             sede_direccion = as_text((sede_row or {}).get("direccion") or row.get("direccionempleador"))
             sede_telefono = as_text((sede_row or {}).get("telefono") or row.get("telefonoprincipalempleador"))
             sede_sr_proc = _to_int_safe((sede_row or {}).get("sr"), default=0)
-            derived_ct_from_workers = trabajadores_by_proc_sr.get(sede_sr_proc, "")
+            # El primer centro de trabajo de la sede es el de MENOR código (coincide con
+            # el orden real de la tabla "Centros de trabajo" del Excel, ej. RIESGO 1 antes
+            # que RIESGO 4). Tomar el CT del primer TRABAJADOR listado es incorrecto: el
+            # orden de los trabajadores en la hoja no respeta el orden de los centros.
+            sede_ct_codes_all = trabajadores_by_proc_sr_codes.get(sede_sr_proc, [])
+            derived_ct_from_workers = ""
+            if sede_ct_codes_all:
+                normalized_candidates = [
+                    (_normalize_ct_code_token(c), c) for c in sede_ct_codes_all
+                ]
+                normalized_candidates = [nc for nc in normalized_candidates if nc[0]]
+                if normalized_candidates:
+                    derived_ct_from_workers = min(normalized_candidates, key=lambda nc: nc[0])[1]
             sede_ct_code = (
                 _normalize_ct_code_token((sede_row or {}).get("codigocentrotrabajo"))
                 or _normalize_ct_code_token((sede_row or {}).get("codigoct"))
@@ -2890,58 +3301,134 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                 or _normalize_ct_code_token(sede_idx + 1)
                 or "000001"
             )
+            # Componentes del nombre del responsable de la sede tomados del centro de
+            # trabajo correspondiente (form_fields sede_XX_centros_de_trabajo →
+            # ct_responsable_*). Fallback al split posicional del nombre completo.
+            sede_ct_ref = (trabajadores_by_ct.get(sede_ct_code) or [{}])[0] or {}
+            resp_ap1_s = as_text(sede_ct_ref.get("ct_responsable_pa")).strip() or r1
+            resp_ap2_s = as_text(sede_ct_ref.get("ct_responsable_sa")).strip() or r2
+            resp_n1_s = as_text(sede_ct_ref.get("ct_responsable_pn")).strip() or r3
+            resp_n2_s = as_text(sede_ct_ref.get("ct_responsable_sn")).strip() or r4
+            # Ciudad/departamento oficiales por sede (catálogos img004): se busca el
+            # municipio del centro de trabajo y, si hay homónimos, se filtra por su
+            # departamento. f15/f57=ciudades.codigo, departamento=departamentos.coddep.
+            sede_dept_code = as_text((sede_row or {}).get("departamento")).strip()
+            combo15_sede = (
+                as_text(sede_ct_ref.get("ct_ciudad")) or as_text((sede_row or {}).get("ciudad")) or as_text(row.get("ciudadempleador"))
+            )
+            geo_s = _resolve_geo(
+                as_text(sede_ct_ref.get("ct_ciudad"))
+                or (sede_row or {}).get("ciudad")
+                or row.get("ciudadempleador"),
+                dept_hint=as_text(sede_ct_ref.get("ct_departamento")) or sede_dept_code or departamento_emp,
+            )
+            if geo_s:
+                sede_ciudad_code = geo_s["codigo"] or sede_ciudad_code
+                sede_dept_code = geo_s["coddep"] or sede_dept_code
+                combo15_sede = geo_s["ciudad"] or combo15_sede
+            f05_code_s = as_text(sede_ct_ref.get("ct_codigoactividad")) or as_text(row.get("actividadeconomicaempleador"))
+            actividad_s = _actividad_lookup(f05_code_s)
+            # f17/f11 son el TOTAL de la sede: cantidad_trabajadores y monto_cotizacion se
+            # reportan por cada centro de trabajo en el Excel, así que se suman entre todos
+            # los centros que pertenecen a esta sede (no solo el primero).
+            cantidad_trab_s = 0
+            monto_cot_s = 0
+            for ct_code_sum in (sede_ct_codes_all or [sede_ct_code]):
+                ct_ref_sum = (trabajadores_by_ct.get(ct_code_sum) or [{}])[0] or {}
+                cantidad_trab_s += _num_or_none(ct_ref_sum.get("ct_cantidadtrabajadores")) or 0
+                monto_cot_s += _num_or_none(ct_ref_sum.get("ct_montocotizacion")) or 0
+            es_sede_principal = sede_idx == 0
 
             wh.append(
                 {
                     "sr": sede_sr,
                     "lt": lote,
                     "tp": "S",
-                    "clase": "Afa",
+                    "clase": "Sedes",
                     "f01": contrato_num,
                     "f50": "0",
                     "f48": numdoc_emp,
-                    "f51": sede_nombre[:54],
+                    "f51": razon_social_emp[:54],
                     "f15": sede_ciudad_code,
+                    "combo15": combo15_sede,
                     "f12": sede_direccion,
                     "f14": sede_telefono,
                     "f67": as_text((sede_row or {}).get("documentoresponsable") or rep_doc),
-                    "f06": r1,
-                    "f69": r2,
-                    "carcont2": r3,
-                    "f70": r4,
+                    "f06": resp_ap1_s,
+                    "f69": resp_ap2_s,
+                    "carcont2": resp_n1_s,
+                    "f70": resp_n2_s,
                     "nomcont2": resp_td,
                     "dircont1": r3,
-                    "f05": as_text(row.get("actividadeconomicaempleador")),
-                    "f49": f49_code,
-                    "f56": arl_emp,
+                    # actividad_economica_codigo del primer centro de trabajo de la sede.
+                    "f05": f05_code_s,
+                    # Clase de riesgo/tasa/grado: se leen de actividadeconomicaarp (img004)
+                    # por el mismo código f05, no de la hoja de centros de trabajo.
+                    "f03": actividad_s.get("claries") or 0,
+                    "f56": 0,
                     "f18": correo_sede,
-                    "f23": sucursal_codigo,
-                    "f57": sede_ciudad_code,
-                    "f09": _yyyymmdd(row.get("fecharegistro")),
-                    "f59": _yyyymmdd(row.get("iniciocobertura")),
-                    "f65": _yyyymmdd(row.get("fecharegistro")),
-                    "fecesc": fecha_proceso,
-                    "fecloc": fecha_proceso,
+                    "f23": 0,
+                    "f57": 0,
+                    "f09": 0,
+                    "f59": 0,
+                    "f65": 0,
+                    "f19": as_text(row.get("numeroradicacion")),
                     "f20": as_text((sede_row or {}).get("telefono") or row.get("telefonocelularempleador")),
-                    "f55": correo_sede,
-                    "tipoempresa": tipoempresa_value,
-                    "grupoecono": "00000",
+                    # Correo del responsable de esta sede (centro de trabajo).
+                    "f55": as_text(sede_ct_ref.get("ct_responsable_correo")) or correo_responsable_p,
+                    "f02": 0,
+                    "f63": 0,
+                    "f24": "",
+                    "f16": 0,
+                    "f10": 0,
+                    "f08": actividad_s.get("grado") or 0,
+                    "f07": actividad_s.get("tasa") or 0,
+                    "f17": cantidad_trab_s,
+                    "f11": monto_cot_s,
+                    "f53": 0,
+                    "f13": "0",
+                    "f54": 0,
+                    "f58": 1 if (cantidad_trab_s or 0) >= 20 else 2,
+                    "f61": 0,
+                    "dev": 0,
+                    "fp": _today_yyyymmdd(),
+                    "ci": 2,
+                    "cf": 2,
+                    "vs": 50,
+                    "d1": "",
+                    "zo": 0,
+                    "ob": "Plano generado",
+                    "combo24": "",
+                    "tipoempresa": "0",
+                    "tipoafiliacion": "0",
+                    "grupoecono": "0",
                     "doccont1": "3",
                     "contratoant": "000000",
                     "tipoaportante": tipoaportante_raw,
-                    "tipoafiliacion": "INDIVIDUAL",
                     "tipocodigo": "1",
                     "subtipocodigo": "0",
-                    "tipoafiliado": "DEPENDIENTE",
-                    "nomdepcont2": "MICRO",
+                    "nomdepcont2": "",
+                    "f64": 0,
+                    "telcont1": 0,
+                    "telcont21": 0,
+                    "doccont2": 0,
+                    "telcont2": 0,
+                    "telcont22": 0,
+                    "e1": 0, "e2": 0, "e3": 0, "e4": 0, "e5": 0,
+                    "e6": 0, "e7": 0, "e8": 0, "e9": 0, "e10": 0,
+                    "e11": 0, "e12": 0, "e13": 0, "e14": 0, "e15": 0,
+                    "e16": 0, "e17": 0, "e18": 0, "e19": 0, "e20": 0,
+                    "combo05": actividad_s.get("nombre") or "",
                     "f62": sede_codigo,
                     "f71": sede_nombre,
-                    "f60": "1",
+                    "f60": 1 if es_sede_principal else 2,
+                    "f27": 0,
+                    "f25": 0,
                     "zona": sede_zona,
-                    "localidad": sede_localidad,
-                    "aut46": "Verdadero",
-                    "aut47": "Verdadero",
-                    "aut48": "Verdadero",
+                    "departamento": sede_dept_code,
+                    "aut46": 0,
+                    "aut47": 0,
+                    "aut48": 0,
                 }
             )
 
@@ -2994,29 +3481,6 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                 if activity_profile.get("clase") in {"1", "2", "3", "4", "5"}:
                     ct_clase = activity_profile["clase"]
                 ct_cot = as_text(ct_ref.get("ct_montocotizacion") or "0")
-                ct_grado = activity_profile.get("grado") or "0"
-                ct_tasa = as_text(
-                    ct_ref.get("ct_tasa_riesgo")
-                    or ct_ref.get("ct_tasa_riesgo_ct")
-                    or ct_ref.get("tasa_riesgo")
-                    or "",
-                ).strip()
-                if activity_profile.get("tasa"):
-                    ct_tasa = activity_profile["tasa"]
-                ct_tasa_norm = ct_tasa.replace(",", ".").strip()
-                if ct_tasa_norm in {"", "0", "0.0", "0.00", "0.000", "0.0000", "00000"}:
-                    tasa_by_clase = {
-                        "1": "0.522",
-                        "2": "1.044",
-                        "3": "2.436",
-                        "4": "4.350",
-                        "5": "6.960",
-                    }
-                    ct_tasa = tasa_by_clase.get(as_text(ct_clase).strip(), "0")
-                if _only_digits(ct_cod_act) == "2851201":
-                    ct_grado = activity_profile.get("grado") or "12"
-                    ct_tasa = activity_profile.get("tasa") or "1.044"
-                ct_tasa = _format_tasa_arp(ct_tasa)
                 wcentrot.append(
                     {
                         "sr": sede_sr,
@@ -3025,8 +3489,6 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                         "codigoactividad": ct_cod_act,
                         "nombreactividad": ct_nom_act,
                         "claseriesgo": ct_clase,
-                        "grado": ct_grado,
-                        "tasa": ct_tasa,
                         "totaltrabajadores": str(len(sede_workers)),
                         "montocotizacion": ct_cot,
                         "ciudad": _city_code(ct_ref.get("ct_ciudad")) or as_text(slot["ciudad"]),
@@ -3061,6 +3523,9 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                 worker_sr = worker_sr_raw
             else:
                 worker_sr = ct_to_sede_sr.get(worker_ct_code, first_sede_sr)
+            trab_id_key = as_text(wr.get("idtrabajador")).strip()
+            if trab_id_key:
+                idtrab_to_sede_sr[trab_id_key] = worker_sr
             worker_ct_code = worker_ct_code or next(
                 (
                     _normalize_ct_code_token(s.get("ct_code"))
@@ -3106,6 +3571,11 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                         "departamento": "",
                         "jornada": as_text(wr.get("jornada")),
                         "modalidad": as_text(wr.get("modalidad")),
+                        # Esquema real: NOT NULL. codigo_tipo_trabajador = tipoafiliadocotizante,
+                        # tipo_trabajador = subtipoafiliadocotizante (mapeo directo de la fuente).
+                        # El "0" es guarda para no violar NOT NULL si la fuente llega vacia.
+                        "codigo_tipo_trabajador": as_text(wr.get("tipoafiliadocotizante")) or "0",
+                        "tipo_trabajador": as_text(wr.get("subtipoafiliadocotizante")) or "0",
                         "codigo_actividad": as_text(wr.get("actividadeconomica")),
                         "fecha_inicio": _yyyymmdd(wr.get("iniciocontrato")),
                         "fecha_final": _yyyymmdd(wr.get("finalizacioncontrato")),
@@ -3171,7 +3641,6 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                             "codigo_arl_anterior": as_text(wr.get("arlanterior")),
                             "tipo_cotizante": as_text(wr.get("tipoafiliadocotizante")),
                             "subtipo_cotizante": as_text(wr.get("subtipoafiliadocotizante")),
-                            "tipotramite": as_text(wr.get("tipotramite")),
                             "modalidad": as_text(wr.get("modalidad")),
                             "tipo_contrato": as_text(wr.get("tipocontrato")),
                             "transporte": RULES_ENGINE.normalize_transporte(wr.get("suministratransporte")),
@@ -3184,10 +3653,8 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                             "actividad_economica": as_text(wr.get("actividadeconomica")),
                             "codigo_ct": worker_ct_code,
                             "tipo_salario": "1",
-                            "linea_origen": wd_line_counter,
                         }
                     )
-            wd_line_counter += 1
 
         if {"idtramite", "vendedor", "porcentaje"}.issubset(comisiones_cols):
             try:
@@ -3212,6 +3679,37 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                     }
                 )
 
+        if {"idtramite", "idtrabajador", "dia", "hora"}.issubset(horas_cols):
+            try:
+                hrows = fetch_all_by_alias(
+                    base,
+                    "SELECT idtrabajador, dia, hora, valor FROM proc_servicios_obtenerhoraslaborales "
+                    "WHERE idtramite = :idtramite",
+                    {"idtramite": idtramite_key},
+                )
+            except (ValueError, SQLAlchemyError):
+                hrows = []
+            # brwddias solo permite un horario por sede (sr): si varios trabajadores de la
+            # misma sede declaran horas distintas, se unen (OR) — una hora cuenta como
+            # trabajada si al menos un trabajador de la sede la marcó.
+            sede_day_hours: dict[tuple[int, int], set[int]] = {}
+            for hr in hrows:
+                worker_sr_for_hours = idtrab_to_sede_sr.get(as_text(hr.get("idtrabajador")).strip())
+                if not worker_sr_for_hours:
+                    continue
+                dia_num = _to_int_safe(hr.get("dia"), default=0)
+                hora_num = _to_int_safe(hr.get("hora"), default=0)
+                if not (1 <= dia_num <= 7 and 1 <= hora_num <= 24):
+                    continue
+                if not as_text(hr.get("valor")).strip():
+                    continue
+                sede_day_hours.setdefault((worker_sr_for_hours, dia_num), set()).add(hora_num)
+            for (sr_dia, dia_num), horas_set in sede_day_hours.items():
+                dia_row = {"sr": sr_dia, "lote": lote, "dia": DAY_NAME_BY_NUM.get(dia_num, str(dia_num))}
+                for h in range(1, 25):
+                    dia_row[f"h{h}"] = "X" if h in horas_set else ""
+                wddias.append(dia_row)
+
         sr_counter += 1 + len(sede_rows)
 
     LEGACY_ENGINE.load_dump(
@@ -3219,7 +3717,7 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
             "tables": {
                 "wh": wh,
                 "wd": wd,
-                "wddias": [],
+                "wddias": wddias,
                 "wcentrot": wcentrot,
                 "wdestudiantes": wdest,
                 "wdindependientes": wdind,
@@ -3245,7 +3743,7 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                     "brempresasarp": wh,
                     "brafiliadosarp": wd,
                     "brcentrot": wcentrot,
-                    "brwddias": [],
+                    "brwddias": wddias,
                     "brwdestudiantes": wdest,
                     "brwdindependientes": wdind,
                     "brwdcomisiones": wdcom,
@@ -3262,6 +3760,7 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
         "rows_engine": {
             "wh": len(wh),
             "wd": len(wd),
+            "wddias": len(wddias),
             "wcentrot": len(wcentrot),
             "wdestudiantes": len(wdest),
             "wdindependientes": len(wdind),
@@ -3680,6 +4179,29 @@ def _parse_empleador_from_contrato_clean(content: str) -> dict[str, str]:
         "sucursalcodigo": "",
         "iniciocobertura": "",
         "numerocontrato": "",
+        "tiponegociodetectado": "",
+        "numerosedes": "",
+        "numerocentrostrabajo": "",
+        "numerotrabajadoresestudiantes": "",
+        "valornomina": "",
+        "autorizacion1": "",
+        "autorizacion2": "",
+        "autorizacion3": "",
+        "departamentoempleador": "",
+        "nombrelugar": "",
+        "lugarafiliacion": "",
+        "sedeprincipalcodigo": "",
+        "sedeprincipalnombre": "",
+        "numeroradicacion": "",
+        "profilenumerotrabajadores": "",
+        "respsedeprimerapellido": "",
+        "respsedesegundoapellido": "",
+        "respsedeprimernombre": "",
+        "respsedesegundonombre": "",
+        "respsedetipodocumento": "",
+        "respsedenumerodocumento": "",
+        "respsedecorreo": "",
+        "sedeprincipalcorreo": "",
     }
 
     def _has_mark_after_label(tokens: list[str], label: str) -> bool:
@@ -3700,6 +4222,10 @@ def _parse_empleador_from_contrato_clean(content: str) -> dict[str, str]:
         parts = [_clean_token(p) for p in ln.split("|")]
         low_ln = ln.lower()
         norm_ln = _norm_label(ln)
+
+        # Las líneas NOVA_* se procesan aparte (abajo) como fuente autoritativa.
+        if _clean_token(parts[0] if parts else "").startswith("NOVA_"):
+            continue
 
         if "1. apellidos y nombres o razón social" in low_ln:
             # ...|RAZON SOCIAL|2. Tipo de documento|NI|3. Número...|900...
@@ -3739,6 +4265,9 @@ def _parse_empleador_from_contrato_clean(content: str) -> dict[str, str]:
                 tipoempresa = _only_digits(_extract_between_fuzzy(parts, "4. Tipo de negocio homologado"))
             if tipoempresa:
                 out["tipoempresa"] = tipoempresa
+            tipo_negocio = _extract_after_key_non_empty(parts, "Tipo de negocio detectado")
+            if tipo_negocio:
+                out["tiponegociodetectado"] = tipo_negocio.upper()
 
         elif "apellidos y nombres del representante legal" in low_ln:
             # 4. Apellidos ...|AP1|AP2|N1|N2
@@ -3860,6 +4389,48 @@ def _parse_empleador_from_contrato_clean(content: str) -> dict[str, str]:
         out["arlanteriorempleador"] = "10"
     if not out["tipoaportante"]:
         out["tipoaportante"] = "01"
+
+    # Override autoritativo con tokens NOVA_* (extractor preciso form_fields del backend
+    # principal). Se aplican al final para ganar sobre el parseo del texto crudo. Solo se
+    # sobrescribe con valores no vacíos, para no borrar fallbacks válidos (ej. ARL "10").
+    nova_field_map = {
+        "NOVA_RESP_APELLIDO1": "respsedeprimerapellido",
+        "NOVA_RESP_APELLIDO2": "respsedesegundoapellido",
+        "NOVA_RESP_NOMBRE1": "respsedeprimernombre",
+        "NOVA_RESP_NOMBRE2": "respsedesegundonombre",
+        "NOVA_RESP_TIPODOC": "respsedetipodocumento",
+        "NOVA_RESP_DOC": "respsedenumerodocumento",
+        "NOVA_RESP_CORREO": "respsedecorreo",
+        "NOVA_SEDE_CORREO": "sedeprincipalcorreo",
+        "NOVA_SEDE_DEPTO": "departamentoempleador",
+        "NOVA_SEDE_CODIGO": "sedeprincipalcodigo",
+        "NOVA_SEDE_NOMBRE": "sedeprincipalnombre",
+        "NOVA_NUM_RADICACION": "numeroradicacion",
+        "NOVA_PROFILE_NUM_TRAB": "profilenumerotrabajadores",
+        "NOVA_NOMBRE_LUGAR": "nombrelugar",
+        "NOVA_LUGAR_AFILIACION": "lugarafiliacion",
+        "NOVA_TIPO_NEGOCIO": "tiponegociodetectado",
+        "NOVA_NUM_SEDES": "numerosedes",
+        "NOVA_NUM_CENTROS": "numerocentrostrabajo",
+        "NOVA_NUM_TRAB": "numerotrabajadoresestudiantes",
+        "NOVA_VALOR_NOMINA": "valornomina",
+        "NOVA_ARL_ANTERIOR": "arlanteriorempleador",
+    }
+    # Las autorizaciones son NOVA-exclusivas y "0" es un valor válido, así que se
+    # asignan aunque no sean vacías-verdaderas (guardando el "0").
+    nova_aut_map = {"NOVA_AUT1": "autorizacion1", "NOVA_AUT2": "autorizacion2", "NOVA_AUT3": "autorizacion3"}
+    for ln in lines:
+        raw_parts = ln.split("|")
+        head = _clean_token(raw_parts[0])
+        if not head.startswith("NOVA_"):
+            continue
+        value = _clean_token(raw_parts[1]) if len(raw_parts) > 1 else ""
+        if head == "NOVA_TRAMITE":
+            out["tipoafiliacion"] = "Traslado" if value.upper() == "TRASLADO" else "Inicial"
+        elif head in nova_aut_map:
+            out[nova_aut_map[head]] = value
+        elif head in nova_field_map and value:
+            out[nova_field_map[head]] = value
 
     return out
 
@@ -4180,8 +4751,10 @@ def _parse_trabajadores_from_sede_clean(
             ct_meta = {
                 "ct_nombreactividad": _part(parts, 2).upper(),
                 # Layout XLSX clean preserva columnas vacías con NULL:
-                # actividad=5, clase=9, ciudad=10, dirección=15, teléfono=17, cotización=34.
+                # actividad=5, clase=9, ciudad=10, dirección=15, teléfono=17, cotización=34,
+                # cantidad de trabajadores=32 (columna backend 36, idx = col-4).
                 "ct_codigoactividad": _to_num_text(_part(parts, 5) or _part(parts, 3)),
+                "ct_cantidadtrabajadores": _to_num_text(_part(parts, 32)),
                 "ct_claseriesgo": _part(parts, 9) or _part(parts, 4),
                 "ct_ciudad": _part(parts, 10),
                 "ct_departamento": _part(parts, 12),
@@ -4311,6 +4884,7 @@ def _parse_trabajadores_from_sede_clean(
             "ct_codigoactividad": ct_meta.get("ct_codigoactividad", ""),
             "ct_claseriesgo": ct_meta.get("ct_claseriesgo", ""),
             "ct_montocotizacion": ct_meta.get("ct_montocotizacion", ""),
+            "ct_cantidadtrabajadores": ct_meta.get("ct_cantidadtrabajadores", ""),
             "ct_ciudad": ct_meta.get("ct_ciudad", ""),
             "ct_departamento": ct_meta.get("ct_departamento", ""),
             "ct_zona": ct_meta.get("ct_zona", ""),
@@ -4429,6 +5003,7 @@ def _parse_trabajadores_from_legacy_independientes(
                 "ct_codigoactividad": "",
                 "ct_claseriesgo": "",
                 "ct_montocotizacion": "",
+                "ct_cantidadtrabajadores": "",
             }
         )
         seq += 1
@@ -4691,6 +5266,37 @@ def _import_real_lote_to_db(payload: dict[str, Any]) -> dict[str, Any]:
                 )
             lote_field = alt
 
+        # Límites de longitud por columna varchar/char: los valores del pipeline (ej.
+        # cargo f37, apellidos, dirección) pueden exceder el ancho legacy (varchar(40),
+        # etc.) y romper el INSERT con StringDataRightTruncation. Se recortan al ancho de
+        # la columna, replicando el comportamiento del CORE legacy (que también trunca).
+        varchar_limits: dict[str, int] = {}
+        # Columnas numéricas (smallint/integer/bigint/numeric/real/double precision):
+        # el pipeline deja "" en campos legítimamente vacíos (ej. f56=ARL anterior en
+        # una Afiliación, que no tiene ARL previa). Postgres rechaza "" en columnas
+        # numéricas ("invalid input syntax"), así que se convierten a NULL.
+        numeric_cols: set[str] = set()
+        try:
+            type_rows = fetch_all_by_alias(
+                base,
+                "SELECT column_name, character_maximum_length, data_type FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = :t",
+                {"t": table},
+            )
+            for lr in type_rows:
+                col_name = as_text(lr.get("column_name")).strip().lower()
+                if not col_name:
+                    continue
+                max_len = lr.get("character_maximum_length")
+                if max_len is not None:
+                    varchar_limits[col_name] = int(max_len)
+                data_type = as_text(lr.get("data_type")).strip().lower()
+                if data_type in {"smallint", "integer", "bigint", "numeric", "real", "double precision"}:
+                    numeric_cols.add(col_name)
+        except (ValueError, SQLAlchemyError):
+            varchar_limits = {}
+            numeric_cols = set()
+
         try:
             deleted = execute_by_alias(base, f"DELETE FROM {table} WHERE {lote_field} = :lote", {"lote": lote})
             deleted_summary[table] = deleted
@@ -4720,6 +5326,14 @@ def _import_real_lote_to_db(payload: dict[str, Any]) -> dict[str, Any]:
             placeholders = ", ".join([f":{c}" for c in cols])
             sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({placeholders})"
             params = {c: row[c] for c in cols}
+            # Recortar strings al ancho de su columna para evitar StringDataRightTruncation.
+            for c in cols:
+                limit = varchar_limits.get(c.lower())
+                if limit is not None and isinstance(params[c], str) and len(params[c]) > limit:
+                    params[c] = params[c][:limit]
+                # "" en columna numérica -> NULL (evita InvalidTextRepresentation).
+                if c.lower() in numeric_cols and isinstance(params[c], str) and params[c].strip() == "":
+                    params[c] = None
             try:
                 execute_by_alias(base, sql, params)
                 inserted += 1
@@ -4837,6 +5451,294 @@ def _clone_lote_between_bases(payload: dict[str, Any]) -> dict[str, Any]:
         "counts_source": exported.get("counts", {}),
         "import_result": imported,
     }
+
+
+BR_TABLES = [
+    "brempresasarp",
+    "brafiliadosarp",
+    "brwddias",
+    "brcentrot",
+    "brwdestudiantes",
+    "brwdindependientes",
+    "brwdcomisiones",
+]
+BK_TABLES = [
+    "bkempresasarp",
+    "bkafiliadosarp",
+    "bkwddias",
+    "bkcentrot",
+    "bkwdestudiantes",
+    "bkwdindependientes",
+    "bkwdcomisiones",
+]
+DEV_TABLES = [
+    "devempresasarp",
+    "devafiliadosarp",
+    "devwddias",
+    "devcentrot",
+    "devwdestudiantes",
+    "devwdindependientes",
+    "devwdcomisiones",
+]
+BR_TO_BK = dict(zip(BR_TABLES, BK_TABLES))
+# Fiel a AfiliacionesReproceso.php: estas 3 tablas se copian a ybr filtrando por
+# rango de sr (min/max de brempresasarp del lote), no por el campo lote/lt.
+SR_RANGE_BR_TABLES = {"brwdestudiantes", "brwdindependientes", "brwdcomisiones"}
+# El esquema real cambia el nombre de la columna de lote segun la base: en img004
+# (wimg004) la tabla bkafiliadosarp usa `lote` en vez de `lt` (el resto de bk*/br*
+# mantiene el nombre de LOTE_FIELD_BY_TABLE). Fiel a AfiliacionesReproceso.php.
+WIMG004_LOTE_FIELD = {"bkafiliadosarp": "lote"}
+
+
+def _lote_field_for(base: str, table: str) -> str:
+    if base in ("wimg004", "img004") and table in WIMG004_LOTE_FIELD:
+        return WIMG004_LOTE_FIELD[table]
+    return LOTE_FIELD_BY_TABLE[table]
+
+
+def _table_exists_alias(base: str, table: str) -> bool:
+    try:
+        return bool(get_table_columns_by_alias(base, table))
+    except NoSuchTableError:
+        return False
+    except (ValueError, SQLAlchemyError):
+        return False
+
+
+def _delete_lote_alias(base: str, table: str, lote_field: str, lote: str) -> int:
+    if not _table_exists_alias(base, table):
+        return -1
+    return execute_by_alias(base, f"DELETE FROM {table} WHERE {lote_field} = :lote", {"lote": lote})
+
+
+def _delete_sr_range_alias(base: str, table: str, sr_col: str, sr_min: Any, sr_max: Any) -> int:
+    if sr_min is None or sr_max is None:
+        return 0
+    if not _table_exists_alias(base, table):
+        return -1
+    return execute_by_alias(
+        base, f"DELETE FROM {table} WHERE {sr_col} BETWEEN :lo AND :hi", {"lo": sr_min, "hi": sr_max}
+    )
+
+
+def _copy_rows_by_filter(
+    src_base: str,
+    src_table: str,
+    dst_base: str,
+    dst_table: str,
+    where_sql: str,
+    where_params: dict[str, Any],
+    rename: Optional[dict[str, str]] = None,
+) -> int:
+    # `rename` mapea nombre-de-columna-origen -> nombre-de-columna-destino, para bases
+    # donde la misma tabla usa un nombre distinto (ej. temporal.bkafiliadosarp.lt ->
+    # img004.bkafiliadosarp.lote, fiel a AfiliacionesReproceso.php).
+    rename = {k.lower(): v.lower() for k, v in (rename or {}).items()}
+    try:
+        src_cols = {c.lower() for c in get_table_columns_by_alias(src_base, src_table)}
+    except NoSuchTableError:
+        return 0
+    order = " ORDER BY sr" if "sr" in src_cols else ""
+    rows = fetch_all_by_alias(src_base, f"SELECT * FROM {src_table} WHERE {where_sql}{order}", where_params)
+    if not rows:
+        return 0
+    try:
+        dst_cols = {c.lower() for c in get_table_columns_by_alias(dst_base, dst_table)}
+    except NoSuchTableError:
+        return 0
+    inserted = 0
+    for row in rows:
+        data: dict[str, Any] = {}
+        for k, v in row.items():
+            col = rename.get(as_text(k).lower(), as_text(k).lower())
+            if col in dst_cols:
+                data[col] = v
+        if not data:
+            continue
+        cols = list(data.keys())
+        placeholders = ", ".join(f":{c}" for c in cols)
+        execute_by_alias(dst_base, f"INSERT INTO {dst_table} ({', '.join(cols)}) VALUES ({placeholders})", data)
+        inserted += 1
+    return inserted
+
+
+def _copy_lote_rows(
+    src_base: str,
+    src_table: str,
+    dst_base: str,
+    dst_table: str,
+    lote_field: str,
+    lote: str,
+    rename: Optional[dict[str, str]] = None,
+) -> int:
+    try:
+        src_cols = {c.lower() for c in get_table_columns_by_alias(src_base, src_table)}
+    except NoSuchTableError:
+        return 0
+    if lote_field.lower() not in src_cols:
+        return 0
+    return _copy_rows_by_filter(
+        src_base, src_table, dst_base, dst_table, f"{lote_field} = :lote", {"lote": lote}, rename=rename
+    )
+
+
+def _execute_legacy_delivery(payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    Ejecucion real (no dry-run) del tramo final del flujo Access:
+    Guardarbk (bk* en temporal) + Estadistico (temporal.estadistico) +
+    AfiliacionesReproceso.php (migracion a ybr/wimg004 y limpieza de temporal).
+    """
+    lote = as_text(payload.get("lote")).strip()
+    if not lote:
+        raise HTTPException(status_code=400, detail="Campo requerido: lote")
+    usuario = (as_text(payload.get("usuario")).strip() or "nova_case_workflow")[:15]
+    fecha_proceso = _only_digits(as_text(payload.get("fecha_proceso")))[:8] or datetime.now().strftime("%Y%m%d")
+
+    sr_rows = fetch_all_by_alias(
+        "temporal", "SELECT min(sr) AS mn, max(sr) AS mx FROM brempresasarp WHERE lt = :lote", {"lote": lote}
+    )
+    sr_min = sr_rows[0].get("mn") if sr_rows else None
+    sr_max = sr_rows[0].get("mx") if sr_rows else None
+
+    result: dict[str, Any] = {"ok": True, "executed": True, "lote": lote, "sr_min": sr_min, "sr_max": sr_max, "steps": {}}
+
+    # --- 1. Guardarbk: copia Wh/Wd (ya persistidos en temporal.br*) hacia temporal.bk* ---
+    guardarbk: dict[str, Any] = {"deleted_sr": {}, "deleted_lote": {}, "inserted": {}}
+    for bk_table in BK_TABLES:
+        guardarbk["deleted_sr"][bk_table] = _delete_sr_range_alias("temporal", bk_table, "sr", sr_min, sr_max)
+    for bk_table in BK_TABLES:
+        guardarbk["deleted_lote"][bk_table] = _delete_lote_alias("temporal", bk_table, LOTE_FIELD_BY_TABLE[bk_table], lote)
+    for br_table, bk_table in BR_TO_BK.items():
+        guardarbk["inserted"][bk_table] = _copy_lote_rows(
+            "temporal", br_table, "temporal", bk_table, LOTE_FIELD_BY_TABLE[br_table], lote
+        )
+    result["steps"]["guardarbk"] = guardarbk
+
+    # --- 2. Estadistico: upsert en temporal.estadistico ---
+    counts_rows = fetch_all_by_alias(
+        "temporal",
+        "SELECT "
+        "(SELECT count(*) FROM brempresasarp WHERE lt=:lote AND tp='P') AS planillas, "
+        "(SELECT count(*) FROM brempresasarp WHERE lt=:lote AND tp='S') AS sedes, "
+        "(SELECT count(*) FROM brempresasarp WHERE lt=:lote AND tp<>'P') AS anexos, "
+        "(SELECT count(*) FROM brafiliadosarp WHERE lt=:lote AND f28 > '0') AS detalles, "
+        "(SELECT count(*) FROM brcentrot WHERE lote=:lote AND codigoct > '0') AS centrot",
+        {"lote": lote},
+    )
+    c = counts_rows[0] if counts_rows else {}
+    existing = fetch_all_by_alias("temporal", "SELECT lote FROM estadistico WHERE lote = :lote", {"lote": lote})
+    if not existing:
+        execute_by_alias(
+            "temporal",
+            "INSERT INTO estadistico(lote, fecha, familia, planillas, anexos, detalles, usuario) "
+            "VALUES (:lote, :fecha, 'Afa', :planillas, :anexos, :detalles, :usuario)",
+            {
+                "lote": lote,
+                "fecha": fecha_proceso,
+                "planillas": c.get("planillas") or 0,
+                "anexos": c.get("anexos") or 0,
+                "detalles": c.get("detalles") or 0,
+                "usuario": usuario,
+            },
+        )
+        estadistico_mode = "inserted"
+    else:
+        execute_by_alias(
+            "temporal",
+            "UPDATE estadistico SET sede=:sede, centrot=:centrot, fecha_entrega=:fecha_entrega, "
+            "planillas=:planillas, anexos=:anexos, detalles=:detalles WHERE lote=:lote",
+            {
+                "sede": c.get("sedes") or 0,
+                "centrot": c.get("centrot") or 0,
+                "fecha_entrega": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "planillas": c.get("planillas") or 0,
+                "anexos": c.get("anexos") or 0,
+                "detalles": c.get("detalles") or 0,
+                "lote": lote,
+            },
+        )
+        estadistico_mode = "updated"
+    result["steps"]["estadistico"] = {"mode": estadistico_mode, "counts": c}
+
+    # --- 3. Reproceso: migracion temporal -> ybr/wimg004 y limpieza de temporal ---
+    reproceso: dict[str, Any] = {"deleted": {}, "inserted": {}}
+    for table in BR_TABLES:
+        reproceso["deleted"][f"ybr.{table}"] = _delete_lote_alias("ybr", table, LOTE_FIELD_BY_TABLE[table], lote)
+    for table in BK_TABLES:
+        reproceso["deleted"][f"wimg004.{table}"] = _delete_lote_alias("wimg004", table, _lote_field_for("wimg004", table), lote)
+    reproceso["deleted"]["wimg004.afi_devoluciones"] = _delete_sr_range_alias(
+        "wimg004", "afi_devoluciones", "dev_sr", sr_min, sr_max
+    )
+    reproceso["deleted"]["wimg004.tr"] = _delete_lote_alias("wimg004", "tr", "nl", lote)
+
+    for table in BR_TABLES:
+        field = LOTE_FIELD_BY_TABLE[table]
+        if table in SR_RANGE_BR_TABLES and sr_min is not None and sr_max is not None:
+            # Fiel a AfiliacionesReproceso.php (filtra por rango de sr), pero se agrega
+            # el campo de lote como condicion de seguridad: en Access, temporal solo
+            # contenia el lote en curso (single-tenant), por lo que sr repetido entre
+            # lotes no era un riesgo; aqui si puede ocurrir con datos de pruebas/lotes
+            # previos que quedaron sin limpiar, y mezclaria filas de otro lote.
+            reproceso["inserted"][f"ybr.{table}"] = _copy_rows_by_filter(
+                "temporal",
+                table,
+                "ybr",
+                table,
+                f"sr BETWEEN :lo AND :hi AND {field} = :lote",
+                {"lo": sr_min, "hi": sr_max, "lote": lote},
+            )
+        else:
+            reproceso["inserted"][f"ybr.{table}"] = _copy_lote_rows("temporal", table, "ybr", table, field, lote)
+
+    for table in BK_TABLES:
+        # El origen (temporal) usa LOTE_FIELD_BY_TABLE; el destino (wimg004) puede usar
+        # otro nombre (bkafiliadosarp: lt -> lote), que se remapea al insertar.
+        src_field = LOTE_FIELD_BY_TABLE[table]
+        dst_field = _lote_field_for("wimg004", table)
+        rename = {src_field: dst_field} if src_field != dst_field else None
+        reproceso["inserted"][f"wimg004.{table}"] = _copy_lote_rows(
+            "temporal", table, "wimg004", table, src_field, lote, rename=rename
+        )
+
+    contrato_rows = fetch_all_by_alias(
+        "temporal", "SELECT f01 FROM brempresasarp WHERE lt=:lote AND tp='P' LIMIT 1", {"lote": lote}
+    )
+    contrato = as_text(contrato_rows[0].get("f01") if contrato_rows else "").strip()
+    reproceso["contrato"] = contrato
+
+    if contrato and _table_exists_alias("wimg004", "afi_rad"):
+        hoy = datetime.now().strftime("%Y%m%d")
+        reproceso["afi_rad_updated"] = execute_by_alias(
+            "wimg004",
+            "UPDATE afi_rad SET afi_rad_estado='Plano', afi_rad_fechaplano=:hoy "
+            "WHERE afi_rad_contrato=:contrato AND afi_rad_estado='Indexado'",
+            {"hoy": hoy, "contrato": contrato},
+        )
+    else:
+        reproceso["afi_rad_updated"] = 0
+
+    # Limpieza de temporal (staging): dev*, br*, bk*, afi_rad, afi_devoluciones, lc, tr.
+    for table in DEV_TABLES:
+        reproceso["deleted"][f"temporal.{table}"] = _delete_sr_range_alias("temporal", table, "sr", sr_min, sr_max)
+    for table in BR_TABLES:
+        reproceso["deleted"][f"temporal.{table}"] = _delete_lote_alias("temporal", table, LOTE_FIELD_BY_TABLE[table], lote)
+    for table in BK_TABLES:
+        reproceso["deleted"][f"temporal.{table}"] = _delete_lote_alias("temporal", table, LOTE_FIELD_BY_TABLE[table], lote)
+    if contrato:
+        reproceso["deleted"]["temporal.afi_rad"] = _delete_lote_alias("temporal", "afi_rad", "afi_rad_contrato", contrato)
+    reproceso["deleted"]["temporal.afi_devoluciones"] = _delete_sr_range_alias(
+        "temporal", "afi_devoluciones", "dev_sr", sr_min, sr_max
+    )
+    reproceso["deleted"]["temporal.lc"] = _delete_lote_alias("temporal", "lc", "fileid", lote)
+    reproceso["deleted"]["temporal.tr"] = _delete_lote_alias("temporal", "tr", "nl", lote)
+
+    result["steps"]["reproceso"] = reproceso
+    return result
+
+
+@router.post("/legacy/db/execute-lote-delivery")
+def legacy_db_execute_lote_delivery(payload: dict[str, Any]) -> dict[str, Any]:
+    return _execute_legacy_delivery(payload)
 
 
 @router.get("/legacy/opc/soportados")
@@ -7001,6 +7903,29 @@ def ruta_inclusion_importar_empleador_contrato(payload: dict[str, Any]) -> dict[
         "tipoafiliacion",
         "tipoaportante",
         "arlanteriorempleador",
+        "tiponegociodetectado",
+        "numerosedes",
+        "numerocentrostrabajo",
+        "numerotrabajadoresestudiantes",
+        "valornomina",
+        "autorizacion1",
+        "autorizacion2",
+        "autorizacion3",
+        "departamentoempleador",
+        "nombrelugar",
+        "lugarafiliacion",
+        "sedeprincipalcodigo",
+        "sedeprincipalnombre",
+        "numeroradicacion",
+        "profilenumerotrabajadores",
+        "respsedeprimerapellido",
+        "respsedesegundoapellido",
+        "respsedeprimernombre",
+        "respsedesegundonombre",
+        "respsedetipodocumento",
+        "respsedenumerodocumento",
+        "respsedecorreo",
+        "sedeprincipalcorreo",
     ]
     params = {k: data.get(k, "") for k in fields}
     params["idtramite"] = idtramite
@@ -7011,6 +7936,36 @@ def ruta_inclusion_importar_empleador_contrato(payload: dict[str, Any]) -> dict[
                 base,
                 "ALTER TABLE proc_servicios_obtenerempleadortramite "
                 "ADD COLUMN IF NOT EXISTS arlanteriorempleador text",
+            )
+        except (ValueError, SQLAlchemyError):
+            pass
+        try:
+            execute_by_alias(
+                base,
+                "ALTER TABLE proc_servicios_obtenerempleadortramite "
+                "ADD COLUMN IF NOT EXISTS tiponegociodetectado text, "
+                "ADD COLUMN IF NOT EXISTS numerosedes text, "
+                "ADD COLUMN IF NOT EXISTS numerocentrostrabajo text, "
+                "ADD COLUMN IF NOT EXISTS numerotrabajadoresestudiantes text, "
+                "ADD COLUMN IF NOT EXISTS valornomina text, "
+                "ADD COLUMN IF NOT EXISTS autorizacion1 text, "
+                "ADD COLUMN IF NOT EXISTS autorizacion2 text, "
+                "ADD COLUMN IF NOT EXISTS autorizacion3 text, "
+                "ADD COLUMN IF NOT EXISTS departamentoempleador text, "
+                "ADD COLUMN IF NOT EXISTS nombrelugar text, "
+                "ADD COLUMN IF NOT EXISTS lugarafiliacion text, "
+                "ADD COLUMN IF NOT EXISTS sedeprincipalcodigo text, "
+                "ADD COLUMN IF NOT EXISTS sedeprincipalnombre text, "
+                "ADD COLUMN IF NOT EXISTS numeroradicacion text, "
+                "ADD COLUMN IF NOT EXISTS profilenumerotrabajadores text, "
+                "ADD COLUMN IF NOT EXISTS respsedeprimerapellido text, "
+                "ADD COLUMN IF NOT EXISTS respsedesegundoapellido text, "
+                "ADD COLUMN IF NOT EXISTS respsedeprimernombre text, "
+                "ADD COLUMN IF NOT EXISTS respsedesegundonombre text, "
+                "ADD COLUMN IF NOT EXISTS respsedetipodocumento text, "
+                "ADD COLUMN IF NOT EXISTS respsedenumerodocumento text, "
+                "ADD COLUMN IF NOT EXISTS respsedecorreo text, "
+                "ADD COLUMN IF NOT EXISTS sedeprincipalcorreo text",
             )
         except (ValueError, SQLAlchemyError):
             pass
@@ -7269,6 +8224,7 @@ def ruta_inclusion_importar_trabajadores_contrato(payload: dict[str, Any]) -> di
             "ADD COLUMN IF NOT EXISTS ct_codigoactividad text, "
             "ADD COLUMN IF NOT EXISTS ct_claseriesgo text, "
             "ADD COLUMN IF NOT EXISTS ct_montocotizacion text, "
+            "ADD COLUMN IF NOT EXISTS ct_cantidadtrabajadores text, "
             "ADD COLUMN IF NOT EXISTS ct_ciudad text, "
             "ADD COLUMN IF NOT EXISTS ct_departamento text, "
             "ADD COLUMN IF NOT EXISTS ct_zona text, "
@@ -7297,7 +8253,7 @@ def ruta_inclusion_importar_trabajadores_contrato(payload: dict[str, Any]) -> di
             "eps,actividadeconomica,modalidad,arlanterior,afp,iniciocontrato,finalizacioncontrato,valorcontrato,"
             "ingresomensual,deducciones,ibc,iniciocobertura,tipoafiliadocotizante,subtipoafiliadocotizante,tipocontrato,"
             "jornada,suministratransporte,numeromesescontrato,tipotramite,idtramite,"
-            "cargo,codigoct,ct_nombreactividad,ct_codigoactividad,ct_claseriesgo,ct_montocotizacion,"
+            "cargo,codigoct,ct_nombreactividad,ct_codigoactividad,ct_claseriesgo,ct_montocotizacion,ct_cantidadtrabajadores,"
             "ct_ciudad,ct_departamento,ct_zona,ct_direccion,ct_telefono,ct_correo,"
             "ct_responsable_pa,ct_responsable_sa,ct_responsable_pn,ct_responsable_sn,"
             "ct_responsable_td,ct_responsable_doc,ct_responsable_correo"
@@ -7307,7 +8263,7 @@ def ruta_inclusion_importar_trabajadores_contrato(payload: dict[str, Any]) -> di
             ":eps,:actividadeconomica,:modalidad,:arlanterior,:afp,:iniciocontrato,:finalizacioncontrato,:valorcontrato,"
             ":ingresomensual,:deducciones,:ibc,:iniciocobertura,:tipoafiliadocotizante,:subtipoafiliadocotizante,:tipocontrato,"
             ":jornada,:suministratransporte,:numeromesescontrato,:tipotramite,:idtramite,"
-            ":cargo,:codigoct,:ct_nombreactividad,:ct_codigoactividad,:ct_claseriesgo,:ct_montocotizacion,"
+            ":cargo,:codigoct,:ct_nombreactividad,:ct_codigoactividad,:ct_claseriesgo,:ct_montocotizacion,:ct_cantidadtrabajadores,"
             ":ct_ciudad,:ct_departamento,:ct_zona,:ct_direccion,:ct_telefono,:ct_correo,"
             ":ct_responsable_pa,:ct_responsable_sa,:ct_responsable_pn,:ct_responsable_sn,"
             ":ct_responsable_td,:ct_responsable_doc,:ct_responsable_correo)"
@@ -7317,7 +8273,7 @@ def ruta_inclusion_importar_trabajadores_contrato(payload: dict[str, Any]) -> di
             for key in (
                 "ct_ciudad", "ct_departamento", "ct_zona", "ct_direccion", "ct_telefono", "ct_correo",
                 "ct_responsable_pa", "ct_responsable_sa", "ct_responsable_pn", "ct_responsable_sn",
-                "ct_responsable_td", "ct_responsable_doc", "ct_responsable_correo",
+                "ct_responsable_td", "ct_responsable_doc", "ct_responsable_correo", "ct_cantidadtrabajadores",
             ):
                 params.setdefault(key, "")
             params["idtramite"] = idtramite

@@ -2,7 +2,7 @@ FROM python:3.10.12-slim-bookworm
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     poppler-utils \
     tesseract-ocr \
@@ -10,10 +10,6 @@ RUN apt-get update && apt-get install -y \
     tesseract-ocr-eng \
     libgomp1 \
     libglib2.0-0 \
-    libgl1 \
-    libsm6 \
-    libxext6 \
-    libxrender1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

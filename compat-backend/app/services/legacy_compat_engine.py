@@ -34,6 +34,17 @@ def load_env(path: Path) -> Dict[str, str]:
 ENV = load_env(ROOT / ".env")
 
 
+def _norm_lote_key(value: str) -> str:
+    # Postgres almacena `lt`/`lote` como integer/numeric (sin ceros a la izquierda),
+    # pero el "lote usuario" generado por la app nueva viene con padding (ej "000000000004").
+    # Sin esta normalizacion, la comparacion de igualdad de texto nunca calza y el
+    # plano 926 sale vacio aunque los datos reales ya esten sincronizados en el engine.
+    v = value.strip()
+    if v.isdigit():
+        return str(int(v))
+    return v
+
+
 def as_text(value: Any) -> str:
     if value is None:
         return ""
@@ -215,7 +226,11 @@ class LegacyCompatEngine:
         return {"tables": {}, "meta": {}}
 
     def _save_state(self) -> None:
-        self.state_path.write_text(json.dumps(self.state, ensure_ascii=False, indent=2), encoding="utf-8")
+        # Filas leídas de Postgres pueden traer Decimal/date/datetime (columnas numeric/timestamp),
+        # que json no serializa por defecto.
+        self.state_path.write_text(
+            json.dumps(self.state, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+        )
 
     def _rows(self, table: str, db: str = "") -> List[Dict[str, Any]]:
         t = table.lower()
@@ -1508,12 +1523,14 @@ class LegacyCompatEngine:
         wdcom_rows = self._rows("wdcomisiones")
 
         if lote:
+            target = _norm_lote_key(lote)
+
             def in_lote(row: Dict[str, Any]) -> bool:
                 lt = as_text(row.get("lt")).strip()
                 lo = as_text(row.get("lote")).strip()
                 if lt == "" and lo == "":
                     return True
-                return lt == lote or lo == lote
+                return _norm_lote_key(lt) == target or _norm_lote_key(lo) == target
 
             wh_rows = [r for r in wh_rows if in_lote(r)]
             wd_rows = [r for r in wd_rows if in_lote(r)]

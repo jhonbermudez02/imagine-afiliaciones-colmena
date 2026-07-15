@@ -59,8 +59,8 @@ services:
       APP_PROFILE: afiliaciones
       DATABASE_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/temporal
       DB_ALIAS_TEMPORAL_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/temporal
-      DB_ALIAS_WIMG004_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/wimg004
-      DB_ALIAS_YBR_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/ybr
+      DB_ALIAS_WIMG004_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/img004
+      DB_ALIAS_YBR_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/br
       AFILIACIONES_ENGINE_STATE_PATH: /tmp/afiliaciones_engine_state.json
       AI_RAG_BACKEND: postgres
       AI_RAG_DB_ALIAS: temporal

@@ -42,3 +42,13 @@ imagine-afiliaciones/
 *.log
 
 files_migration/
+
+*.tar
+*.tar.gz
+*.tar.zst
+
+AFI_COLIMA_OFFLINE_2026-07-06_d0db5de/
+README_OFFLINE_DEPLOY.md
+docker-compose.deploy.external-db.yml
+scripts/build_and_save_images.sh
+scripts/reset_compat_db.sh

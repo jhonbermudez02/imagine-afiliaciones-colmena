@@ -1455,6 +1455,35 @@ def approve_case(case_id: str, reason: str = "", operator: str = "", note: str =
     if active_messages:
         raise ValueError("El contrato aún tiene bloqueantes activos y no se puede aprobar manualmente.")
 
+    # El insert a la base de datos ocurre al COMPLETAR el workflow (etapa de entrega). Si
+    # el flujo quedó detenido (ej. se aceptaron excepciones después de un stop, o el
+    # sync/entrega falló) el estado guardado puede estar rancio. Como el caso ya pasó el
+    # chequeo de bloqueantes activos (es aprobable), se re-ejecuta el flujo aquí para que
+    # la aprobación implique realmente la inserción. Si el flujo vuelve a fallar, se
+    # expone el motivo real y NO se aprueba (en vez de marcar APROBADO en falso).
+    workflow = analysis.get("workflow_run") or {}
+    if normalize_haystack(workflow.get("status") or "") != "completed":
+        payload = run_case_workflow(case_id)
+        analysis = payload.setdefault("analysis", {}) or {}
+        workflow = analysis.get("workflow_run") or {}
+        if normalize_haystack(workflow.get("status") or "") != "completed":
+            stop_reason = normalize_text(workflow.get("stop_reason") or "")
+            detalle = f" Motivo: {stop_reason}" if stop_reason else ""
+            raise ValueError(
+                f"El flujo no se completó (estado: {workflow.get('status')}), la información no se insertó "
+                f"en la base de datos. No se puede aprobar.{detalle}"
+            )
+        delivery = analysis.get("legacy_delivery") or {}
+        if delivery and not delivery.get("skipped"):
+            exec_error = normalize_text(delivery.get("execution_error") or delivery.get("error") or "")
+            if exec_error:
+                raise ValueError(f"La entrega a la base de datos falló y no se puede aprobar. Error: {exec_error}")
+            if settings.legacy_delivery_execute_sql and not delivery.get("executed"):
+                raise ValueError(
+                    "La información aún no se insertó en la base de datos (entrega legacy no ejecutada). "
+                    "No se puede aprobar."
+                )
+
     now = utc_now()
     approval = {
         "approved": True,
@@ -1814,6 +1843,16 @@ def _apply_validation_exceptions(validation_summary: Dict[str, Any], manual_revi
         for item in active_exceptions
         if str(item.get("fingerprint") or "")
     }
+    # Respaldo por código: el fingerprint = hash(code+mensaje), pero el mensaje puede
+    # llevar contenido volátil que cambia entre corridas/subidas (nombre de archivo con
+    # radicado, fechas, "N días hábiles"). Sin esto, una excepción aceptada dejaría de
+    # cruzar al re-analizar y el bloqueante reaparecería. Estos códigos aceptables son
+    # únicos por caso, así que matchear por código es seguro.
+    exception_by_code: Dict[str, Dict[str, Any]] = {}
+    for item in active_exceptions:
+        code_key = normalize_haystack(item.get("code"))
+        if code_key:
+            exception_by_code.setdefault(code_key, item)
     remaining: List[Dict[str, Any]] = []
     accepted: List[Dict[str, Any]] = []
     accepted_keys: set[tuple[str, str]] = set()
@@ -1822,6 +1861,8 @@ def _apply_validation_exceptions(validation_summary: Dict[str, Any], manual_revi
             remaining.append(reason)
             continue
         exception = exception_by_fingerprint.get(str(reason.get("fingerprint") or ""))
+        if not exception:
+            exception = exception_by_code.get(normalize_haystack(reason.get("code")))
         if not exception:
             remaining.append(reason)
             continue
@@ -5740,12 +5781,24 @@ def _extract_form_fields_from_sheet(sheet: Any) -> Dict[str, str]:
         "sede_principal_nombre": _sheet_value(sheet, 21, 13),
         "sede_principal_direccion": _sheet_value(sheet, 20, 21),
         "sede_principal_telefono": next((only_digits(p) for p in re.split(r"[-/,;\s]+", str(_sheet_value(sheet, 20, 40) or _sheet_value(sheet, 20, 31) or _sheet_value(sheet, 21, 40) or _sheet_value(sheet, 21, 31) or "")) if len(only_digits(p)) in {7,10} and not only_digits(p).startswith("0")), only_digits(str(_sheet_value(sheet, 20, 40) or _sheet_value(sheet, 20, 31) or ""))),
-        "sede_principal_correo": _clean_contact_value("sede_principal_correo", _sheet_value(sheet, 24, 27)),
+        "sede_principal_correo": _clean_contact_value("sede_principal_correo", _sheet_value(sheet, 21, 40)),
         "sede_principal_municipio_distrito": _sheet_value(sheet, 22, 8),
         "sede_principal_zona": _sheet_value(sheet, 22, 20),
         "sede_principal_as22": _sheet_value(sheet, 22, 45),
         "sede_principal_localidad_comuna": _sheet_value(sheet, 22, 28),
         "sede_principal_departamento": _sheet_value(sheet, 22, 34),
+        "responsable_sede_principal_primer_apellido": _sheet_value(sheet, 23, 11),
+        "responsable_sede_principal_segundo_apellido": (
+            _sheet_value(sheet, 23, 22)
+            if normalize_haystack(_sheet_value(sheet, 23, 22)) != "segundo apellido"
+            else ""
+        ),
+        "responsable_sede_principal_primer_nombre": _sheet_value(sheet, 23, 34),
+        "responsable_sede_principal_segundo_nombre": (
+            _sheet_value(sheet, 23, 44)
+            if normalize_haystack(_sheet_value(sheet, 23, 44)) != "segundo nombre"
+            else ""
+        ),
         "responsable_sede_principal_nombre_completo": " ".join(
             value
             for value in [
@@ -5758,6 +5811,7 @@ def _extract_form_fields_from_sheet(sheet: Any) -> Dict[str, str]:
         ).strip(),
         "responsable_sede_principal_tipo_documento": _sheet_value(sheet, 24, 8),
         "responsable_sede_principal_numero_documento": only_digits(_sheet_value(sheet, 24, 16)),
+        "responsable_sede_principal_correo": _clean_contact_value("responsable_sede_principal_correo", _sheet_value(sheet, 24, 27)),
         "tipo_tramite": tipo_tramite,
         "naturaleza_juridica_empleador": cleaned_sheet_value(13, 26, (13, 28), (13, 27)),
         "tipo_aportante": cleaned_sheet_value(13, 39, (13, 38), (13, 40)),
@@ -6279,9 +6333,14 @@ def _extract_employer_from_contract_text(contract_text: str) -> Dict[str, str]:
         "sede_principal_zona": by_label("Zona sede", "Zona"),
         "sede_principal_localidad_comuna": by_label("Localidad/Comuna", "localidad comuna"),
         "sede_principal_departamento": by_label("Departamento"),
+        "responsable_sede_principal_primer_apellido": "",
+        "responsable_sede_principal_segundo_apellido": "",
+        "responsable_sede_principal_primer_nombre": "",
+        "responsable_sede_principal_segundo_nombre": "",
         "responsable_sede_principal_nombre_completo": "",
         "responsable_sede_principal_tipo_documento": "",
         "responsable_sede_principal_numero_documento": "",
+        "responsable_sede_principal_correo": "",
         "tipo_tramite": by_label("Tipo de trámite", "tipo tramite"),
         "naturaleza_juridica_empleador": by_label("Naturaleza jurídica del empleador", "naturaleza juridica del empleador"),
         "tipo_aportante": by_label("Tipo de aportante"),
@@ -6490,9 +6549,14 @@ def _enrich_xlsx_profile_from_clean(
             "sede_principal_zona",
             "sede_principal_localidad_comuna",
             "sede_principal_departamento",
+            "responsable_sede_principal_primer_apellido",
+            "responsable_sede_principal_segundo_apellido",
+            "responsable_sede_principal_primer_nombre",
+            "responsable_sede_principal_segundo_nombre",
             "responsable_sede_principal_nombre_completo",
             "responsable_sede_principal_tipo_documento",
             "responsable_sede_principal_numero_documento",
+            "responsable_sede_principal_correo",
             "tipo_tramite",
             "naturaleza_juridica_empleador",
             "tipo_aportante",
@@ -9079,7 +9143,11 @@ def _case_lote_and_contract(payload: Dict[str, Any]) -> Dict[str, str]:
     analysis = payload.get("analysis") or {}
     profile = ((analysis.get("xlsx_profile") or {}).get("profile") or {})
     flat_pairs = ((analysis.get("xlsx_profile") or {}).get("flat_pairs") or {})
-    lote = normalize_text(profile.get("lote") or profile.get("idtramite") or payload.get("id") or "")
+    # Las tablas legado reales (brempresasarp.lt, etc.) son integer/numeric: preferir el
+    # lote numérico ya persistido (payload["lote_usuario"]) antes que caer al case-id de texto.
+    lote = normalize_text(
+        payload.get("lote_usuario") or profile.get("lote") or profile.get("idtramite") or payload.get("id") or ""
+    )
     contrato = only_digits(
         flat_pairs.get("numerocontrato")
         or profile.get("numero_contrato")
@@ -9290,6 +9358,21 @@ def attach_legacy_delivery_plan(case_id: str, payload: Optional[Dict[str, Any]] 
             "error": f"{type(exc).__name__}: {exc}",
             "executed": False,
         }
+    if result.get("ok") and settings.legacy_delivery_execute_sql:
+        meta = _case_lote_and_contract(payload)
+        usuario = normalize_text((payload.get("manual_approval") or {}).get("operator") or "nova_case_workflow")
+        try:
+            execution = _legacy_post(
+                "legacy/db/execute-lote-delivery",
+                {"lote": meta["lote"], "usuario": usuario, "fecha_proceso": meta["fecha_proceso"]},
+                timeout=120.0,
+            )
+            result["execution"] = execution
+            result["executed"] = bool(execution.get("executed"))
+            result["mode"] = "executed" if result["executed"] else "dry_run"
+        except Exception as exc:
+            result["execution_error"] = f"{type(exc).__name__}: {exc}"
+            result["executed"] = False
     analysis["legacy_delivery"] = result
     workflow = analysis.get("workflow_run")
     if isinstance(workflow, dict):
@@ -9368,9 +9451,110 @@ def _build_manifest_step(payload: Dict[str, Any], analysis: Dict[str, Any]) -> D
     }
 
 
+def _form_field_delivery_lines(xlsx_profile: Dict[str, Any]) -> List[str]:
+    """Líneas estructuradas con tokens únicos NOVA_* construidas desde el extractor
+    preciso `form_fields`. Son la fuente autoritativa que el compat-backend lee para
+    poblar el registro tp='P' de brempresasarp (responsable de sede, número de
+    sedes/centros/trabajadores/nómina según Afiliación o Traslado, ARL anterior, etc.).
+    Se anexan al contrato_clean real; los tokens NOVA_ evitan colisión con el texto
+    crudo del formulario."""
+    form_fields = (xlsx_profile or {}).get("form_fields", {}) or {}
+    form_cell_values = (xlsx_profile or {}).get("form_cell_values", {}) or {}
+    profile = (xlsx_profile or {}).get("profile", {}) or {}
+    if not form_fields:
+        return []
+    is_traslado = normalize_haystack(form_fields.get("tipo_tramite") or "") == "traslado"
+
+    def pick(a_key: str, b_key: str) -> str:
+        return only_digits((form_fields.get(b_key) if is_traslado else form_fields.get(a_key)) or "")
+
+    resp_ap1 = normalize_text(form_fields.get("responsable_sede_principal_primer_apellido") or "")
+    resp_ap2 = normalize_text(form_fields.get("responsable_sede_principal_segundo_apellido") or "")
+    resp_n1 = normalize_text(form_fields.get("responsable_sede_principal_primer_nombre") or "")
+    resp_n2 = normalize_text(form_fields.get("responsable_sede_principal_segundo_nombre") or "")
+    resp_td = normalize_text(form_fields.get("responsable_sede_principal_tipo_documento") or "")
+    resp_doc = only_digits(form_fields.get("responsable_sede_principal_numero_documento") or "")
+    resp_correo = normalize_text(form_fields.get("responsable_sede_principal_correo") or "").lower()
+    sede_correo = normalize_text(form_fields.get("sede_principal_correo") or "").lower()
+    sede_depto = normalize_text(form_fields.get("sede_principal_departamento") or "")
+    sede_codigo = normalize_text(form_fields.get("sede_principal_codigo") or "")
+    sede_nombre_principal = normalize_text(form_fields.get("sede_principal_nombre") or "")
+    tipo_negocio = normalize_text(profile.get("tipo_negocio_detectado") or "")
+    # Ciudad/departamento del empleador para resolución contra catálogos img004 en el
+    # compat: nombre_lugar es la ciudad; lugar_afiliacion desambigua homónimos.
+    nombre_lugar = normalize_text((form_cell_values.get("nombre_lugar") or {}).get("value") or "")
+    lugar_afiliacion = normalize_text((form_cell_values.get("lugar_afiliacion") or {}).get("value") or "")
+    numero_radicacion = only_digits((form_cell_values.get("numero_radicacion") or {}).get("value") or form_fields.get("numero_radicacion") or "")
+
+    # ARL anterior (solo traslado): "14-11 Compañía Suramericana..." -> el SEGUNDO
+    # número (11) es el código real a buscar en arpriesgos (img004); el primero es
+    # solo un prefijo/clase que no corresponde a ningún catálogo.
+    arl_raw = normalize_text(form_fields.get("b_arl_de_la_cual_se_traslada") or "")
+    arl_match = re.search(r"(\d{1,2})\s*-\s*(\d{1,2})", arl_raw)
+    if arl_match:
+        arl_code = str(int(arl_match.group(2)))
+    else:
+        arl_code = only_digits(arl_raw)
+
+    profile_num_trab = only_digits(str(profile.get("numero_trabajadores") or ""))
+
+    def _aut(field: str) -> str:
+        raw = normalize_haystack(((form_cell_values.get(field) or {}).get("value")) or "")
+        return "1" if raw == "x" else "0"
+
+    return [
+        f"NOVA_TRAMITE|{'TRASLADO' if is_traslado else 'AFILIACION'}",
+        f"NOVA_RESP_APELLIDO1|{resp_ap1}",
+        f"NOVA_RESP_APELLIDO2|{resp_ap2}",
+        f"NOVA_RESP_NOMBRE1|{resp_n1}",
+        f"NOVA_RESP_NOMBRE2|{resp_n2}",
+        f"NOVA_RESP_TIPODOC|{resp_td}",
+        f"NOVA_RESP_DOC|{resp_doc}",
+        f"NOVA_RESP_CORREO|{resp_correo}",
+        f"NOVA_SEDE_CORREO|{sede_correo}",
+        f"NOVA_SEDE_DEPTO|{sede_depto}",
+        f"NOVA_SEDE_CODIGO|{sede_codigo}",
+        f"NOVA_SEDE_NOMBRE|{sede_nombre_principal}",
+        f"NOVA_NOMBRE_LUGAR|{nombre_lugar}",
+        f"NOVA_LUGAR_AFILIACION|{lugar_afiliacion}",
+        f"NOVA_NUM_RADICACION|{numero_radicacion}",
+        f"NOVA_TIPO_NEGOCIO|{tipo_negocio}",
+        f"NOVA_NUM_SEDES|{pick('a_numero_sedes', 'b_numero_sedes')}",
+        f"NOVA_NUM_CENTROS|{pick('a_numero_centros_trabajo', 'b_numero_centros_trabajo')}",
+        f"NOVA_NUM_TRAB|{pick('a_numero_inicial_trabajadores_estudiantes', 'b_numero_total_trabajadores_estudiantes')}",
+        f"NOVA_VALOR_NOMINA|{pick('a_valor_total_nomina', 'b_monto_total_cotizacion')}",
+        f"NOVA_ARL_ANTERIOR|{arl_code}",
+        f"NOVA_PROFILE_NUM_TRAB|{profile_num_trab}",
+        f"NOVA_AUT1|{_aut('autorizacion_1')}",
+        f"NOVA_AUT2|{_aut('autorizacion_2')}",
+        f"NOVA_AUT3|{_aut('autorizacion_3')}",
+    ]
+
+
+def _augment_contrato_clean_with_form_fields(
+    contrato_clean: Optional[Dict[str, Any]], xlsx_profile: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """Anexa las líneas NOVA_* de form_fields al contrato_clean real (extraído del
+    Excel), para que los valores precisos lleguen al compat-backend sin depender de
+    re-parsear el texto crudo del formulario."""
+    if not isinstance(contrato_clean, dict):
+        return contrato_clean
+    lines = _form_field_delivery_lines(xlsx_profile)
+    if not lines:
+        return contrato_clean
+    marker = "# NOVA_FORM_FIELDS"
+    content = str(contrato_clean.get("content") or "")
+    base = content.split(marker)[0].rstrip()
+    updated = dict(contrato_clean)
+    updated["content"] = f"{base}\n{marker}\n" + "\n".join(lines) + "\n"
+    updated["lines"] = len(updated["content"].splitlines())
+    return updated
+
+
 def _build_contrato_clean(xlsx_profile: Dict[str, Any], docs: List[Dict[str, Any]]) -> Dict[str, Any]:
     profile = xlsx_profile.get("profile", {})
     flat_pairs = xlsx_profile.get("flat_pairs", {})
+    form_fields = xlsx_profile.get("form_fields", {}) or {}
     employer_doc = only_digits(profile.get("nit") or profile.get("documento_empleador") or "")
     employer_name = normalize_text(profile.get("empresa") or "EMPRESA EN PROCESO")
     worker_name = normalize_text(profile.get("nombre") or "")
@@ -9390,18 +9574,26 @@ def _build_contrato_clean(xlsx_profile: Dict[str, Any], docs: List[Dict[str, Any
     email = normalize_text(flat_pairs.get("correoelectronicoempleador") or "contacto@empresa.test").lower()
     contrato_num = only_digits(flat_pairs.get("numerocontrato") or employer_doc or worker_doc or "1001")
 
+    is_traslado = normalize_haystack(form_fields.get("tipo_tramite") or "") == "traslado"
+    tipo_negocio_detectado = normalize_text(profile.get("tipo_negocio_detectado") or "")
+    tramite_marker_afiliacion = "" if is_traslado else "X"
+    tramite_marker_traslado = "X" if is_traslado else ""
+
     lines = [
         f"1. Apellidos y nombres o razón social|{employer_name}|2. Tipo de documento|NI|3. Número de documento o NIT|{employer_doc}",
-        f"1. Tipo de trámite|X|2. Naturaleza jurídica del empleador|{naturaleza}|3. Tipo de aportante|{tipo_aportante}",
-        f"4. Tipo de negocio homologado|{normalize_text(profile.get('tipoempresa_homologado') or '')}|Tipo de negocio detectado|{normalize_text(profile.get('tipo_negocio_detectado') or '')}",
+        f"1. Tipo de trámite|A. Afiliación|{tramite_marker_afiliacion}|B. Traslado|{tramite_marker_traslado}|2. Naturaleza jurídica del empleador|{naturaleza}|3. Tipo de aportante|{tipo_aportante}",
+        f"4. Tipo de negocio homologado|{normalize_text(profile.get('tipoempresa_homologado') or '')}|Tipo de negocio detectado|{tipo_negocio_detectado}",
         f"4. Apellidos y nombres del Representante Legal|{rep_name}",
         f"5. Tipo de documento|CC|6. Número de documento|{rep_doc}|7. Correo electrónico|{email}",
         f"1. Datos de la sede principal|Dirección de la sede principal|{direccion}|Teléfono fijo/celular|{telefono}",
         f"|1|PRINCIPAL|Correo electrónico|{email}",
-        f"Municipio/Distrito|{ciudad}|Zona|{zona}|Localidad/Comuna|{localidad}|Departamento|BOGOTA D.C.",
+        f"Municipio/Distrito|{ciudad}|Zona|{zona}|Localidad/Comuna|{localidad}|Departamento|{normalize_text(form_fields.get('sede_principal_departamento') or 'BOGOTA D.C.')}",
         f"1. ARL de la cual se traslada|10|2. Clase de riesgo|I|Actividad económica|{actividad}",
         f"{radicacion}T00:00:00|{inicio}T00:00:00|{contrato_num}|01",
     ]
+    # Fuente autoritativa (responsable de sede, número de sedes/centros/trabajadores/
+    # nómina, ARL anterior, autorizaciones) vía tokens NOVA_*.
+    lines.extend(_form_field_delivery_lines(xlsx_profile))
     return {
         "filename": "contrato_clean_auto.txt",
         "content": "\n".join(lines) + "\n",
@@ -9731,6 +9923,7 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
     if (not contrato_clean or not str(contrato_clean.get("content") or "").strip()) and xlsx_entry:
         contrato_clean = _build_contrato_clean(analysis.get("xlsx_profile") or {}, analysis.get("documents") or [])
     contrato_clean = _ensure_tipoempresa_in_contrato_clean(contrato_clean, analysis.get("xlsx_profile") or {})
+    contrato_clean = _augment_contrato_clean_with_form_fields(contrato_clean, analysis.get("xlsx_profile") or {})
     if not trabajadores_clean_multi and xlsx_entry:
         fallback_indep = _build_independientes_clean(analysis.get("xlsx_profile") or {})
         if str(fallback_indep.get("content") or "").strip():
@@ -9901,14 +10094,25 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
 
     try:
         sync_started = perf_counter()
+        # El SELECT del engine trae ~1 fila por trabajador; un límite fijo bajo (200)
+        # truncaba contratos grandes (ej. 443 trabajadores en 23 sedes) dejando sedes
+        # sin trabajadores y rompiendo la conciliación de salarios por sede. El límite
+        # debe superar el total real de trabajadores del lote.
+        try:
+            _worker_total = int(only_digits(str(profile.get("numero_trabajadores") or "")) or 0)
+        except (TypeError, ValueError):
+            _worker_total = 0
+        proc_import_limit = max(2000, _worker_total * 2 + 1000)
         import_proc_out = _legacy_post(
             "legacy/db/import-proc-servicios",
             {
                 "base": base,
-                "lote": lote,
+                # brempresasarp.lt/brwddias.lote/etc son integer/numeric en el schema real:
+                # aquí debe ir el lote numérico (legacy_lote_usuario), no el case-id de texto.
+                "lote": legacy_lote_usuario,
                 "estado": "Estudio",
                 "idtramite": idtramite,
-                "limit": 200,
+                "limit": proc_import_limit,
                 "apply_to_db": True,
             },
             timeout=120.0,
@@ -9943,7 +10147,9 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
         save_case(payload)
         return payload
 
-    pre_payload: Dict[str, Any] = {"lote": lote, "from_db": True, "base": "temporal"}
+    # from_db=True dispara _sync_engine_from_db en compat-backend, que filtra brempresasarp.lt
+    # (integer) por este valor: debe ser el lote numérico, no el case-id de texto.
+    pre_payload: Dict[str, Any] = {"lote": legacy_lote_usuario, "from_db": True, "base": "temporal"}
     if xlsx_b64:
         pre_payload["excel_file_base64"] = xlsx_b64
     try:
@@ -9961,11 +10167,32 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
             )
         )
         if not prebuild_ok:
+            # Extraer los mensajes específicos (conciliación de salarios por sede, reglas
+            # legacy) para que el usuario vea la causa real y no solo un texto genérico.
+            prebuild_reasons: List[str] = []
+            salary_check = prebuild_out.get("xlsx_sede_salary_check") or {}
+            for err in salary_check.get("errors", []) or []:
+                msg = normalize_text(err.get("message") or "")
+                if msg and msg not in prebuild_reasons:
+                    prebuild_reasons.append(msg)
+            rules_check = prebuild_out.get("prebuild") or {}
+            for err in rules_check.get("errors", []) or []:
+                detail = normalize_text(err.get("detail") or err.get("message") or err.get("code") or "")
+                if detail:
+                    ubic = normalize_text(f"{err.get('table', '')} sr {err.get('sr', '')}".strip())
+                    line = f"{ubic}: {detail}" if ubic else detail
+                    if line not in prebuild_reasons:
+                        prebuild_reasons.append(line)
+            prebuild_stop_reason = "El prebuild legacy no fue aprobado."
+            if prebuild_reasons:
+                prebuild_stop_reason += " " + " | ".join(prebuild_reasons[:5])
+                if len(prebuild_reasons) > 5:
+                    prebuild_stop_reason += f" (y {len(prebuild_reasons) - 5} hallazgo(s) más)"
             workflow = {
                 "status": "stopped_prebuild",
                 "current_step": "prebuild_validaciones",
                 "steps": timeline,
-                "stop_reason": "El prebuild legacy no fue aprobado.",
+                "stop_reason": prebuild_stop_reason,
                 "executive_report_precheck": analysis.get("reporte_ejecutivo"),
                 "executive_report_final": None,
                 "output_926": output_926,
@@ -10001,7 +10228,7 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
     try:
         report_prev_started = perf_counter()
         pre_report_payload: Dict[str, Any] = {
-            "lote": lote,
+            "lote": legacy_lote_usuario,
             "base": base,
             "from_db": True,
             "generate_926_if_missing": False,
@@ -10033,9 +10260,11 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
             .get("entrega_documentos_intermediario", {})
             .get("todos_intermediarios")
         )
-        _push_comisiones_to_legacy(lote=lote, docs=_workflow_docs, base=base, intermediarios_override=_workflow_intermediarios)
+        # brwdcomisiones.lote y el filtro from_db=true de flatfile/build son numeric/integer
+        # en el schema real: usar legacy_lote_usuario, no el case-id de texto (lote).
+        _push_comisiones_to_legacy(lote=legacy_lote_usuario, docs=_workflow_docs, base=base, intermediarios_override=_workflow_intermediarios)
         generated_926 = _legacy_build_926_http(
-            lote=lote,
+            lote=legacy_lote_usuario,
             base=base,
             strict_validate=True,
             fecha_proceso=legacy_fecha_proceso,
@@ -10081,7 +10310,7 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
     try:
         report_final_started = perf_counter()
         final_report_payload: Dict[str, Any] = {
-            "lote": lote,
+            "lote": legacy_lote_usuario,
             "base": base,
             "from_db": True,
             "generate_926_if_missing": True,
