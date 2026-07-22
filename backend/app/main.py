@@ -755,12 +755,10 @@ def _apply_926_download_overrides(content: Any) -> str:
         if line.startswith("3") and len(line) >= 163 and line[162:163] == "D":
             line = _patch_fixed_position(line, 511, "0")
             line = _patch_fixed_position(line, 512, "00000")
-        elif line.startswith("5"):
-            line = _patch_fixed_position(line, 205, "19050101")
         elif line.startswith("7"):
             line = _patch_fixed_position(line, 98, "N")
             line = _patch_fixed_position(line, 404, "S")
-            line = _patch_fixed_position(line, 411, "2")
+            line = _patch_fixed_position(line, 411, "N")
         patched_lines.append(line)
     patched = linebreak.join(patched_lines)
     if trailing_newline:
@@ -2435,7 +2433,9 @@ def _admin_write_json(path: Path, payload: Any) -> None:
 
 
 def _admin_int_or_text(value: Any) -> Any:
-    text = str(value or "").strip()
+    if value is None:
+        return ""
+    text = str(value).strip()
     if text == "":
         return ""
     return int(text) if re.fullmatch(r"-?\d+", text) else text
@@ -2515,19 +2515,18 @@ def _normalize_pila_catalog(items: Any) -> List[Dict[str, Any]]:
 
 
 def _normalize_asesores(items: Any) -> List[Dict[str, Any]]:
+    # Tabla plana img004.consultores: cedula/nombre. Acepta la llave legacy `codigo`.
     if not isinstance(items, list):
         return []
     normalized: List[Dict[str, Any]] = []
     for item in items:
         if not isinstance(item, dict):
             continue
-        row = dict(item)
-        row["cedula"] = str(item.get("cedula") or "").strip()
-        row["nombre"] = str(item.get("nombre") or "").strip().upper()
-        row["tipo"] = str(item.get("tipo") or "").strip()
-        if not row["cedula"] and not row["nombre"]:
+        cedula = str(item.get("cedula") or item.get("codigo") or "").strip()
+        nombre = str(item.get("nombre") or "").strip().upper()
+        if not cedula and not nombre:
             continue
-        normalized.append(row)
+        normalized.append({"cedula": cedula, "nombre": nombre})
     return normalized
 
 
@@ -2586,44 +2585,56 @@ async def save_pila_catalog(payload: dict):
     return {"ok": True, "count": len(items)}
 
 
+def _legacy_db_base_url() -> str:
+    base_url = str(settings.legacy_backend_url or "").strip().rstrip("/")
+    if not base_url:
+        raise HTTPException(status_code=503, detail="legacy_backend_url no configurado.")
+    return f"{base_url}/legacy/db"
+
+
+def _legacy_catalog_url(tipo: str) -> str:
+    return f"{_legacy_db_base_url()}/catalog/{tipo}"
+
+
 @app.get("/api/admin/tables/eps")
 async def get_eps_catalog():
-    p = Path("/data/evals/eps_catalog.json")
-    return {"items": _admin_read_json(p, [])}
+    r = httpx.get(_legacy_catalog_url("eps"), timeout=30.0)
+    r.raise_for_status()
+    return {"items": r.json().get("items", [])}
 
 @app.post("/api/admin/tables/eps")
 async def save_eps_catalog(payload: dict):
-    p = Path("/data/evals/eps_catalog.json")
     items = _normalize_entity_catalog(payload.get("items", []))
-    _admin_write_json(p, items)
-    return {"ok": True, "count": len(items)}
+    r = httpx.post(_legacy_catalog_url("eps"), json={"items": items}, timeout=30.0)
+    r.raise_for_status()
+    return r.json()
 
 @app.get("/api/admin/tables/afp")
 async def get_afp_catalog():
-    p = Path("/data/evals/afp_catalog.json")
-    return {"items": _admin_read_json(p, [])}
+    r = httpx.get(_legacy_catalog_url("afp"), timeout=30.0)
+    r.raise_for_status()
+    return {"items": r.json().get("items", [])}
 
 @app.post("/api/admin/tables/afp")
 async def save_afp_catalog(payload: dict):
-    p = Path("/data/evals/afp_catalog.json")
     items = _normalize_entity_catalog(payload.get("items", []), include_active=True)
-    _admin_write_json(p, items)
-    return {"ok": True, "count": len(items)}
+    r = httpx.post(_legacy_catalog_url("afp"), json={"items": items}, timeout=30.0)
+    r.raise_for_status()
+    return r.json()
 
 @app.get("/api/admin/tables/asesores")
 async def get_asesores():
-    p = Path("/data/evals/asesores_colmena.json")
-    d = _admin_read_json(p, {})
-    return {"comerciales": d.get("comerciales", []), "intermediarios": d.get("intermediarios", [])}
+    # Tabla real img004.consultores (plana). Reemplaza data/evals/asesores_colmena.json.
+    r = httpx.get(f"{_legacy_db_base_url()}/consultores", timeout=30.0)
+    r.raise_for_status()
+    return {"items": r.json().get("items", [])}
 
 @app.post("/api/admin/tables/asesores")
 async def save_asesores(payload: dict):
-    p = Path("/data/evals/asesores_colmena.json")
-    comerciales = _normalize_asesores(payload.get("comerciales", []))
-    intermediarios = _normalize_asesores(payload.get("intermediarios", []))
-    d = {"comerciales": comerciales, "intermediarios": intermediarios, "total": len(comerciales) + len(intermediarios)}
-    _admin_write_json(p, d)
-    return {"ok": True, "count": d["total"]}
+    items = _normalize_asesores(payload.get("items", []))
+    r = httpx.post(f"{_legacy_db_base_url()}/consultores", json={"items": items}, timeout=30.0)
+    r.raise_for_status()
+    return r.json()
 
 @app.get("/api/admin/tables/smmlv")
 async def get_smmlv():

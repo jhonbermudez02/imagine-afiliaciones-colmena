@@ -1708,7 +1708,7 @@ class LegacyCompatEngine:
                     + self._vb_text(wh.get("f18"), 125)
                     + "S"
                     + " " * 6
-                    + "2"
+                    + "N"
                     + " " * 266
                 )
                 lines.append(self._line_926(line7))
@@ -1726,7 +1726,7 @@ class LegacyCompatEngine:
                     + self._vb_text(wh.get("f12"), 40)
                     + self._vb_num(wh.get("f14"), 7)
                     + self._vb_num(wh.get("f14"), 7)
-                    + self._vb_text(wh.get("f18"), 40)
+                    + self._vb_text(wh.get("f18"), 125)
                     + self._vb_num(wh.get("f15"), 5)
                     + " "
                     + "19050101"
@@ -1799,7 +1799,7 @@ class LegacyCompatEngine:
                         + self._vb_text(wh.get("f12"), 40)
                         + self._vb_num(wh.get("f14"), 7)
                         + self._vb_num(wh.get("f14"), 7)
-                        + self._vb_text(wh.get("f18"), 40)
+                        + self._vb_text(wh.get("f18"), 125)
                         + self._vb_num(wh.get("f15"), 5)
                         + " "
                         + "19050101"
@@ -1862,6 +1862,9 @@ class LegacyCompatEngine:
                             + " " * 4
                             + ("1    " if as_text(wd.get("trabajoalturas")) not in ("", "0") else "00000")
                             + ("1" if self._catalog_normalize("tipo_salario", wd.get("tipo_salario"), default="VARIABLE") == "FIJO" else "2")
+                            # Posicion 639: tipo de tramite de la empresa (f49 de la fila P;
+                            # 1=Traslado, 2=Afiliacion) como letra, "T"/"A".
+                            + ("T" if as_text(p_row.get("f49")).strip() == "1" else "A")
                         )
                         lines.append(self._line_926(line3))
 

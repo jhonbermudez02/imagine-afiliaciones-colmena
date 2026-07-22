@@ -312,10 +312,13 @@ function showToast(msg, type = 'info', duration = 4000) {
         document.body.appendChild(container);
     }
     const toast = document.createElement('div');
-    const colors = {info:'var(--c-blue)', ok:'var(--c-ok)', err:'var(--c-err)', warn:'#f59e0b'};
+    // Acentos brillantes para que resalten sobre el fondo oscuro del toast.
+    const colors = {info:'#60a5fa', ok:'#34d399', err:'#f87171', warn:'#fbbf24'};
     const icons = {info:'ℹ️', ok:'✅', err:'❌', warn:'⚠️'};
-    toast.style.cssText = `background:var(--c-bg-2);border:1px solid var(--c-border);border-left:4px solid ${colors[type]||colors.info};border-radius:8px;padding:12px 16px;font-size:13px;color:var(--c-text-1);box-shadow:0 4px 16px rgba(0,0,0,0.12);display:flex;gap:10px;align-items:flex-start;animation:slideIn 0.2s ease`;
-    toast.innerHTML = `<span style="flex-shrink:0">${icons[type]||icons.info}</span><span style="flex:1">${escapeHtml(msg)}</span><button onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;color:var(--c-text-2);font-size:16px;padding:0;line-height:1">×</button>`;
+    // Fondo oscuro solido + texto claro: siempre visible sobre la pagina clara
+    // (antes usaba var(--c-bg-2)/var(--c-text-1), que no existen -> fondo transparente).
+    toast.style.cssText = `background:#1f2937;border:1px solid rgba(255,255,255,0.10);border-left:4px solid ${colors[type]||colors.info};border-radius:8px;padding:12px 16px;font-size:13px;color:#f9fafb;box-shadow:0 6px 22px rgba(0,0,0,0.35);display:flex;gap:10px;align-items:flex-start;animation:slideIn 0.2s ease`;
+    toast.innerHTML = `<span style="flex-shrink:0">${icons[type]||icons.info}</span><span style="flex:1">${escapeHtml(msg)}</span><button onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;color:rgba(255,255,255,0.6);font-size:16px;padding:0;line-height:1">×</button>`;
     container.appendChild(toast);
     if (duration > 0) setTimeout(() => toast.remove(), duration);
 }
@@ -2378,7 +2381,8 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
                 const [moved] = newItems.splice(currentIdx, 1);
                 newItems.push(moved);
             } else {
-                [newItems[currentIdx], newItems[targetIdx]] = [newItems[targetIdx], newItems[currentIdx]];
+                const [moved] = newItems.splice(currentIdx, 1);
+                newItems.splice(targetIdx, 0, moved);
             }
             const currentOrder = items.map(it => it.file);
             const newOrder = newItems.map(it => it.file);
@@ -5379,6 +5383,7 @@ const ADMIN_CATALOG_FIELD_TYPES = {
     codigo: 'number',
     na: 'number',
     activo: 'boolean',
+    cedula: 'text',
     nombre: 'text',
     subsistema: 'text',
     codigo_pila: 'text',
@@ -5472,8 +5477,14 @@ async function loadAdminTables() {
             }
         );
 
-        // Asesores
-        renderAsesoresTable(aseR);
+        // Consultores (tabla plana img004.consultores)
+        renderCatalogTable('asesores', aseR.items || [], ['cedula','nombre'],
+            ['Cédula','Nombre'],
+            async (items) => {
+                const r = await fetch(`${API_URL}/api/admin/tables/asesores`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
+                await assertAdminSaveOk(r, 'Consultores');
+            }
+        );
 
         // SMMLV
         renderSmmlvTable(smlR);
@@ -5710,59 +5721,6 @@ window.filterTable = function(type) {
         tr.style.display = readAdminRowSearchText(data[idx], fields).includes(q) ? '' : 'none';
     });
 };
-
-function renderAsesoresTable(data) {
-    const el = document.getElementById('tableContent_asesores');
-    if (!el) return;
-    window._aseData = { comerciales: [...data.comerciales], intermediarios: [...data.intermediarios] };
-
-    window.renderAse = () => {
-        ['comerciales','intermediarios'].forEach(tipo => {
-            const items = window._aseData[tipo];
-            const body = document.getElementById(`ase_${tipo}_body`);
-            const count = document.getElementById(`ase_${tipo}_count`);
-            if (count) count.textContent = items.length;
-            if (body) body.innerHTML = `<div style="overflow-x:auto;max-height:300px;overflow-y:auto">
-            <table class="blocker-table" style="font-size:11px">
-                <thead><tr><th>Cédula/NIT</th><th>Nombre</th><th>Tipo</th><th style="width:40px"></th></tr></thead>
-                <tbody>${items.map((row,i) => `<tr>
-                    <td><input value="${escapeHtml(String(row.cedula??''))}" style="width:100%;border:none;background:transparent;font-size:11px" onchange="window._aseData.${tipo}[${i}].cedula=this.value"></td>
-                    <td><input value="${escapeHtml(String(row.nombre??''))}" style="width:100%;border:none;background:transparent;font-size:11px" onchange="window._aseData.${tipo}[${i}].nombre=this.value"></td>
-                    <td><input value="${escapeHtml(String(row.tipo??''))}" style="width:80px;border:none;background:transparent;font-size:11px" onchange="window._aseData.${tipo}[${i}].tipo=this.value"></td>
-                    <td><button type="button" style="background:transparent;border:none;cursor:pointer;color:var(--c-err)" onclick="window._aseData.${tipo}.splice(${i},1);window.renderAse()">✕</button></td>
-                </tr>`).join('')}</tbody>
-            </table></div>`;
-        });
-    };
-
-    el.innerHTML = `
-    <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
-        <button class="btn-primary" style="font-size:11px;padding:5px 14px" type="button" onclick="window.saveAsesores()">💾 Guardar todos los asesores</button>
-    </div>
-    <div style="font-weight:600;font-size:12px;margin-bottom:6px;display:flex;align-items:center;gap:8px">
-        Comerciales (<span id="ase_comerciales_count">${data.comerciales.length}</span>)
-        <button class="classif-sort-btn" type="button" onclick="window._aseData.comerciales.unshift({cedula:'',nombre:'',tipo:'consultor'});window.renderAse()">+ Agregar</button>
-    </div>
-    <div id="ase_comerciales_body"></div>
-    <div style="font-weight:600;font-size:12px;margin:14px 0 6px;display:flex;align-items:center;gap:8px">
-        Intermediarios (<span id="ase_intermediarios_count">${data.intermediarios.length}</span>)
-        <button class="classif-sort-btn" type="button" onclick="window._aseData.intermediarios.unshift({cedula:'',nombre:'',tipo:'AGENCIA'});window.renderAse()">+ Agregar</button>
-    </div>
-    <div id="ase_intermediarios_body"></div>`;
-
-    window.renderAse();
-
-    window.saveAsesores = async () => {
-        try {
-            const r = await fetch(`${API_URL}/api/admin/tables/asesores`, {
-                method:'POST', headers:{'Content-Type':'application/json'},
-                body: JSON.stringify({comerciales: window._aseData.comerciales, intermediarios: window._aseData.intermediarios})
-            });
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-            showToast(`Asesores guardados — ${window._aseData.comerciales.length + window._aseData.intermediarios.length} registros`, 'ok');
-        } catch(e) { showToast('Error: ' + e.message, 'err'); }
-    };
-}
 
 function renderSmmlvTable(data) {
     const el = document.getElementById('tableContent_smmlv');

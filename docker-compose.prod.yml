@@ -72,6 +72,7 @@ services:
       LLM_API_KEY: ${COMPAT_LLM_API_KEY:-}
       LLM_MODEL: ${COMPAT_LLM_MODEL:-local-model}
       LLM_EMBED_MODEL: ${COMPAT_LLM_EMBED_MODEL:-}
+      LEGACY_IMG_EXPECTED_NDISCO: ${LEGACY_IMG_EXPECTED_NDISCO:-img11}
     ports:
       - "${COMPAT_BACKEND_PORT:-8011}:8000"
     healthcheck:
@@ -81,6 +82,7 @@ services:
       retries: 6
     volumes:
       - ./shared_downloads:/host_downloads:ro
+      - ${LEGACY_IMG_HOST_MOUNT:-/img11}:/legacy_share
     networks:
       - imagine_net
 

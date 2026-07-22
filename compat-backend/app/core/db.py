@@ -109,6 +109,18 @@ def execute_by_alias(alias: str, sql: str, params: Optional[dict[str, Any]] = No
         return int(result.rowcount or 0)
 
 
+def execute_many_by_alias(alias: str, sql: str, params_list: list[dict[str, Any]]) -> int:
+    """Como execute_by_alias, pero para insertar/actualizar muchas filas con el mismo
+    SQL en una sola transaccion (un commit) en vez de una llamada -y un commit- por
+    fila. params_list vacia es un no-op (0 filas afectadas)."""
+    if not params_list:
+        return 0
+    engine = get_engine_by_alias(alias)
+    with engine.begin() as conn:
+        result = conn.execute(text(sql), params_list)
+        return int(result.rowcount or 0)
+
+
 def get_table_columns_by_alias(alias: str, table: str, schema: Optional[str] = None) -> list[str]:
     engine = get_engine_by_alias(alias)
     inspector = inspect(engine)

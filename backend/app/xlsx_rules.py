@@ -8,6 +8,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
 
+import httpx
+
+from .config import settings
+
 
 WORKER_DATA_START_REMINDER = "Recuerda que la información de los trabajadores debe comenzar en la línea 39."
 
@@ -758,8 +762,6 @@ ALLOWED_TIPO_TRAMITE = {"afiliacion", "afiliación", "traslado", "terminacion de
 ALLOWED_DOCUMENT_TYPES = {"CC", "CD", "CE", "PE", "PT", "RC", "SC", "TI", "NI"}
 ALLOWED_ESTADO_CUENTA = {"al día", "al dia", "en mora", "acuerdo de pago", "incumplimiento de acuerdo de pago"}
 SMMLV_TABLE_PATH = Path(__file__).resolve().parents[2] / "data" / "evals" / "smmlv_table.json"
-EPS_CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "evals" / "eps_catalog.json"
-AFP_CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "evals" / "afp_catalog.json"
 PILA_CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "evals" / "pila_catalog.json"
 DEFAULT_SMMLV_TABLE = {
     "2025": 1423500,
@@ -820,6 +822,21 @@ def _resolve_smmlv_value(form_fields: Dict[str, Any]) -> tuple[str, int]:
 
 
 
+def _fetch_catalog_items(tipo: str) -> List[Dict[str, Any]]:
+    """Catálogos reales de EPS/AFP: viven en img004.epsriesgos / img004.afpriesgos
+    (compat-backend), ya no en data/evals/eps_catalog.json ni afp_catalog.json."""
+    base_url = str(settings.legacy_backend_url or "").strip().rstrip("/")
+    if not base_url:
+        return []
+    try:
+        response = httpx.get(f"{base_url}/legacy/db/catalog/{tipo}", timeout=15.0)
+        response.raise_for_status()
+        items = response.json().get("items")
+        return items if isinstance(items, list) else []
+    except Exception:
+        return []
+
+
 def _rag_validate_eps_afp(value: str, tipo: str) -> bool:
     """Valida EPS o AFP usando RAG con el motor de embeddings configurado.
     Retorna True si es válido, False si no."""
@@ -871,18 +888,15 @@ def _get_entity_tokens(value: str) -> set:
     stop = {"S","A","SA","SAS","LTDA","EPS","AFP","DE","DEL","LA","LOS","Y","E","EL","EN","CON","AL"}
     return set(t for t in re.split(r"[^A-Z0-9]+", text) if t and t not in stop and len(t) >= 3)
 
-def _build_valid_tokens(eps_catalog_path: Path, afp_catalog_path: Path) -> set:
+def _build_valid_tokens(eps_items: List[Dict[str, Any]], afp_items: List[Dict[str, Any]]) -> set:
     global _EPS_AFP_VALID_TOKENS
     if _EPS_AFP_VALID_TOKENS:
         return _EPS_AFP_VALID_TOKENS
     valid = set(_EPS_AFP_DOMAIN_WORDS)
-    for path_c in [eps_catalog_path, afp_catalog_path]:
-        try:
-            for item in json.loads(path_c.read_text(encoding="utf-8")):
-                if isinstance(item, dict) and item.get("nombre"):
-                    valid.update(_get_entity_tokens(item["nombre"]))
-        except Exception:
-            pass
+    for items_c in (eps_items, afp_items):
+        for item in items_c:
+            if isinstance(item, dict) and item.get("nombre"):
+                valid.update(_get_entity_tokens(item["nombre"]))
     try:
         for item in json.loads(PILA_CATALOG_PATH.read_text(encoding="utf-8")):
             if not isinstance(item, dict):
@@ -919,13 +933,9 @@ def _normalize_catalog_name(value: Any) -> str:
     return normalized
 
 
-def _load_name_catalog(path: Path) -> set[str]:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        payload = []
+def _load_name_catalog(items: List[Dict[str, Any]]) -> set[str]:
     names: set[str] = set()
-    for item in payload or []:
+    for item in items:
         if not isinstance(item, dict):
             continue
         normalized = _normalize_catalog_name(item.get("nombre"))
@@ -2012,14 +2022,16 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
             }
         )
 
-    eps_catalog = _load_name_catalog(EPS_CATALOG_PATH) | _load_pila_name_catalog("EPS")
-    afp_catalog = _load_name_catalog(AFP_CATALOG_PATH) | _load_pila_name_catalog("AFP")
+    eps_items = _fetch_catalog_items("eps")
+    afp_items = _fetch_catalog_items("afp")
+    eps_catalog = _load_name_catalog(eps_items) | _load_pila_name_catalog("EPS")
+    afp_catalog = _load_name_catalog(afp_items) | _load_pila_name_catalog("AFP")
     invalid_eps = []
     invalid_afp = []
     try:
-        valid_tokens = _build_valid_tokens(EPS_CATALOG_PATH, AFP_CATALOG_PATH)
-        eps_token_sets = [_get_entity_tokens(i.get("nombre","")) for i in json.loads(EPS_CATALOG_PATH.read_text(encoding="utf-8")) if isinstance(i,dict) and i.get("nombre") and i["nombre"] not in ("SIN DEFINIR",)]
-        afp_token_sets = [_get_entity_tokens(i.get("nombre","")) for i in json.loads(AFP_CATALOG_PATH.read_text(encoding="utf-8")) if isinstance(i,dict) and i.get("nombre") and i["nombre"] not in ("NO SUMINISTRADO","DESCONOCIDO")]
+        valid_tokens = _build_valid_tokens(eps_items, afp_items)
+        eps_token_sets = [_get_entity_tokens(i.get("nombre","")) for i in eps_items if isinstance(i,dict) and i.get("nombre") and i["nombre"] not in ("SIN DEFINIR",)]
+        afp_token_sets = [_get_entity_tokens(i.get("nombre","")) for i in afp_items if isinstance(i,dict) and i.get("nombre") and i["nombre"] not in ("NO SUMINISTRADO","DESCONOCIDO")]
         for item in json.loads(PILA_CATALOG_PATH.read_text(encoding="utf-8")):
             if not isinstance(item, dict):
                 continue

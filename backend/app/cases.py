@@ -86,6 +86,28 @@ DOC_TYPE_LABELS = {
     "inspector": "Inspector",
 }
 
+# Valor de la columna "clase" en brempresasarp por tipo de documento (nombres legacy,
+# SIN tildes). rut se guarda como "Dian" y el generico pdf/imagen como "Imagen".
+DB_CLASE_BY_DOC_TYPE = {
+    "carta": "Cartas",
+    "camara_comercio": "Camara Comercio",
+    "cedula": "Cedula",
+    "constancia_afiliacion": "Verificacion",
+    "entrega_documentos": "Entrega Doc",
+    "soporte_pagos": "Pagos",
+    "soporte_ingresos": "Pagos",
+    "contrato": "Contrato",
+    "identificacion_peligros": "Identificacion de Peligros",
+    "examen_preocupacional": "Examen Pre-ocupacional",
+    "autorizacion": "Autorizacion",
+    "beneficiario_final": "Beneficiario Final",
+    "sat": "SAT",
+    "rut": "Dian",
+    "inspector": "Inspector",
+    "pdf": "Imagen",
+    "imagen": "Imagen",
+}
+
 DOCUMENT_DISPLAY_PRIORITY = [
     "formulario_afiliacion",
     "anexo_sedes",
@@ -1152,20 +1174,30 @@ def _rag_index_document(case_id: str, filename: str, ocr_text: str, document_typ
 _ASESORES_CACHE: Dict[str, Any] = {}
 
 def _load_asesores_colmena() -> Dict[str, Any]:
+    """Lee la tabla real de consultores Colmena (img004.consultores) via compat-backend.
+    Reemplaza el antiguo data/evals/asesores_colmena.json. Es una tabla PLANA
+    (cedula/nombre): ya no hay listas separadas comerciales(01) / intermediarios(03) --
+    ese split solo existia en el JSON. La validacion de comisiones (codigos 01 y 03) es
+    membresia del documento en esta tabla, indexada por solo-digitos."""
     global _ASESORES_CACHE
-    if _ASESORES_CACHE:
+    if _ASESORES_CACHE.get("loaded"):
         return _ASESORES_CACHE
     try:
-        p = Path(settings.cases_dir).parent / "evals" / "asesores_colmena.json"
-        if p.exists():
-            data = json.loads(p.read_text(encoding="utf-8"))
-            comerciales = {only_digits(str(r.get("cedula",""))): r for r in data.get("comerciales", []) if r.get("cedula")}
-            intermediarios = {only_digits(str(r.get("cedula",""))): r for r in data.get("intermediarios", []) if r.get("cedula")}
-            _ASESORES_CACHE = {"comerciales": comerciales, "intermediarios": intermediarios, "loaded": True}
-        else:
-            _ASESORES_CACHE = {"comerciales": {}, "intermediarios": {}, "loaded": False}
+        base_url = str(settings.legacy_backend_url or "").strip().rstrip("/")
+        if not base_url:
+            return {"asesores": {}, "loaded": False}
+        resp = httpx.get(f"{base_url}/legacy/db/consultores", timeout=30.0)
+        resp.raise_for_status()
+        items = resp.json().get("items", [])
+        asesores = {
+            only_digits(str(r.get("cedula", ""))): r
+            for r in items
+            if only_digits(str(r.get("cedula", "")))
+        }
+        _ASESORES_CACHE = {"asesores": asesores, "loaded": True}
     except Exception:
-        _ASESORES_CACHE = {"comerciales": {}, "intermediarios": {}, "loaded": False}
+        # No cachear el fallo: reintenta en la proxima llamada (compat pudo estar caido).
+        return {"asesores": {}, "loaded": False}
     return _ASESORES_CACHE
 
 
@@ -1180,11 +1212,8 @@ def _validate_asesor_en_tabla(cedula: str, codigo_intermediario: str) -> bool:
     if '-' in cedula_str:
         cedula_str = cedula_str.split('-')[0]
     cedula_clean = only_digits(cedula_str)
-    if codigo_intermediario in {"1", "01"}:
-        return cedula_clean in asesores.get("comerciales", {})
-    elif codigo_intermediario in {"3", "03"}:
-        return cedula_clean in asesores.get("intermediarios", {})
-    return True
+    # Tabla plana: la validez del codigo (01/03) se controla aparte; aqui solo membresia.
+    return cedula_clean in asesores.get("asesores", {})
 
 
 def _lookup_asesor_colmena(cedula: Any, codigo_intermediario: Any) -> Dict[str, Any]:
@@ -1194,11 +1223,7 @@ def _lookup_asesor_colmena(cedula: Any, codigo_intermediario: Any) -> Dict[str, 
     asesores = _load_asesores_colmena()
     if not asesores.get("loaded"):
         return {}
-    codigo = only_digits(str(codigo_intermediario or "")).lstrip("0") or ""
-    bucket = "comerciales" if codigo == "1" else "intermediarios" if codigo == "3" else ""
-    if not bucket:
-        return {}
-    row = asesores.get(bucket, {}).get(cedula_clean)
+    row = asesores.get("asesores", {}).get(cedula_clean)
     return row if isinstance(row, dict) else {}
 
 
@@ -1364,6 +1389,11 @@ def _normalize_case_payload(case_payload: Dict[str, Any]) -> Dict[str, Any]:
         analysis.setdefault("validation_profile", operation)
         if "_apply_authorization_phrase_overrides" in globals():
             _apply_authorization_phrase_overrides(analysis)
+        # La materializacion del anclaje a sede debe ser la ULTIMA palabra en cada
+        # guardado: corre despues de re-aplicar los overrides manuales para que un
+        # override manual vacio (sede limpiada) no borre el anclaje heuristico.
+        if "_materialize_sede_anchors" in globals():
+            _materialize_sede_anchors(analysis)
     workflow = analysis.get("workflow_run") or {}
     steps = workflow.get("steps")
     if isinstance(steps, list):
@@ -1463,7 +1493,7 @@ def approve_case(case_id: str, reason: str = "", operator: str = "", note: str =
     # expone el motivo real y NO se aprueba (en vez de marcar APROBADO en falso).
     workflow = analysis.get("workflow_run") or {}
     if normalize_haystack(workflow.get("status") or "") != "completed":
-        payload = run_case_workflow(case_id)
+        payload = run_case_workflow(case_id, operator=operator)
         analysis = payload.setdefault("analysis", {}) or {}
         workflow = analysis.get("workflow_run") or {}
         if normalize_haystack(workflow.get("status") or "") != "completed":
@@ -1615,7 +1645,14 @@ def save_manual_review(
         bucket[str(filename)]["sede_key"] = normalize_text(sede_key)
     _apply_manual_document_review_overrides(analysis)
     if bucket_name == "documents" and normalized_expected_type:
-        _reorder_document_workspace_by_document_priority(payload, moved_filename=str(filename))
+        workspace = _ensure_document_workspace(payload)
+        if workspace.get("user_reordered"):
+            # El operador ya fijó un orden manual: preservarlo. Solo se sincroniza
+            # contra los archivos existentes (el archivo reclasificado conserva su
+            # posición; únicamente cambia su tipo/etiqueta).
+            _sync_document_workspace(payload)
+        else:
+            _reorder_document_workspace_by_document_priority(payload, moved_filename=str(filename))
     payload["updated_at"] = utc_now()
     save_case(payload)
     _refresh_learning_artifacts()
@@ -1908,6 +1945,11 @@ def _ensure_document_workspace(payload: Dict[str, Any]) -> Dict[str, Any]:
     workspace.setdefault("order", [])
     workspace.setdefault("removed_files", [])
     workspace.setdefault("manual_order", False)
+    # user_reordered = el operador fijó un orden manual explícito (set_position/set_order).
+    # A diferencia de manual_order (que también lo activa el auto-reordenamiento por
+    # prioridad al reclasificar), este flag protege el orden manual: mientras esté activo,
+    # reclasificar NO vuelve a reordenar por prioridad.
+    workspace.setdefault("user_reordered", False)
     return workspace
 
 
@@ -2009,6 +2051,7 @@ def save_document_workspace(case_id: str, action: str, filename: str = "", order
     if action_key == "set_order":
         workspace["order"] = _clean_document_order(files, order)
         workspace["manual_order"] = True
+        workspace["user_reordered"] = True
     elif action_key == "set_position":
         valid = {str(item.get("filename") or "").strip() for item in files}
         if not filename or filename not in valid:
@@ -2029,9 +2072,11 @@ def save_document_workspace(case_id: str, action: str, filename: str = "", order
         else:
             target_idx = requested_position - 1
             if current_idx != target_idx:
-                current_order[current_idx], current_order[target_idx] = current_order[target_idx], current_order[current_idx]
+                moved = current_order.pop(current_idx)
+                current_order.insert(target_idx, moved)
         workspace["order"] = current_order
         workspace["manual_order"] = True
+        workspace["user_reordered"] = True
     elif action_key == "remove":
         if filename and filename not in workspace["removed_files"]:
             workspace["removed_files"].append(filename)
@@ -4375,6 +4420,110 @@ def _number_anexo_sedes(docs: List[Dict[str, Any]]) -> None:
         doc["sede_num"] = num
         doc["display_name"] = f"Sedes ·{num:02d}"
         doc["legacy_label"] = f"Sedes ·{num:02d}"
+
+
+def _build_sede_group_order(analysis: Dict[str, Any]) -> List[str]:
+    """Replica el orden de sedes del frontend (buildFormularioSedes -> sedeGroupNames):
+    hojas de trabajadores del XLSX, truncadas al numero de sedes declarado y
+    deduplicadas preservando el orden. El nombre de grupo es el nombre de la hoja
+    (p.ej. "Sede 05 - Trabajadores"), que es el mismo valor que usa la asignacion
+    manual de sede, de modo que ambos anclajes son consistentes."""
+    xlsx_profile = analysis.get("xlsx_profile") or {}
+    active = xlsx_profile.get("active_sede_worker_sheet_names")
+    if isinstance(active, list) and active:
+        ordered = [str(x) for x in active]
+    else:
+        worker_counts = xlsx_profile.get("worker_sheet_counts") or {}
+        if isinstance(worker_counts, dict) and worker_counts:
+            ordered = [str(x) for x in worker_counts.keys()]
+        else:
+            sede_values = xlsx_profile.get("sede_sheet_values") or {}
+            ordered = [str(x) for x in sede_values.keys()] if isinstance(sede_values, dict) else []
+
+    form_fields = xlsx_profile.get("form_fields") or {}
+    profile = xlsx_profile.get("profile") or {}
+    declared_raw = (
+        form_fields.get("a_numero_sedes")
+        or form_fields.get("b_numero_sedes")
+        or profile.get("numero_sedes")
+        or (analysis.get("validacion_resumen") or {}).get("numero_sedes")
+        or ""
+    )
+    digits = re.sub(r"[^\d]", "", str(declared_raw or ""))
+    declared = int(digits) if digits else 0
+    sheets = ordered[:declared] if declared else ordered
+
+    names: List[str] = []
+    seen: set[str] = set()
+    for index, sheet in enumerate(sheets):
+        name = str(sheet or "").strip() or f"Sede {index + 1:02d} - Trabajadores"
+        if name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return names
+
+
+def _materialize_sede_anchors(analysis: Dict[str, Any]) -> None:
+    """Persiste en cada documento anexo_sedes a que sede esta anclado (doc["sede_key"]),
+    para que la relacion archivo->sede quede escrita en case.json y sea auditable y
+    exportable a BD, sin depender del recalculo en el frontend.
+
+    Prioridad de anclaje:
+    1. Asignacion manual del operador (manual_review.documents[<file>].sede_key) -> gana.
+    2. Heuristica: las paginas del mismo PDF original (mismo prefijo antes de __pNNN.pdf)
+       se anclan, en orden de aparicion, a la i-esima sede del XLSX.
+    3. Si sobran anexos sin sede disponible, quedan sin anclar (sede_key vacio).
+
+    Idempotente: se puede recalcular en cada analisis. doc["sede_source"] deja trazado
+    el origen del anclaje ("manual" | "heuristic" | "unassigned") para auditoria."""
+    docs = analysis.get("documents")
+    if not isinstance(docs, list):
+        return
+
+    # Limpiar el anclaje de documentos que ya no son anexo_sedes (p.ej. un anexo
+    # reclasificado a cedula no debe arrastrar un sede_key obsoleto hacia la BD).
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        if not str(doc.get("document_type") or "").startswith("anexo_sedes"):
+            doc.pop("sede_key", None)
+            doc.pop("sede_source", None)
+
+    anexo_docs = [
+        d for d in docs
+        if isinstance(d, dict) and str(d.get("document_type") or "").startswith("anexo_sedes")
+    ]
+    if not anexo_docs:
+        return
+
+    manual_docs = ((analysis.get("manual_review") or {}).get("documents") or {})
+    sede_order = _build_sede_group_order(analysis)
+
+    def _pdf_prefix(name: str) -> str:
+        return re.sub(r"__p\d+\.pdf$", "", str(name or ""), flags=re.IGNORECASE)
+
+    # Ordinal ESTABLE de cada PDF original (prefijo) segun su orden de aparicion sobre
+    # TODOS los anexos, no solo los sin asignar. Asi, si el operador asigna manualmente
+    # un PDF, la sede heuristica del resto no se corre (cada PDF conserva su "slot").
+    prefix_ordinal: Dict[str, int] = {}
+    for doc in anexo_docs:
+        prefix = _pdf_prefix(doc.get("filename") or "")
+        if prefix not in prefix_ordinal:
+            prefix_ordinal[prefix] = len(prefix_ordinal)
+
+    for doc in anexo_docs:
+        filename = str(doc.get("filename") or "")
+        manual_entry = manual_docs.get(filename) if isinstance(manual_docs, dict) else None
+        manual_sede = str((manual_entry or {}).get("sede_key") or "").strip()
+        if manual_sede:
+            doc["sede_key"] = manual_sede
+            doc["sede_source"] = "manual"
+            continue
+        ordinal = prefix_ordinal.get(_pdf_prefix(filename), 0)
+        sede_name = sede_order[ordinal] if ordinal < len(sede_order) else ""
+        doc["sede_key"] = sede_name
+        doc["sede_source"] = "heuristic" if sede_name else "unassigned"
 
 
 def _classify_document(filename: str, text: str) -> Dict[str, Any]:
@@ -9170,29 +9319,37 @@ def _legacy_delivery_sql_log(payload: Dict[str, Any]) -> Dict[str, Any]:
     exported: Dict[str, Any] = {}
     export_error = ""
     tables: Dict[str, List[Dict[str, Any]]] = {}
+    counts: Dict[str, int] = {}
+    # El sync_engine escribe brempresasarp/etc directo en "ybr" y bkempresasarp/etc directo
+    # en "wimg004" (direct_to_archive=True, ya no pasa por "temporal"): hay que leer cada
+    # grupo de tablas de su base real, si no el reporte queda vacio aunque los datos existan.
     try:
-        exported = _legacy_post(
-            "legacy/db/export-lote",
-            {
-                "base": "temporal",
-                "lote": lote,
-                "include_empty": True,
-                "tables": LEGACY_DELIVERY_TABLES,
-            },
-            timeout=120.0,
-        )
-        raw_tables = ((exported.get("payload") or {}).get("tables") or {})
-        if isinstance(raw_tables, dict):
-            for name, rows in raw_tables.items():
-                if isinstance(rows, list):
-                    tables[_sql_identifier(name)] = [r for r in rows if isinstance(r, dict)]
+        for db_alias, table_group in (("ybr", LEGACY_DELIVERY_TABLES[:7]), ("wimg004", LEGACY_DELIVERY_TABLES[7:])):
+            exported = _legacy_post(
+                "legacy/db/export-lote",
+                {
+                    "base": db_alias,
+                    "lote": lote,
+                    "include_empty": True,
+                    "tables": table_group,
+                },
+                timeout=120.0,
+            )
+            raw_tables = ((exported.get("payload") or {}).get("tables") or {})
+            if isinstance(raw_tables, dict):
+                for name, rows in raw_tables.items():
+                    if isinstance(rows, list):
+                        tables[_sql_identifier(name)] = [r for r in rows if isinstance(r, dict)]
+            raw_counts = exported.get("counts") or {}
+            if isinstance(raw_counts, dict):
+                counts.update(raw_counts)
     except Exception as exc:
         export_error = f"{type(exc).__name__}: {exc}"
         try:
             exported = _legacy_post(
                 "legacy/db/export-lote",
                 {
-                    "base": "temporal",
+                    "base": "ybr",
                     "lote": lote,
                     "include_empty": True,
                     "tables": LEGACY_DELIVERY_TABLES[:7],
@@ -9261,7 +9418,6 @@ def _legacy_delivery_sql_log(payload: Dict[str, Any]) -> Dict[str, Any]:
     lines.append("")
 
     lines.append("-- 4. Estadístico equivalente a General-Estadistico")
-    counts = exported.get("counts") if isinstance(exported.get("counts"), dict) else {}
     planillas = len([r for r in tables.get("brempresasarp", []) if normalize_text(r.get("tp")).upper() == "P"])
     sedes = len([r for r in tables.get("brempresasarp", []) if normalize_text(r.get("tp")).upper() == "S"])
     anexos = len([r for r in tables.get("brempresasarp", []) if normalize_text(r.get("tp")).upper() != "P"])
@@ -9759,12 +9915,18 @@ def _workflow_step(
     return step
 
 
-def run_case_workflow(case_id: str) -> Dict[str, Any]:
+def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
     workflow_started = perf_counter()
     analyze_started = perf_counter()
-    payload = analyze_case(case_id, preserve_manual_approval=True)
+    _clean_output_holder: Dict[str, Any] = {}
+    payload = analyze_case(case_id, preserve_manual_approval=True, clean_output_out=_clean_output_holder)
     analyze_duration_ms = int((perf_counter() - analyze_started) * 1000)
     analysis = payload.get("analysis") or {}
+    # /run-workflow (cola async, disparada por el frontend justo despues de /approve para
+    # generar el 926) no recibe operator -re-ejecuta el flujo sin el, lo que borraba el "us"
+    # ya guardado por /approve. Si no viene operator explicito, se recupera del
+    # manual_approval ya persistido (aprobar-contrato lo guarda ahi antes de llamar aqui).
+    operator = operator or normalize_text((payload.get("manual_approval") or {}).get("operator") or "")
     profile = (analysis.get("xlsx_profile") or {}).get("profile", {})
     xlsx_entry = _get_xlsx_file_entry(payload)
     xlsx_bytes = Path(xlsx_entry["stored_path"]).read_bytes() if xlsx_entry else b""
@@ -9772,9 +9934,10 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
     flat_pairs = ((analysis.get("xlsx_profile") or {}).get("flat_pairs", {}) or {})
     lote = normalize_text(profile.get("lote") or profile.get("idtramite") or "")
     idtramite = only_digits(profile.get("idtramite") or flat_pairs.get("idtramite") or "")
-    legacy_lote_usuario = only_digits(
-        profile.get("lote_usuario") or flat_pairs.get("lote_usuario") or flat_pairs.get("lt_usuario") or payload.get("lote_usuario") or ""
-    )
+    # El lote del caso se genera desde la secuencia Postgres `lote_reproceso` (mas abajo),
+    # NO desde el XLSX. Aqui solo se reutiliza el valor ya persistido en el propio caso para
+    # ser idempotente en re-runs; el XLSX (profile/flat_pairs) ya no dicta el lote.
+    legacy_lote_usuario = only_digits(payload.get("lote_usuario") or "")
     legacy_fecha_proceso = only_digits(
         profile.get("fecha_proceso") or flat_pairs.get("fecha_proceso") or payload.get("fecha_proceso") or ""
     )[:8]
@@ -9819,7 +9982,26 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
     lote = lote or manifest["lote"]
     idtramite = idtramite or str(int(datetime.now().timestamp()))[-8:]
     if not legacy_lote_usuario:
-        legacy_lote_usuario = build_generated_lote_usuario(legacy_fecha_proceso)
+        # El lote sale de la secuencia Postgres `lote_reproceso` (via compat), que ademas
+        # registra la fila de control en `lc` — fiel al legacy (nextval + intolc). Solo se
+        # pide en la PRIMERA corrida del caso; en re-runs se reutiliza el ya persistido en
+        # payload["lote_usuario"] (idempotente, no consume un lote nuevo por re-proceso).
+        # Se conserva el padding a 12 digitos por compatibilidad; la BD guarda el numero
+        # pelado y _norm_lote_key concilia ambos.
+        try:
+            _lote_out = _legacy_post(
+                "legacy/lote/next-reproceso",
+                {"usuario": "nova_case_workflow", "fecha": legacy_fecha_proceso},
+                timeout=30.0,
+            )
+            _lote_seq = only_digits(_lote_out.get("lote") or "")
+            if _lote_seq:
+                legacy_lote_usuario = f"{int(_lote_seq):012d}"
+        except Exception:
+            legacy_lote_usuario = ""
+        if not legacy_lote_usuario:
+            # Respaldo: si el compat/secuencia no responde, no bloquear el flujo.
+            legacy_lote_usuario = build_generated_lote_usuario(legacy_fecha_proceso)
     payload["lote_usuario"] = legacy_lote_usuario
     payload["fecha_proceso"] = legacy_fecha_proceso
     analysis.setdefault("xlsx_profile", {}).setdefault("profile", {})
@@ -9909,8 +10091,10 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
         )
     )
 
-    clean_output: Dict[str, Any] = {}
-    if xlsx_entry and xlsx_bytes:
+    # analyze_case() (llamado arriba) ya calculó esto una vez -reusar en vez de repetir
+    # la subida/parseo del xlsx contra legacy-nova, que es costoso y redundante.
+    clean_output: Dict[str, Any] = dict(_clean_output_holder)
+    if not clean_output and xlsx_entry and xlsx_bytes:
         clean_output = _generate_clean_via_legacy_nova(xlsx_entry["filename"], xlsx_bytes)
         if not bool(clean_output.get("ok")):
             workbook = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
@@ -9963,6 +10147,80 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
         )
         sedes_out: List[Dict[str, Any]] = []
         trabajadores_out: List[Dict[str, Any]] = []
+        # Paginas de anexo ancladas a cada sede (por sede_key = nombre de hoja), en orden de
+        # pagina. La pagina 1 es la imagen de la PROPIA sede (su ruta va en pi de la fila
+        # Sede); las paginas 2..N son los anexos (filas Imagen), cada una con su ruta en pi.
+        anexo_pages_by_sede_key: Dict[str, List[str]] = {}
+        for _doc in analysis.get("documents", []):
+            if not isinstance(_doc, dict):
+                continue
+            if not str(_doc.get("document_type") or "").startswith("anexo_sedes"):
+                continue
+            _sk = str(_doc.get("sede_key") or "").strip()
+            _fn = str(_doc.get("filename") or "").strip()
+            if _sk and _fn:
+                anexo_pages_by_sede_key.setdefault(_sk, []).append(_fn)
+        for _sk in anexo_pages_by_sede_key:
+            anexo_pages_by_sede_key[_sk].sort()  # orden por pagina (__pNNN, con ceros)
+        sede_order_for_anexos = _build_sede_group_order(analysis)
+        # Rutas fisicas de imagen por sede (pagina 1 = sede, resto = anexos), claveadas por
+        # el sr de la sede en proc_servicios (= sr_inserted de importar-sede-contrato).
+        sede_anexo_paths: Dict[str, List[str]] = {}
+        # Resto de documentos (incluida la COMISION, que va en su posicion del orden como
+        # fila tp="V") -> una fila por documento, en el ORDEN que el usuario o la app
+        # dejaron: si hay orden manual del workspace se respeta; si no, la prioridad visual
+        # de la app. Se excluyen los anexos de sede (van con su sede), el formulario (es la
+        # fila P: su ruta va en el pi de esa fila) y los removidos en la UI.
+        _workspace = analysis.get("document_workspace") or {}
+        _removed_files = {str(x) for x in (_workspace.get("removed_files") or [])}
+        _otros_docs = [
+            _d for _d in analysis.get("documents", [])
+            if isinstance(_d, dict)
+            and str(_d.get("filename") or "").strip()
+            and str(_d.get("filename") or "").strip() not in _removed_files
+            and not str(_d.get("document_type") or "").startswith("anexo_sedes")
+            and str(_d.get("document_type") or "") != "formulario_afiliacion"
+        ]
+        # El formulario de afiliacion NO va como fila propia: es el documento de la fila P
+        # (empresa), asi que su ruta va en el pi de esa fila.
+        formulario_path = next(
+            (
+                str(get_case_dir(case_id) / "files" / str(_d.get("filename") or "").strip())
+                for _d in analysis.get("documents", [])
+                if isinstance(_d, dict)
+                and str(_d.get("document_type") or "") == "formulario_afiliacion"
+                and str(_d.get("filename") or "").strip()
+            ),
+            "",
+        )
+        _ws_order = [str(x) for x in (_workspace.get("order") or [])]
+        if _workspace.get("manual_order") and _ws_order:
+            _pos_by_name = {name: idx for idx, name in enumerate(_ws_order)}
+            _otros_docs.sort(key=lambda d: _pos_by_name.get(str(d.get("filename") or ""), len(_pos_by_name)))
+        else:
+            _otros_docs.sort(key=lambda d: _document_display_sort_key(d.get("document_type")))
+
+        def _clase_documento(document_type: Any) -> str:
+            # clase = nombre legacy del tipo (DB_CLASE_BY_DOC_TYPE, sin tildes; rut->"Dian",
+            # pdf generico->"Imagen"). Fallback: label visible sin tildes, o capitalizado.
+            dt = str(document_type or "").strip().lower()
+            mapped = str(DB_CLASE_BY_DOC_TYPE.get(dt) or "").strip()
+            if mapped:
+                return mapped
+            label = str(DOC_TYPE_LABELS.get(dt) or "").strip() or (dt.capitalize() if dt else "Imagen")
+            label = unicodedata.normalize("NFKD", label)
+            return "".join(ch for ch in label if not unicodedata.combining(ch))
+
+        documentos_paths: List[Dict[str, str]] = [
+            {
+                "ruta": str(get_case_dir(case_id) / "files" / str(_d.get("filename") or "").strip()),
+                "clase": _clase_documento(_d.get("document_type")),
+                # El compat usa "tipo" para construir la comision como fila tp="V" (con los
+                # datos del rep legal) en su posicion del orden; el resto va como tp="A".
+                "tipo": str(_d.get("document_type") or ""),
+            }
+            for _d in _otros_docs
+        ]
         for index, sede_clean in enumerate(trabajadores_clean_multi):
             replace = index == 0
             sede_result = _legacy_post(
@@ -9982,6 +10240,16 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
             if bool(sede_result.get("skipped")):
                 continue
             sed_sr = int(sede_result.get("sr_inserted") or 0)
+            # Emparejar esta sede con sus anexos por el nombre de hoja (== sede_key). Si el
+            # clean no trae "sheet", se cae al orden de sedes del XLSX por indice.
+            _sede_sheet = str(sede_clean.get("sheet") or "").strip()
+            if not _sede_sheet:
+                _sede_sheet = sede_order_for_anexos[index] if index < len(sede_order_for_anexos) else ""
+            _pages = anexo_pages_by_sede_key.get(_sede_sheet, [])
+            if sed_sr > 0 and _pages:
+                sede_anexo_paths[str(sed_sr)] = [
+                    str(get_case_dir(case_id) / "files" / _fn) for _fn in _pages
+                ]
             worker_payload = {
                 "base": base,
                 "idtramite": idtramite,
@@ -10114,6 +10382,18 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
                 "idtramite": idtramite,
                 "limit": proc_import_limit,
                 "apply_to_db": True,
+                # Escribir directo en los destinos finales (ybr.br* + wimg004.bk*) en vez
+                # de pasar primero por temporal.br*/bk*: ya no hay ningún proceso Access
+                # leyendo temporal en paralelo, así que ese paso intermedio solo
+                # duplicaba escrituras sin necesidad (ver _execute_legacy_delivery).
+                "direct_to_archive": True,
+                "sede_anexo_paths": sede_anexo_paths,
+                "documentos_paths": documentos_paths,
+                "formulario_path": formulario_path,
+                # Usuario que aprueba el contrato (correo del operador); va al campo "us"
+                # de brempresasarp/bkempresasarp. Vacio en corridas automaticas (cola de
+                # subida, regeneracion de 926) donde no hay un operador humano de por medio.
+                "usuario": normalize_text(operator),
             },
             timeout=120.0,
         )
@@ -10149,7 +10429,10 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
 
     # from_db=True dispara _sync_engine_from_db en compat-backend, que filtra brempresasarp.lt
     # (integer) por este valor: debe ser el lote numérico, no el case-id de texto.
-    pre_payload: Dict[str, Any] = {"lote": legacy_lote_usuario, "from_db": True, "base": "temporal"}
+    # base="ybr": el paso sync_engine escribe con direct_to_archive directo a ybr/wimg004
+    # (ya no a temporal), así que el prebuild debe leer la data desde ybr o el chequeo de
+    # salarios encuentra 0 filas (Importado=0 en todas las sedes).
+    pre_payload: Dict[str, Any] = {"lote": legacy_lote_usuario, "from_db": True, "base": "ybr"}
     if xlsx_b64:
         pre_payload["excel_file_base64"] = xlsx_b64
     try:
@@ -10262,10 +10545,14 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
         )
         # brwdcomisiones.lote y el filtro from_db=true de flatfile/build son numeric/integer
         # en el schema real: usar legacy_lote_usuario, no el case-id de texto (lote).
-        _push_comisiones_to_legacy(lote=legacy_lote_usuario, docs=_workflow_docs, base=base, intermediarios_override=_workflow_intermediarios)
+        # El sync_engine ya escribe brempresasarp/brafiliadosarp/etc directo en "ybr" (real,
+        # direct_to_archive=True) y ya NO pasa por "temporal" — leer/insertar el 926 desde
+        # "temporal" aca dejaba el plano vacio (solo aparecia brwdcomisiones, que es lo unico
+        # que este paso escribe). Debe usar "ybr", igual que el sync_engine.
+        _push_comisiones_to_legacy(lote=legacy_lote_usuario, docs=_workflow_docs, base="ybr", intermediarios_override=_workflow_intermediarios)
         generated_926 = _legacy_build_926_http(
             lote=legacy_lote_usuario,
-            base=base,
+            base="ybr",
             strict_validate=True,
             fecha_proceso=legacy_fecha_proceso,
             lote_usuario=legacy_lote_usuario,
@@ -10376,7 +10663,11 @@ def run_case_workflow(case_id: str) -> Dict[str, Any]:
     return attach_legacy_delivery_plan(case_id, payload)
 
 
-def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[str, Any]:
+def analyze_case(
+    case_id: str,
+    preserve_manual_approval: bool = False,
+    clean_output_out: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     analyze_started = perf_counter()
     payload = load_case(case_id)
     previous_analysis = payload.get("analysis") or {}
@@ -10389,6 +10680,19 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
     clean_output: Dict[str, Any] = {}
     documents_started = perf_counter()
 
+    # Cache de OCR/extraccion de texto: reanalizar un caso (ej. al aprobar) no debe
+    # rehacer OCR de archivos que ya se procesaron y no cambiaron. Se reusa el texto
+    # crudo (ocr_text/used_ocr/pages_processed) de la corrida anterior si el archivo
+    # tiene el mismo nombre Y el mismo tamaño (cualquier cambio de contenido real
+    # cambia el tamaño en la enorme mayoria de los casos; un archivo nuevo o
+    # modificado simplemente no encuentra match y se reprocesa normalmente). La
+    # clasificacion/campos/checklist/decision siempre se recalculan con datos frescos.
+    previous_docs_by_filename = {
+        str(d.get("filename") or ""): d
+        for d in (previous_analysis.get("documents") or [])
+        if isinstance(d, dict) and d.get("filename")
+    }
+
     for file_entry in files:
         path = Path(file_entry["stored_path"])
         suffix = path.suffix.lower()
@@ -10397,7 +10701,21 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
             xlsx_profile = _read_xlsx(path)
             continue
 
-        if suffix == ".pdf":
+        cached_doc = previous_docs_by_filename.get(path.name)
+        cached_size = (cached_doc or {}).get("_ocr_cache_size_bytes")
+        current_size = file_entry.get("size_bytes")
+        if (
+            cached_doc
+            and current_size is not None
+            and cached_size == current_size
+            and "ocr_text" in cached_doc
+        ):
+            result = {
+                "text": cached_doc.get("ocr_text", ""),
+                "used_ocr": bool(cached_doc.get("used_ocr")),
+                "pages_processed": cached_doc.get("pages_processed", 0),
+            }
+        elif suffix == ".pdf":
             result = _read_pdf(path)
         elif suffix in {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}:
             result = _ocr_image(path)
@@ -10441,6 +10759,7 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
                 "signals_detected": signals_detected,
                 "classification_confidence": classification_confidence,
                 "ocr_quality_score": ocr_quality_score,
+                "_ocr_cache_size_bytes": file_entry.get("size_bytes"),
             }
         )
         _apply_auto_entrega_comision_metadata(docs[-1], file_entry)
@@ -10496,6 +10815,10 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
             workbook = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
             clean_output = _generate_clean_from_workbook(workbook, xlsx_entry["filename"])
             clean_output["_source"] = "local_fallback"
+        if clean_output_out is not None:
+            clean_output_out.update(clean_output)
+            clean_output_out["_xlsx_entry"] = xlsx_entry
+            clean_output_out["_xlsx_bytes"] = xlsx_bytes
         xlsx_profile = _enrich_xlsx_profile_from_clean(xlsx_profile, clean_output, docs)
         xlsx_profile = _finalize_profile_from_docs(xlsx_profile, docs)
     tipoempresa_detectado = _extract_tipoempresa_from_entrega_docs(docs)

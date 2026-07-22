@@ -13,3 +13,4 @@ SQL
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname temporal -f /docker-entrypoint-initdb.d/10-temporal-schema.sql
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname img004 -f /docker-entrypoint-initdb.d/20-img004-schema.sql
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname br -f /docker-entrypoint-initdb.d/30-br-schema.sql
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname temporal -f /docker-entrypoint-initdb.d/40-temporal-proc-servicios-schema.sql
