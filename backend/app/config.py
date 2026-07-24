@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "NOVA API - Sistema de Afiliaciones"
+    app_name: str = "AFILEGA_FA_IMA_LA_V2 API"
     app_version: str = "2.0"
     qdrant_url: str = "http://imagine_qdrant:6333"
     database_url: str = "postgresql://afi_user:afi_pass@imagine_db:5432/afiliaciones"
@@ -26,12 +26,17 @@ class Settings(BaseSettings):
     notification_log_path: str = "/data/evals/notification_log.jsonl"
     notification_enabled: bool = False
     notification_sender_email: str = "hdescobarmesa@gmail.com"
-    notification_sender_name: str = "Imagine S.A.S."
+    notification_sender_name: str = "AFILEGA_FA_IMA_LA_V2"
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
     smtp_username: str = ""
     smtp_password: str = ""
     smtp_use_tls: bool = True
+    max_upload_file_bytes: int = 60 * 1024 * 1024
+    max_upload_total_bytes: int = 220 * 1024 * 1024
+    max_zip_members: int = 300
+    max_zip_expanded_bytes: int = 220 * 1024 * 1024
+    max_pdf_pages_explode: int = 300
     legacy_project_root: str = "/compat-backend"
     legacy_state_path: str = "/tmp/afiliaciones_engine_state.json"
     legacy_backend_url: str = "http://imagine_compat_backend:8000/api/v1/afiliaciones"

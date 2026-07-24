@@ -4,7 +4,11 @@ import base64
 import hashlib
 import io
 import json
+<<<<<<< HEAD
 import os
+=======
+import logging
+>>>>>>> origin/main
 import re
 import shutil
 import subprocess
@@ -15,11 +19,11 @@ import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from openpyxl import load_workbook
@@ -28,7 +32,26 @@ from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 from pypdf import PdfReader, PdfWriter
 
 from .config import settings
+from .afilega_legacy_mdb import (
+    ALLOWED_BOOLEAN_SN,
+    ALLOWED_NOVEDAD_AUTOLIQUIDACION,
+    ALLOWED_NOVEDAD_CODES,
+    ALLOWED_NOVEDAD_ESTADO,
+    ALLOWED_NOVEDAD_ORIGEN,
+    ALLOWED_TIPO_COTIZANTE,
+    ALLOWED_ZONA,
+    DEFAULT_SUBTIPO_COTIZANTE,
+    DOCUMENT_CATALOG as AFILEGA_MDB_DOCUMENT_CATALOG,
+    FIELD_LIMITS as AFILEGA_MDB_FIELD_LIMITS,
+    MDB_VERSION as AFILEGA_MDB_VERSION,
+    WORKER_FIELD_LIMITS as AFILEGA_MDB_WORKER_FIELD_LIMITS,
+    calculate_nit_dv,
+    department_code,
+    municipality_code,
+    validate_nit_dv,
+)
 from .legacy_bridge import generate_legacy_flatfile_926, generate_legacy_flatfile_926_http
+<<<<<<< HEAD
 from .qdrant_guard import collection_matches_current_embeddings, ensure_current_vector_collection
 from .xlsx_rules import _format_date_value, _parse_date_value, _resolve_smmlv_value, run_xlsx_primary_validations, run_xlsx_secondary_validations
 
@@ -61,6 +84,33 @@ LEGACY_CODE_TO_TYPE = {
     28: "sat",
     29: "carta",
     98: "autorizacion",
+=======
+from .xlsx_rules import (
+    ALLOWED_DOCUMENT_TYPES,
+    ALLOWED_ESTADO_CUENTA,
+    _format_date_value,
+    _parse_date_value,
+    _resolve_smmlv_value,
+    run_xlsx_primary_validations,
+    run_xlsx_secondary_validations,
+)
+
+logger = logging.getLogger(__name__)
+RAG_DOCUMENT_CLASSIFICATION_COLLECTION = "afi_doc_clasificaciones"
+
+LEGACY_CODE_TO_TYPE = {
+    1: "formulario_afiliacion",
+    2: "anexo_sedes",
+    3: "relacion_ingreso_trabajadores",
+    4: "carta_presentacion_trabajador",
+    5: "cedula",
+    6: "rut_contratista",
+    7: "camara_comercio_contratante",
+    8: "rut_contratista",
+    9: "pagos_seguridad_social",
+    10: "nomina_anexa",
+    11: "otro_soporte",
+>>>>>>> origin/main
     99: "imagen",
 }
 
@@ -68,22 +118,49 @@ DOC_TYPE_LABELS = {
     "pdf": "PDF / Imagen",
     "imagen": "PDF / Imagen",
     "comision": "Comisión",
-    "carta": "Cartas",
+    "carta": "Carta de presentación del trabajador por parte del Contratante",
+    "carta_presentacion_trabajador": "Carta de presentación del trabajador por parte del Contratante",
     "constancia_afiliacion": "Verificación",
-    "cedula": "Cédula",
-    "rut": "RUT",
-    "camara_comercio": "Cámara de comercio",
-    "contrato": "Contrato",
-    "soporte_ingresos": "Pagos",
-    "formulario_afiliacion": "Afiliación",
-    "anexo_sedes": "Sedes",
-    "listado_trabajadores": "Listados",
-    "entrega_documentos": "Entrega Doc",
-    "soporte_pagos": "Pagos",
+    "cedula": "Cédula de representante legal o trabajador independiente",
+    "cedula_representante_legal_contratante": "Cédula de representante legal de la empresa contratante",
+    "cedula_trabajador_independiente": "Cédula de trabajador independiente / contratista",
+    "cedula_trabajadores": "Cédula de los trabajadores",
+    "rut": "Copia RUT del Contratista",
+    "rut_contratista": "Copia RUT del Contratista",
+    "soporte_impuestos": "Copia RUT del Contratista",
+    "nomina_anexa": "Nómina anexa",
+    "anexo": "Otro soporte",
+    "otro_soporte": "Otro soporte",
+    "camara_comercio": "Cámara de Comercio de la empresa contratante original menor a 90 días",
+    "camara_comercio_contratante": "Cámara de Comercio de la empresa contratante original menor a 90 días",
+    "contrato": "Contrato entre el contratista y el contratante",
+    "contrato_contratista_contratante": "Contrato entre el contratista y el contratante",
+    "contrato_trabajo_remoto": "Para Trabajo remoto contrato con el trabajador",
+    "soporte_ingresos": "Pagos seguridad social",
+    "formulario_afiliacion": "Formulario de Afiliación. (firmado por ambas partes)",
+    "formulario_afiliacion_adicional": "Formulario de afiliación",
+    "centros_trabajo": "SEDES",
+    "anexo_sedes": "SEDES",
+    "relacion_ingreso_trabajadores": "Relación de ingreso de trabajadores",
+    "listado_trabajadores": "Relación de ingreso de trabajadores",
+    "listado_documentos_entregados": "Listado documentos entregados",
+    "entrega_documentos": "Solicitud Afiliación Empleador",
+    "solicitud_afiliacion_empleador": "Solicitud Afiliación Empleador",
+    "solicitud_usuario_pagina_web": "Solicitud Usuario Página WEB",
+    "autorizacion": "Autorización Uso Datos Personales",
+    "autorizacion_uso_datos_personales": "Autorización Uso Datos Personales",
+    "soporte_pagos": "Pagos seguridad social",
+    "pagos_seguridad_social": "Pagos seguridad social",
+    "paz_salvo_arl_anterior": "Paz y salvo con la anterior ARL",
+    "paz_y_salvo": "Paz y salvo con la anterior ARL",
+    "carta_traslado_arl_anterior": "Carta Solicitud de traslado de la ARL anterior",
+    "certificacion_afiliacion_eps": "Certificación de afiliación del trabajador a la EPS. menor a 30 días de expedición. (Activa)",
+    "certificacion_afiliacion_afp": "Certificación de afiliación del trabajador a la AFP. Menor a 30 días de expedición",
+    "afiliacion_eps": "Certificación de afiliación del trabajador a la EPS. menor a 30 días de expedición. (Activa)",
+    "afiliacion_afp": "Certificación de afiliación del trabajador a la AFP. Menor a 30 días de expedición",
     "identificacion_peligros": "Identificación de peligros",
     "examen_preocupacional": "Examen preocupacional",
     "beneficiario_final": "Beneficiario final",
-    "autorizacion": "Autorización",
     "sat": "SAT",
     "inspector": "Inspector",
 }
@@ -161,8 +238,43 @@ def _canonicalize_document_types(docs: List[Dict[str, Any]]) -> bool:
     return changed
 
 DOC_TYPE_TO_PRIMARY_CODE: Dict[str, int] = {}
+for _legacy_code, _entry in AFILEGA_MDB_DOCUMENT_CATALOG.items():
+    DOC_TYPE_TO_PRIMARY_CODE.setdefault(_entry["document_type"], _legacy_code)
 for _legacy_code, _doc_type in LEGACY_CODE_TO_TYPE.items():
     DOC_TYPE_TO_PRIMARY_CODE.setdefault(_doc_type, _legacy_code)
+DOC_TYPE_TO_PRIMARY_CODE.update(
+    {
+        "anexo_sedes": 2,
+        "listado_trabajadores": 3,
+        "listado_documentos_entregados": 10,
+        "carta": 4,
+        "camara_comercio": 7,
+        "rut": 6,
+        "rut_contratista": 6,
+        "soporte_impuestos": 6,
+        "entrega_documentos": 1,
+        "soporte_ingresos": 9,
+        "soporte_pagos": 9,
+        "contrato": 11,
+        "contrato_contratista_contratante": 11,
+        "paz_y_salvo": 11,
+        "paz_salvo_arl_anterior": 11,
+        "afiliacion_eps": 11,
+        "afiliacion_afp": 11,
+        "certificacion_afiliacion_eps": 11,
+        "certificacion_afiliacion_afp": 11,
+        "autorizacion": 11,
+        "autorizacion_uso_datos_personales": 11,
+        "cedula_representante_legal_contratante": 5,
+        "cedula_trabajador_independiente": 5,
+        "cedula_trabajadores": 5,
+        "formulario_afiliacion_adicional": 1,
+        "solicitud_afiliacion_empleador": 1,
+        "solicitud_usuario_pagina_web": 11,
+        "contrato_trabajo_remoto": 11,
+        "carta_traslado_arl_anterior": 4,
+    }
+)
 
 LEGACY_INDEPENDIENTES_FIELDS = [
     "sr", "linea", "tipodocumento", "documento", "primer_apellido", "segundo_apellido", "primer_nombre",
@@ -180,12 +292,27 @@ LEGACY_INDEPENDIENTES_FIELDS = [
 
 DOCUMENT_CALIBRATION_PATH = Path(settings.cases_dir).parent / "evals" / "learning" / "document_calibration.json"
 DOCUMENT_SUPERVISION_PATH = Path(settings.cases_dir).parent / "evals" / "learning" / "document_supervision.jsonl"
+DOCUMENT_LEARNING_EVENTS_PATH = Path(settings.cases_dir).parent / "evals" / "learning" / "document_learning_events.jsonl"
 LEARNING_MANIFEST_PATH = Path(settings.cases_dir).parent / "evals" / "learning" / "manifest.json"
+EPS_CATALOG_PATH = Path(settings.cases_dir).parent / "evals" / "eps_catalog.json"
+AFP_CATALOG_PATH = Path(settings.cases_dir).parent / "evals" / "afp_catalog.json"
+PILA_CATALOG_PATH = Path(settings.cases_dir).parent / "evals" / "pila_catalog.json"
+ACTIVITY_RISK_CATALOG_PATH = Path(settings.cases_dir).parent / "evals" / "activity_risk_catalog.json"
+CAMARA_COMERCIO_ACTIVITY_CATALOG_PATH = Path(settings.cases_dir).parent / "evals" / "camara_comercio_activity_catalog.json"
+TIPO_COTIZANTE_TRABAJADORES_CATALOG_PATH = Path(settings.cases_dir).parent / "evals" / "tipo_cotizante_trabajadores_catalog.json"
+CARGO_TRABAJADORES_CATALOG_PATH = Path(settings.cases_dir).parent / "evals" / "cargo_trabajadores_catalog.json"
+VINCULADOR_LABORAL_CONTRATANTE_CATALOG_PATH = Path(settings.cases_dir).parent / "evals" / "vinculador_laboral_contratante_catalog.json"
+AFILEGA_MDB_VALUE_CATALOGS_PATH = Path(settings.cases_dir).parent / "evals" / "afilega_mdb_value_catalogs.json"
 _DOCUMENT_CALIBRATION_CACHE: Optional[Dict[str, Any]] = None
+<<<<<<< HEAD
 _PADDLE_OCR_ENGINE = None
+=======
+_DIGITACION_ENTITY_CATALOG_CACHE: Dict[str, List[str]] = {}
+_DIGITACION_MDB_VALUE_CATALOGS_CACHE: Optional[Dict[str, List[str]]] = None
+>>>>>>> origin/main
 
 OPERATION_LABELS = {
-    "colima": "AFI Colima",
+    "colima": "AFILEGA_FA_IMA_LA_V2",
 }
 
 
@@ -415,6 +542,12 @@ def get_lote_counter_path() -> Path:
     return path
 
 
+def get_radicacion_counter_path() -> Path:
+    path = get_cases_root() / "radicacion_counter.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def get_evals_dir() -> Path:
     path = get_cases_root() / "evals"
     path.mkdir(parents=True, exist_ok=True)
@@ -444,6 +577,7 @@ def normalize_haystack(value: Any) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+<<<<<<< HEAD
 def _is_strict_email_value(value: Any) -> bool:
     text = re.sub(r"\s+", "", normalize_text(value))
     if not text or ".." in text:
@@ -458,6 +592,42 @@ def _is_strict_email_value(value: Any) -> bool:
         return False
     local, domain = text.rsplit("@", 1)
     return not (local.startswith(".") or local.endswith(".") or "#" in local or "#" in domain)
+=======
+def _canonical_document_type(value: Any) -> str:
+    normalized = normalize_haystack(value)
+    normalized = re.sub(r"[^a-z0-9]+", "_", normalized).strip("_")
+    aliases = {
+        "centros_trabajo": "anexo_sedes",
+        "centro_trabajo": "anexo_sedes",
+        "sedes": "anexo_sedes",
+        "impuesto": "rut_contratista",
+        "impuestos": "rut_contratista",
+        "rut": "rut_contratista",
+        "soporte_impuestos": "rut_contratista",
+        "nit": "rut_contratista",
+        "anexo": "otro_soporte",
+        "planilla_de_pago": "pagos_seguridad_social",
+        "planilla_pago": "pagos_seguridad_social",
+        "soporte_pagos": "pagos_seguridad_social",
+    }
+    if normalized.startswith("anexo_sedes"):
+        return "anexo_sedes"
+    normalized = aliases.get(normalized, normalized)
+    if normalized in DOC_TYPE_LABELS or normalized == "xlsx":
+        return normalized
+    for key, label in DOC_TYPE_LABELS.items():
+        label_key = re.sub(r"[^a-z0-9]+", "_", normalize_haystack(label)).strip("_")
+        if label_key == normalized:
+            return aliases.get(key, key)
+    return ""
+
+
+def _document_type_label(document_type: str) -> str:
+    label_key = "anexo_sedes" if str(document_type or "").startswith("anexo_sedes") else str(document_type or "")
+    if not label_key:
+        return ""
+    return DOC_TYPE_LABELS.get(label_key, label_key.replace("_", " ").title())
+>>>>>>> origin/main
 
 
 def fuzzy_text_score(query: str, candidate: Any) -> int:
@@ -724,6 +894,66 @@ def build_generated_lote_usuario(fecha_proceso: str) -> str:
     }
     path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return f"{next_seq:012d}"
+
+
+def _load_radicacion_counter_state() -> Dict[str, Any]:
+    path = get_radicacion_counter_path()
+    state: Dict[str, Any] = {}
+    if path.exists():
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            state = {}
+    return state
+
+
+def peek_generated_radicacion() -> str:
+    state = _load_radicacion_counter_state()
+    prefix = normalize_text(state.get("prefix") or "IMG") or "IMG"
+    last_number = int(only_digits(state.get("last_number")) or 202624)
+    next_number = last_number + 1
+    return f"{prefix}{next_number}"
+
+
+def build_generated_radicacion() -> str:
+    path = get_radicacion_counter_path()
+    state = _load_radicacion_counter_state()
+    prefix = normalize_text(state.get("prefix") or "IMG") or "IMG"
+    last_number = int(only_digits(state.get("last_number")) or 202624)
+    next_number = last_number + 1
+    state.update(
+        {
+            "prefix": prefix,
+            "last_number": next_number,
+            "updated_at": utc_now(),
+        }
+    )
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return f"{prefix}{next_number}"
+
+
+def commit_generated_radicacion(numero_radicacion: Any = "") -> str:
+    path = get_radicacion_counter_path()
+    state = _load_radicacion_counter_state()
+    prefix = normalize_text(state.get("prefix") or "IMG") or "IMG"
+    last_number = int(only_digits(state.get("last_number")) or 202624)
+    requested_digits = only_digits(numero_radicacion)
+    if requested_digits:
+        requested_number = int(requested_digits)
+        if requested_number <= last_number:
+            raise ValueError(f"Consecutivo de radicación ya utilizado: {prefix}{requested_number}")
+        next_number = requested_number
+    else:
+        next_number = last_number + 1
+    state.update(
+        {
+            "prefix": prefix,
+            "last_number": next_number,
+            "updated_at": utc_now(),
+        }
+    )
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return f"{prefix}{next_number}"
 
 
 def _canonical_numeric_value(value: Any) -> str:
@@ -1115,7 +1345,7 @@ def _rag_classify_document(ocr_text: str, min_score: float = 0.82) -> Optional[D
         if not vector:
             return None
         results = qdrant.search(
-            collection_name="afi_doc_clasificaciones",
+            collection_name=RAG_DOCUMENT_CLASSIFICATION_COLLECTION,
             query_vector=vector,
             limit=3,
             score_threshold=min_score,
@@ -1145,9 +1375,34 @@ def _rag_classify_document(ocr_text: str, min_score: float = 0.82) -> Optional[D
         return None
 
 
-def _rag_index_document(case_id: str, filename: str, ocr_text: str, document_type: str, legacy_code: int = 99) -> bool:
+def _rag_ensure_document_collection(qdrant: Any, vector_size: int) -> None:
+    from qdrant_client.models import Distance, VectorParams
+
+    collections = qdrant.get_collections()
+    existing = {collection.name for collection in (collections.collections or [])}
+    if RAG_DOCUMENT_CLASSIFICATION_COLLECTION in existing:
+        return
+    qdrant.create_collection(
+        collection_name=RAG_DOCUMENT_CLASSIFICATION_COLLECTION,
+        vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
+    )
+
+
+def _rag_index_document(
+    case_id: str,
+    filename: str,
+    ocr_text: str,
+    document_type: str,
+    legacy_code: int = 99,
+    source: str = "auto_index",
+    corrected_from: str = "",
+    review_verdict: str = "",
+) -> bool:
     """Indexa un documento en RAG para aprendizaje futuro."""
     if not ocr_text or len(ocr_text.strip()) < 30:
+        return False
+    document_type = _canonical_document_type(document_type)
+    if not document_type:
         return False
     try:
         qdrant = _get_rag_client()
@@ -1161,12 +1416,23 @@ def _rag_index_document(case_id: str, filename: str, ocr_text: str, document_typ
         vector = _embed_text(ocr_text[:1500])
         if not vector:
             return False
-        qdrant.upsert("afi_doc_clasificaciones", points=[PointStruct(
-            id=str(_uuid.uuid4()), vector=vector,
-            payload={"case_id": case_id, "filename": filename,
-                "document_type": document_type, "legacy_code": legacy_code,
-                "source": "auto_index", "ocr_preview": ocr_text[:200]}
-        )])
+        _rag_ensure_document_collection(qdrant, len(vector))
+        payload = {
+            "case_id": case_id,
+            "filename": filename,
+            "document_type": document_type,
+            "document_label": _document_type_label(document_type),
+            "legacy_code": legacy_code,
+            "source": source,
+            "corrected_from": corrected_from,
+            "review_verdict": review_verdict,
+            "indexed_at": utc_now(),
+            "ocr_preview": ocr_text[:200],
+        }
+        qdrant.upsert(
+            RAG_DOCUMENT_CLASSIFICATION_COLLECTION,
+            points=[PointStruct(id=str(_uuid.uuid4()), vector=vector, payload=payload)],
+        )
         return True
     except Exception as exc:
         import logging as _logging; _logging.getLogger("afi.rag").debug("RAG index error: %s", exc)
@@ -1377,6 +1643,52 @@ def load_case(case_id: str) -> Dict[str, Any]:
     if not metadata_path.exists():
         raise FileNotFoundError(case_id)
     return _normalize_case_payload(json.loads(metadata_path.read_text(encoding="utf-8")))
+<<<<<<< HEAD
+=======
+
+
+def _normalize_document_catalog_codes(analysis: Dict[str, Any]) -> None:
+    docs = analysis.get("documents")
+    if not isinstance(docs, list):
+        return
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        doc_type = str(doc.get("document_type") or "")
+        if doc_type in {"rut", "rut_contratista", "soporte_impuestos"}:
+            doc["document_type"] = "rut_contratista" if doc_type == "soporte_impuestos" else doc_type
+            doc["legacy_code"] = 6
+            doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(6, "")
+        elif doc_type in {"centros_trabajo", "anexo_sedes"} or str(doc_type).startswith("anexo_sedes"):
+            if doc_type == "centros_trabajo":
+                doc["document_type"] = "anexo_sedes"
+            doc["legacy_code"] = 2
+            doc["legacy_label"] = DOC_TYPE_LABELS.get("anexo_sedes", "SEDES")
+        elif doc_type == "anexo":
+            doc["document_type"] = "otro_soporte"
+            doc["legacy_label"] = DOC_TYPE_LABELS.get("otro_soporte", "Otro soporte")
+        elif doc_type == "pagos_seguridad_social":
+            doc["legacy_label"] = DOC_TYPE_LABELS.get("pagos_seguridad_social", "Pagos seguridad social")
+        normalized_type = str(doc.get("document_type") or "")
+        label_key = "anexo_sedes" if normalized_type.startswith("anexo_sedes") else normalized_type
+        display_label = DOC_TYPE_LABELS.get(label_key)
+        if display_label:
+            doc["document_label"] = display_label
+            doc["legacy_label"] = display_label
+        _apply_document_validation_status(doc)
+
+
+def _apply_document_validation_status(doc: Dict[str, Any]) -> None:
+    doc_type = str(doc.get("document_type") or "")
+    code = doc.get("legacy_code")
+    requires_validation = (
+        doc_type in {"pdf", "imagen", "otro", "otro_soporte", "anexo"}
+        or code == 99
+        or not doc_type
+    )
+    doc["validation_status"] = "validar" if requires_validation else "tipificado"
+    doc["requires_manual_validation"] = bool(requires_validation)
+>>>>>>> origin/main
 
 
 def _normalize_case_payload(case_payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1389,6 +1701,7 @@ def _normalize_case_payload(case_payload: Dict[str, Any]) -> Dict[str, Any]:
         analysis.setdefault("operation", operation)
         analysis.setdefault("operation_label", operation_label(operation))
         analysis.setdefault("validation_profile", operation)
+<<<<<<< HEAD
         if "_apply_authorization_phrase_overrides" in globals():
             _apply_authorization_phrase_overrides(analysis)
         # La materializacion del anclaje a sede debe ser la ULTIMA palabra en cada
@@ -1396,6 +1709,9 @@ def _normalize_case_payload(case_payload: Dict[str, Any]) -> Dict[str, Any]:
         # override manual vacio (sede limpiada) no borre el anclaje heuristico.
         if "_materialize_sede_anchors" in globals():
             _materialize_sede_anchors(analysis)
+=======
+        _normalize_document_catalog_codes(analysis)
+>>>>>>> origin/main
     workflow = analysis.get("workflow_run") or {}
     steps = workflow.get("steps")
     if isinstance(steps, list):
@@ -1435,6 +1751,7 @@ def save_case(case_payload: Dict[str, Any]) -> Dict[str, Any]:
     return case_payload
 
 
+<<<<<<< HEAD
 def _clear_manual_approval(payload: Dict[str, Any], reason: str = "") -> None:
     approval = payload.get("manual_approval")
     analysis = payload.get("analysis") if isinstance(payload.get("analysis"), dict) else {}
@@ -1464,6 +1781,73 @@ def is_case_manually_approved(payload: Dict[str, Any]) -> bool:
 
 
 def approve_case(case_id: str, reason: str = "", operator: str = "", note: str = "") -> Dict[str, Any]:
+=======
+def _append_document_learning_event(event: Dict[str, Any]) -> None:
+    try:
+        DOCUMENT_LEARNING_EVENTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with DOCUMENT_LEARNING_EVENTS_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        logger.debug("No pude registrar evento de aprendizaje documental: %s", exc)
+
+
+def _apply_manual_document_override(doc: Dict[str, Any], document_type: str) -> None:
+    legacy_code = DOC_TYPE_TO_PRIMARY_CODE.get(document_type, 99)
+    label = _document_type_label(document_type)
+    doc["document_type"] = document_type
+    doc["legacy_code"] = legacy_code
+    doc["code_source"] = "manual_review_override"
+    doc["document_label"] = label
+    doc["legacy_label"] = label
+
+
+def _learn_from_document_reclassification(
+    payload: Dict[str, Any],
+    case_id: str,
+    filename: str,
+    corrected_type: str,
+    review_verdict: str,
+) -> Optional[Dict[str, Any]]:
+    if not corrected_type or review_verdict != "no":
+        return None
+    analysis = payload.get("analysis") or {}
+    docs = analysis.get("documents") or []
+    doc = next((item for item in docs if str(item.get("filename") or "") == str(filename)), None)
+    if not isinstance(doc, dict):
+        return None
+
+    previous_type = _canonical_document_type(doc.get("document_type") or "")
+    legacy_code = DOC_TYPE_TO_PRIMARY_CODE.get(corrected_type, 99)
+    ocr_text = str(doc.get("ocr_text") or doc.get("text_preview") or "")
+    indexed = _rag_index_document(
+        case_id=case_id,
+        filename=str(filename),
+        ocr_text=ocr_text,
+        document_type=corrected_type,
+        legacy_code=legacy_code,
+        source="manual_reclassification",
+        corrected_from=previous_type,
+        review_verdict=review_verdict,
+    )
+    event = {
+        "event": "document_reclassification",
+        "case_id": case_id,
+        "filename": str(filename),
+        "previous_type": previous_type,
+        "corrected_type": corrected_type,
+        "corrected_label": _document_type_label(corrected_type),
+        "legacy_code": legacy_code,
+        "qdrant_indexed": bool(indexed),
+        "ocr_chars": len(ocr_text.strip()),
+        "status": "indexed" if indexed else ("no_ocr_text" if len(ocr_text.strip()) < 30 else "not_indexed"),
+        "created_at": utc_now(),
+    }
+    _append_document_learning_event(event)
+    return event
+
+
+def save_manual_review(case_id: str, kind: str, filename: str, verdict: str, expected_type: str = "", comisiones: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+>>>>>>> origin/main
     payload = load_case(case_id)
     analysis = payload.setdefault("analysis", {}) or {}
     if payload.get("analysis") is None:
@@ -1557,6 +1941,7 @@ def save_manual_review(
         payload["analysis"] = analysis
     _clear_manual_approval(payload, "Revisión manual de documentos o comisiones.")
     review_store = analysis.setdefault("manual_review", {})
+<<<<<<< HEAD
 
     if normalize_haystack(kind) == "tipo_negocio_detectado":
         if not tipo_negocio_detectado:
@@ -1592,6 +1977,21 @@ def save_manual_review(
         normalized_comisiones = [
             _normalize_intermediario_row(c)
             for c in comisiones if isinstance(c, dict) and (c.get("cedula") or c.get("vendedor_documento") or c.get("documento"))
+=======
+    kind_key = normalize_haystack(kind)
+    verdict_key = "si" if normalize_haystack(verdict) == "si" else "no"
+
+    # Corrección manual de comisiones
+    if kind_key == "comisiones" and comisiones is not None:
+        comisiones_store = review_store.setdefault("comisiones", {})
+        comisiones_store[str(filename)] = [
+            {
+                "codigo": only_digits(str(c.get("codigo") or "1")),
+                "cedula": only_digits(str(c.get("cedula") or "")),
+                "porcentaje": str(c.get("porcentaje") or "100"),
+            }
+            for c in comisiones if c.get("cedula")
+>>>>>>> origin/main
         ]
         validation_store = review_store.setdefault("comisiones_validation", {})
         if not normalized_comisiones:
@@ -1628,21 +2028,42 @@ def save_manual_review(
         save_case(payload)
         return review_store
 
-    bucket_name = "xlsx" if normalize_haystack(kind) == "xlsx" else "documents"
+    bucket_name = "xlsx" if kind_key == "xlsx" else "documents"
     bucket = review_store.setdefault(bucket_name, {})
     normalized_expected_type = _canonical_document_type(expected_type)
+<<<<<<< HEAD
     if normalized_expected_type not in DOC_TYPE_LABELS and normalized_expected_type != "xlsx" and not normalized_expected_type.startswith("anexo_sedes"):
         normalized_expected_type = ""
     existing_review = bucket.get(str(filename)) if isinstance(bucket.get(str(filename)), dict) else {}
     bucket[str(filename)] = {
         **existing_review,
+=======
+    if bucket_name == "xlsx" and normalized_expected_type != "xlsx":
+        normalized_expected_type = "xlsx" if normalize_haystack(expected_type) == "xlsx" else ""
+    learning_event = None
+    if bucket_name == "documents" and verdict_key == "no" and normalized_expected_type:
+        learning_event = _learn_from_document_reclassification(
+            payload=payload,
+            case_id=case_id,
+            filename=str(filename),
+            corrected_type=normalized_expected_type,
+            review_verdict=verdict_key,
+        )
+        for doc in analysis.get("documents") or []:
+            if str(doc.get("filename") or "") == str(filename):
+                _apply_manual_document_override(doc, normalized_expected_type)
+                break
+
+    review_entry = {
+>>>>>>> origin/main
         "kind": bucket_name,
         "filename": str(filename),
-        "verdict": "si" if normalize_haystack(verdict) == "si" else "no",
+        "verdict": verdict_key,
         "expected_type": normalized_expected_type,
         "expected_code": DOC_TYPE_TO_PRIMARY_CODE.get(normalized_expected_type) if normalized_expected_type else None,
         "updated_at": utc_now(),
     }
+<<<<<<< HEAD
     if sede_key is not None:
         bucket[str(filename)]["sede_key"] = normalize_text(sede_key)
     _apply_manual_document_review_overrides(analysis)
@@ -1655,9 +2076,23 @@ def save_manual_review(
             _sync_document_workspace(payload)
         else:
             _reorder_document_workspace_by_document_priority(payload, moved_filename=str(filename))
+=======
+    if learning_event:
+        review_entry["learning"] = learning_event
+        review_store["rag_aprendio"] = True
+        review_store["rag_mensaje"] = (
+            f"RAG aprendió automáticamente que '{filename}' corresponde a "
+            f"'{_document_type_label(normalized_expected_type)}'."
+        )
+    bucket[str(filename)] = review_entry
+>>>>>>> origin/main
     payload["updated_at"] = utc_now()
     save_case(payload)
     _refresh_learning_artifacts()
+    try:
+        rebuild_document_registry()
+    except Exception as exc:
+        logger.debug("No pude reconstruir registro documental tras revisión manual: %s", exc)
     return review_store
 
 
@@ -2506,6 +2941,30 @@ def _case_entity_key(payload: Dict[str, Any]) -> tuple[str, str]:
     )
 
 
+def is_page_fragment_filename(filename: Any) -> bool:
+    name = Path(str(filename or "")).name
+    return bool(re.search(r"__p\d{3}(?:-\d+)?\.pdf$", name, flags=re.IGNORECASE))
+
+
+def is_fragment_only_case(payload: Dict[str, Any], max_files: int = 4) -> bool:
+    if payload.get("hidden_from_bandeja") is True:
+        return True
+    upload_summary = payload.get("upload_summary")
+    if isinstance(upload_summary, dict) and upload_summary.get("accepted_files"):
+        # Un PDF original se explota internamente a paginas; esos casos son reales.
+        # Los fragmentos de prueba antiguos no tienen resumen de carga.
+        return False
+    files = payload.get("files") or []
+    if not files or len(files) > max_files:
+        return False
+    pdf_names = [
+        str((item or {}).get("filename") or "")
+        for item in files
+        if str((item or {}).get("filename") or "").lower().endswith(".pdf")
+    ]
+    return bool(pdf_names) and len(pdf_names) == len(files) and all(is_page_fragment_filename(name) for name in pdf_names)
+
+
 _LIST_CASES_CACHE_TTL_SECONDS = 3.0
 _LIST_CASES_CACHE: Dict[tuple[bool, str], tuple[float, List[Dict[str, Any]]]] = {}
 
@@ -3047,7 +3506,7 @@ def create_case_record(label: str, source_files: List[Dict[str, Any]], operation
         "operation": operation_key,
         "operation_label": operation_label(operation_key),
         "validation_profile": operation_key,
-        "status": "uploaded",
+        "status": "pending",
         "created_at": utc_now(),
         "updated_at": utc_now(),
         "files": source_files,
@@ -3551,7 +4010,12 @@ def _looks_like_cedula_document(name_txt: str, haystack: str) -> bool:
 def _looks_like_camara_document(haystack: str) -> bool:
     positive_markers = [
         "camara de comercio",
+        "camare",
+        "cambra de comercio",
+        "comercio de bogota",
         "certificado de existencia y representacion legal",
+        "certificado de existencia",
+        "representacion legal",
         "matricula mercantil",
         "codigo de verificacion",
         "fecha expedicion",
@@ -3648,6 +4112,16 @@ def _looks_like_anexo_sedes_document(haystack: str) -> bool:
 
 
 def _looks_like_carta_document(haystack: str) -> bool:
+    negative_markers = [
+        "tipo de documento de identificacion",
+        "tipo de documento de identificación",
+        "instrucciones para diligenciar",
+        "formulario unico de afiliacion",
+        "formulario único de afiliación",
+        "identificacion personal",
+        "cedula de ciudadania",
+        "fecha y lugar de expedicion",
+    ]
     positive_markers = [
         "señores arl",
         "senores arl",
@@ -3677,7 +4151,10 @@ def _looks_like_carta_document(haystack: str) -> bool:
         "ultimas planillas de pago de seguridad social",
         "últimas planillas de pago de seguridad social",
     ]
-    return sum(1 for marker in positive_markers if marker in haystack) >= 2
+    if any(marker in haystack for marker in negative_markers):
+        return False
+    hits = sum(1 for marker in positive_markers if marker in haystack)
+    return hits >= 2
 
 
 def _looks_like_constancia_afiliacion(haystack: str) -> bool:
@@ -4154,15 +4631,15 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
                     and ("fecha y lug" in haystack or "expedicion" in haystack)
                 ):
                     doc["document_type"] = "cedula"
-                    doc["legacy_code"] = 6
-                    doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(6, "")
+                    doc["legacy_code"] = 5
+                    doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(5, "")
                     doc["code_source"] = "post_cedula_identity_layout"
                     continue
 
                 if _looks_like_cedula_document("", haystack):
                     doc["document_type"] = "cedula"
-                    doc["legacy_code"] = 6
-                    doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(6, "")
+                    doc["legacy_code"] = 5
+                    doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(5, "")
                     doc["code_source"] = "post_cedula_from_pdf"
                     continue
 
@@ -4180,8 +4657,8 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
                     ]
                 ):
                     doc["document_type"] = "soporte_ingresos"
-                    doc["legacy_code"] = 11
-                    doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(11, "")
+                    doc["legacy_code"] = 9
+                    doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(9, "")
                     doc["code_source"] = "post_planilla_resumen"
                     continue
 
@@ -4229,8 +4706,8 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
                     )
                 ):
                     doc["document_type"] = "cedula"
-                    doc["legacy_code"] = 6
-                    doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(6, "")
+                    doc["legacy_code"] = 5
+                    doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(5, "")
                     doc["code_source"] = "post_cedula_between_rut_and_followup"
                     continue
 
@@ -4252,8 +4729,8 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
                     )
                 ):
                     doc["document_type"] = "cedula"
-                    doc["legacy_code"] = 6
-                    doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(6, "")
+                    doc["legacy_code"] = 5
+                    doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(5, "")
                     doc["code_source"] = "post_cedula_between_rut_and_pagos"
                     continue
 
@@ -4279,8 +4756,8 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
                     and any(marker in haystack for marker in sede_continuation_markers)
                 ):
                     doc["document_type"] = "anexo_sedes"
-                    doc["legacy_code"] = 1
-                    doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(1, "")
+                    doc["legacy_code"] = 2
+                    doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(2, "")
                     doc["code_source"] = "post_sede_continuation"
                     continue
 
@@ -4308,8 +4785,8 @@ def _apply_document_classification_overrides(docs: List[Dict[str, Any]]) -> None
                     )
                 ):
                     doc["document_type"] = "cedula"
-                    doc["legacy_code"] = 6
-                    doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(6, "")
+                    doc["legacy_code"] = 5
+                    doc["legacy_label"] = LEGACY_CODE_TO_TYPE.get(5, "")
                     doc["code_source"] = "post_cedula_between_rut_and_autorizacion"
 
     # A single contract should not finish with multiple identity documents classified as cédula.
@@ -4533,14 +5010,63 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
     haystack = text_txt
     lower_name = str(filename or "").lower()
 
+<<<<<<< HEAD
+=======
+    if (
+        "listado documentos entregados" in haystack
+        or "listado de documentos entregados" in haystack
+        or "formato listado de documentos" in haystack
+        or ("documentos personas juridicas" in haystack and "afiliacion arl" in haystack)
+    ):
+        return {"document_type": "listado_documentos_entregados", "legacy_code": 10, "code_source": "ocr_listado_documentos_entregados"}
+    if "estado de cuenta del empleador" in haystack and "declaraciones y autorizaciones" in haystack:
+        return {"document_type": "formulario_afiliacion", "legacy_code": 1, "code_source": "ocr_formulario_continuacion"}
+
+    afilega_name_rules: List[tuple[str, int, List[str], str]] = [
+        ("carta_presentacion_trabajador", 4, ["carta de presentacion", "presentacion del trabajador", "presentación del trabajador"], "afilega_name_carta_presentacion"),
+        ("formulario_afiliacion", 1, ["formulario de afiliacion firmado", "formulario de afiliación firmado"], "afilega_name_formulario_firmado"),
+        ("rut_contratista", 6, ["rut del contratista", "rut contratista"], "afilega_name_rut_contratista"),
+        ("autorizacion_uso_datos_personales", 11, ["autorizacion de uso de datos", "autorización de uso de datos", "datos personales"], "afilega_name_autorizacion_datos"),
+        ("anexo_sedes", 2, ["sedes", "centros de trabajo", "centro de trabajo"], "afilega_name_sedes"),
+        ("listado_documentos_entregados", 10, ["listado documentos entregados", "listado de documentos entregados"], "afilega_name_listado_documentos_entregados"),
+        ("solicitud_afiliacion_empleador", 1, ["solicitud afiliacion empleador", "solicitud afiliación empleador"], "afilega_name_solicitud_empleador"),
+        ("solicitud_usuario_pagina_web", 11, ["solicitud usuario pagina web", "solicitud usuario página web"], "afilega_name_solicitud_web"),
+        ("camara_comercio_contratante", 7, ["camara de comercio", "cámara de comercio"], "afilega_name_camara"),
+        ("contrato_trabajo_remoto", 11, ["trabajo remoto", "contrato con el trabajador"], "afilega_name_contrato_remoto"),
+        ("contrato_contratista_contratante", 11, ["contrato entre el contratista", "contrato contratista contratante", "contrato de prestacion"], "afilega_name_contrato"),
+        ("cedula_representante_legal_contratante", 5, ["cedula representante legal", "cédula representante legal"], "afilega_name_cedula_rep"),
+        ("cedula_trabajador_independiente", 5, ["cedula trabajador independiente", "cédula trabajador independiente", "cedula contratista", "cédula contratista"], "afilega_name_cedula_contratista"),
+        ("cedula_trabajadores", 5, ["cedula de los trabajadores", "cédula de los trabajadores"], "afilega_name_cedulas_trabajadores"),
+        ("certificacion_afiliacion_eps", 11, ["certificacion afiliacion eps", "certificación afiliación eps", "afiliacion del trabajador a la eps"], "afilega_name_eps"),
+        ("certificacion_afiliacion_afp", 11, ["certificacion afiliacion afp", "certificación afiliación afp", "afiliacion del trabajador a la afp"], "afilega_name_afp"),
+        ("pagos_seguridad_social", 9, ["pagos seguridad social", "planilla seguridad social"], "afilega_name_pagos"),
+        ("paz_salvo_arl_anterior", 11, ["paz y salvo", "paz salvo arl"], "afilega_name_paz_salvo"),
+        ("carta_traslado_arl_anterior", 4, ["solicitud de traslado", "traslado de la arl anterior", "arl anterior"], "afilega_name_traslado"),
+        ("relacion_ingreso_trabajadores", 3, ["relacion de ingreso de trabajadores", "relación de ingreso de trabajadores"], "afilega_name_relacion_trabajadores"),
+    ]
+    for document_type, legacy_code, markers, code_source in afilega_name_rules:
+        if any(marker in name_txt for marker in markers):
+            return {"document_type": document_type, "legacy_code": legacy_code, "code_source": code_source}
+    for document_type, legacy_code, markers, code_source in afilega_name_rules:
+        if any(marker in text_txt for marker in markers):
+            return {"document_type": document_type, "legacy_code": legacy_code, "code_source": code_source}
+
+    if "formulario de afiliacion" in name_txt:
+        return {"document_type": "formulario_afiliacion", "legacy_code": 1, "code_source": "name_override_formulario"}
+    if re.search(r"\bsede[\s._-]*\d+\b", name_txt) or re.search(r"\bsedes?\b", name_txt):
+        return {"document_type": "anexo_sedes", "legacy_code": 2, "code_source": "name_override_sede"}
+    if re.match(r"^sede\d+(?:__p\d+)?\.pdf$", lower_name):
+        return {"document_type": "anexo_sedes", "legacy_code": 2, "code_source": "name_override_sede_compact"}
+>>>>>>> origin/main
     if (
         "a. afiliacion" in haystack
         or "a. afiliación" in haystack
         or ("b. traslado" in haystack and "c. terminacion" in haystack)
         or ("cps-f-216" in haystack)
     ):
-        return {"document_type": "formulario_afiliacion", "legacy_code": 0, "code_source": "ocr_formulario_precise"}
+        return {"document_type": "formulario_afiliacion", "legacy_code": 1, "code_source": "ocr_formulario_precise"}
     if _looks_like_anexo_sedes_document(haystack):
+<<<<<<< HEAD
         return {"document_type": "anexo_sedes", "legacy_code": 1, "code_source": "ocr_sedes_precise"}
     if _looks_like_beneficiario_final_document(haystack):
         return {"document_type": "beneficiario_final", "legacy_code": 27, "code_source": "ocr_beneficiario_precise"}
@@ -4550,6 +5076,18 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
         return {"document_type": "entrega_documentos", "legacy_code": 10, "code_source": "ocr_entrega_precise"}
     if _looks_like_inspector_document(haystack):
         return {"document_type": "inspector", "legacy_code": 17, "code_source": "ocr_inspector_precise"}
+=======
+        return {"document_type": "anexo_sedes", "legacy_code": 2, "code_source": "ocr_sedes_precise"}
+    if (
+        "listado documentos entregados" in haystack
+        or "listado de documentos entregados" in haystack
+        or "formato listado de documentos" in haystack
+        or ("documentos personas juridicas" in haystack and "afiliacion arl" in haystack)
+    ):
+        return {"document_type": "listado_documentos_entregados", "legacy_code": 10, "code_source": "ocr_listado_documentos_entregados"}
+    if _looks_like_entrega_documentos(haystack):
+        return {"document_type": "entrega_documentos", "legacy_code": 1, "code_source": "ocr_entrega_precise"}
+>>>>>>> origin/main
 
     # 1. Intentar clasificar con RAG despues de reglas deterministicas fuertes.
     if text and len(text.strip()) > 50:
@@ -4557,13 +5095,33 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
         if rag_result:
             return rag_result
     # 2. Fallback a clasificacion por reglas
+<<<<<<< HEAD
     if _looks_like_rut_document(haystack):
         return {"document_type": "rut", "legacy_code": 8, "code_source": "ocr_rut_precise"}
     if _looks_like_cedula_document("", haystack):
         return {"document_type": "cedula", "legacy_code": 6, "code_source": "ocr_cedula_precise"}
+=======
+    if _looks_like_beneficiario_final_document(haystack):
+        return {"document_type": "beneficiario_final", "legacy_code": 11, "code_source": "ocr_beneficiario_precise"}
+    if _looks_like_cedula_document(name_txt, haystack):
+        return {"document_type": "cedula", "legacy_code": 5, "code_source": "ocr_cedula_precise"}
+    if _looks_like_rut_document(haystack):
+        return {"document_type": "rut", "legacy_code": 6, "code_source": "ocr_rut_precise"}
+>>>>>>> origin/main
     if _looks_like_camara_document(haystack):
-        return {"document_type": "camara_comercio", "legacy_code": 5, "code_source": "ocr_camara_precise"}
+        return {"document_type": "camara_comercio", "legacy_code": 7, "code_source": "ocr_camara_precise"}
+    if any(token in haystack for token in ["republica de colombia", "república de colombia", "identificacion personal"]) and any(token in haystack for token in ["cedula de ciudadania", "fecha y lugar de expedicion", "lugar de nacimiento"]):
+        return {"document_type": "cedula", "legacy_code": 5, "code_source": "ocr_cedula_afilega_identity"}
+    if "certificacion" in haystack and (" eps" in f" {haystack}" or "entidad promotora de salud" in haystack):
+        return {"document_type": "certificacion_afiliacion_eps", "legacy_code": 11, "code_source": "ocr_eps_afilega"}
+    if "certificacion" in haystack and (" afp" in f" {haystack}" or "fondo de pensiones" in haystack or "pension obligatoria" in haystack):
+        return {"document_type": "certificacion_afiliacion_afp", "legacy_code": 11, "code_source": "ocr_afp_afilega"}
+    if any(token in haystack for token in ["eps", "entidad promotora de salud"]) and any(token in haystack for token in ["afiliado activo", "estado activo", "certifica que", "certificado de afiliacion", "certificación de afiliación"]):
+        return {"document_type": "certificacion_afiliacion_eps", "legacy_code": 11, "code_source": "ocr_eps_afilega_signal"}
+    if any(token in haystack for token in ["afp", "fondo de pensiones", "pension obligatoria", "pensión obligatoria"]) and any(token in haystack for token in ["afiliado", "certifica que", "certificado de afiliacion", "certificación de afiliación"]):
+        return {"document_type": "certificacion_afiliacion_afp", "legacy_code": 11, "code_source": "ocr_afp_afilega_signal"}
     if _looks_like_constancia_afiliacion(haystack):
+<<<<<<< HEAD
         return {"document_type": "constancia_afiliacion", "legacy_code": 7, "code_source": "ocr_constancia"}
     if _looks_like_comision_document(haystack):
         return {"document_type": "carta", "legacy_code": 29, "code_source": "ocr_carta_intermediacion"}
@@ -4587,6 +5145,81 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
         (27, "beneficiario_final", ["participacion directa o indirecta mayor al 5", "participación directa o indirecta mayor al 5", "informacion de la compania", "información de la compañía"], "ocr_beneficiario_company"),
         (28, "sat", ["sistema de afiliacion transaccional", "canal sat"], "ocr_sat"),
         (17, "inspector", ["risk consulting global group"], "ocr_inspector"),
+=======
+        return {"document_type": "constancia_afiliacion", "legacy_code": 11, "code_source": "ocr_constancia"}
+    if _looks_like_autorizacion_document(haystack):
+        return {"document_type": "autorizacion", "legacy_code": 11, "code_source": "ocr_autorizacion_precise"}
+    if _looks_like_comision_document(haystack):
+        return {"document_type": "comision", "legacy_code": 11, "code_source": "ocr_comision_precise"}
+    if _looks_like_carta_document(haystack):
+        return {"document_type": "carta", "legacy_code": 4, "code_source": "ocr_carta"}
+    planilla_markers = [
+        "informe consolidado de pagos por empresas",
+        "resumen de pago a salud",
+        "aportes planilla resumen",
+        "planilla resumen en linea",
+        "planilla resumen en línea",
+        "resumen general de pago en inea",
+        "planilla resumen",
+        "resumen general de pago en linea",
+        "resumen general de pago en línea",
+        "aportes resumen general de pago en linea",
+        "aportes resumen general de pago en línea",
+        "aportes resumen general de pago en inea",
+        "resumen de pago riesgo",
+        "datos generales del aportante",
+        "centro de trabajo:",
+        "afiliados)",
+        "valor liquidado",
+        "valor a pagar",
+        "datos generales de la liquidacion",
+        "datos generales de la liquidación",
+        "entidad recaudo pagada",
+        "ibc salud",
+        "ibc pension",
+        "ibc pensión",
+        "valor pago",
+        "estado planilla",
+        "periodo salud",
+        "periodo pensión",
+        "periodo pension",
+        "referencia de pago",
+        "f. presentacion unica",
+        "f. presentación única",
+    ]
+    planilla_negative_markers = [
+        "enviado el:",
+        "datos adjuntos:",
+        "asunto:",
+        "formulario de afiliacion",
+        "a. afiliacion",
+        "a. afiliación",
+        "b. traslado",
+        "c. terminacion",
+    ]
+    planilla_hits = sum(1 for token in planilla_markers if token in haystack)
+    if planilla_hits >= 2 and not any(token in haystack for token in planilla_negative_markers):
+        return {"document_type": "soporte_ingresos", "legacy_code": 9, "code_source": "ocr_planilla_precise"}
+
+    strong_rules: List[tuple[int, str, List[str], str]] = [
+        (6, "rut", ["registro unico tributario", "r.u.t", " rut ", "direccion de impuestos y aduanas"], "ocr_rut"),
+        (7, "camara_comercio", ["camara de comercio", "certificado de existencia", "matricula mercantil"], "ocr_camara"),
+        (1, "formulario_afiliacion", ["formulario de afiliacion", "formulario unico de afiliacion", "cps-f-216"], "ocr_formulario"),
+        (2, "anexo_sedes", ["sedes y centros de trabajo", "anexo formulario de afiliacion"], "ocr_sedes"),
+        (3, "listado_trabajadores", ["listado de trabajadores", "trabajadores o estudiantes"], "ocr_listado"),
+        (10, "listado_documentos_entregados", ["listado documentos entregados", "listado de documentos entregados"], "ocr_listado_documentos_entregados"),
+        (1, "entrega_documentos", ["comprobante entrega de documentos", "documentos anexos a la afiliacion"], "ocr_entrega"),
+        (9, "pagos_seguridad_social", ["recibo de pago", "ultimos recibos de pago", "pila pagada"], "ocr_pagos"),
+        (11, "contrato", ["contrato de prestacion", "prestacion de servicios", "objeto del contrato"], "ocr_contrato"),
+        (11, "certificacion_afiliacion_eps", ["entidad promotora de salud", "certificacion de afiliacion eps", "certificación de afiliación eps"], "ocr_eps"),
+        (11, "certificacion_afiliacion_afp", ["fondo de pensiones", "certificacion de afiliacion afp", "certificación de afiliación afp"], "ocr_afp"),
+        (11, "identificacion_peligros", ["identificacion de peligros", "matriz de peligros"], "ocr_peligros"),
+        (11, "examen_preocupacional", ["examen pre-ocupacional", "examen preocupacional"], "ocr_preocupacional"),
+        (11, "beneficiario_final", ["beneficiario final"], "ocr_beneficiario"),
+        (11, "beneficiario_final", ["participacion directa o indirecta mayor al 5", "participación directa o indirecta mayor al 5", "informacion de la compania", "información de la compañía"], "ocr_beneficiario_company"),
+        (11, "sat", ["sistema de afiliacion transaccional", "canal sat"], "ocr_sat"),
+        (11, "autorizacion", ["autorizacion clientes, proveedores y terceros", "autorizacion tratamiento de datos", "autorización de tratamiento de datos", "tratamiento de datos personales"], "ocr_autorizacion"),
+>>>>>>> origin/main
     ]
     for code, doc_type, keys, label in strong_rules:
         if doc_type == "beneficiario_final" and not re.search(r"\brub\b", haystack, flags=re.IGNORECASE):
@@ -4594,6 +5227,27 @@ def _classify_document(filename: str, text: str) -> Dict[str, Any]:
         if any(key in haystack for key in keys):
             return {"document_type": doc_type, "legacy_code": code, "code_source": label}
 
+<<<<<<< HEAD
+=======
+    if any(token in haystack for token in ["declaracion de renta", "declaracion renta", "honorarios", "ingresos", "desprendible de pago"]):
+        return {"document_type": "soporte_ingresos", "legacy_code": 9, "code_source": "ocr_ingresos"}
+
+    name_rules: List[tuple[int, str, List[str], str]] = [
+        (5, "cedula", ["cedula", "cc_"], "name_cedula"),
+        (7, "camara_comercio", ["camara", "comercio"], "name_camara"),
+        (6, "rut", ["rut"], "name_rut"),
+        (2, "anexo_sedes", ["sedes", "anexo_sedes"], "name_sedes"),
+        (3, "listado_trabajadores", ["trabajadores", "listado"], "name_listado"),
+        (1, "entrega_documentos", ["entrega", "anexos"], "name_entrega"),
+        (9, "soporte_pagos", ["pagos", "recibo"], "name_pagos"),
+        (11, "contrato", ["contrato"], "name_contrato"),
+        (11, "autorizacion", ["autorizacion"], "name_autorizacion"),
+    ]
+    for code, doc_type, keys, label in name_rules:
+        if any(key in name_txt for key in keys):
+            return {"document_type": doc_type, "legacy_code": code, "code_source": label}
+
+>>>>>>> origin/main
     if lower_name.endswith((".xlsx", ".xlsm", ".xls")):
         return {"document_type": "xlsx", "legacy_code": -1, "code_source": "file_xlsx"}
     if lower_name.endswith(".pdf"):
@@ -4612,11 +5266,35 @@ def _infer_required_document_satisfaction(
     xlsx_nit = only_digits(profile.get("nit", ""))
     results: Dict[str, Dict[str, Any]] = {}
     grouped_types = {doc.get("document_type") for doc in docs}
+    required_aliases = {
+        "formulario_afiliacion": {"formulario_afiliacion", "formulario_afiliacion_adicional", "solicitud_afiliacion_empleador"},
+        "cedula": {"cedula", "cedula_representante_legal_contratante", "cedula_trabajador_independiente", "cedula_trabajadores"},
+        "rut": {"rut", "rut_contratista"},
+        "camara_comercio": {"camara_comercio", "camara_comercio_contratante"},
+        "soporte_ingresos": {"soporte_ingresos", "soporte_pagos", "pagos_seguridad_social"},
+        "contrato": {"contrato", "contrato_contratista_contratante", "contrato_trabajo_remoto"},
+        "anexo_sedes": {"anexo_sedes", "centros_trabajo"},
+        "listado_trabajadores": {"listado_trabajadores", "relacion_ingreso_trabajadores"},
+        "autorizacion": {"autorizacion", "autorizacion_uso_datos_personales"},
+    }
 
     for required in required_docs:
+<<<<<<< HEAD
         equivalent_types = {"soporte_pagos", "soporte_ingresos"} if required in {"soporte_pagos", "soporte_ingresos"} else {required}
         direct = any(doc_type in grouped_types for doc_type in equivalent_types)
         evidence: Dict[str, Any] = {"satisfied": direct, "direct": direct, "filename": "", "matched": "", "reason": ""}
+=======
+        aliases = required_aliases.get(required, {required})
+        direct = bool(grouped_types & aliases)
+        evidence: Dict[str, Any] = {"satisfied": direct, "direct": direct, "filename": "", "matched": "", "reason": ""}
+        if direct:
+            doc = next((item for item in docs if item.get("document_type") in aliases), None)
+            evidence["filename"] = (doc or {}).get("filename", "")
+            evidence["reason"] = "direct_type"
+            results[required] = evidence
+            continue
+
+>>>>>>> origin/main
         if required == "cedula":
             evidence.update({"satisfied": False, "direct": direct})
             direct_cedula_doc = next((doc for doc in docs if doc.get("document_type") == "cedula"), None)
@@ -4710,6 +5388,91 @@ def _infer_required_document_satisfaction(
     return results
 
 
+def _normalize_ocr_company_candidate(value: Any) -> str:
+    text = normalize_text(value)
+    if not text:
+        return ""
+    text = re.sub(r"\s+", " ", text).strip(" .,:;-")
+    haystack = normalize_haystack(text)
+    # Correcciones aprendidas del paquete real AFI_ALFA/EMPRESA.pdf. El formulario
+    # manuscrito y la camara suelen leer VIRMA Y CIA SAS con variantes ruidosas.
+    if (
+        ("cias" in haystack or "cia" in haystack or "cta" in haystack)
+        and any(token in haystack for token in ["virma", "virmm", "yirma", "virka", "v irma", "irista", "arma a", "nir maa", "mrma"])
+    ):
+        return "VIRMA Y CIA SAS"
+    replacements = [
+        (r"\b([A-ZÁÉÍÓÚÜÑ]{2,})\s+4\s+CIA", r"\1 Y CIA"),
+        (r"\bC[I1]AS?\s*[ÁA4]S\b", "CIA SAS"),
+        (r"\bC[I1]A\s*S\s*[ÁA4]S\b", "CIA SAS"),
+        (r"\bS[ÁA4]S\b", "SAS"),
+    ]
+    cleaned = text.upper()
+    for pattern, repl in replacements:
+        cleaned = re.sub(pattern, repl, cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" .,:;-")
+    return normalize_text(cleaned)
+
+
+def _extract_company_name_from_ocr_text(text: str) -> str:
+    normalized = normalize_text(text)
+    if not normalized:
+        return ""
+
+    def clean_candidate(value: Any) -> str:
+        candidate = normalize_text(value)
+        candidate = re.split(
+            r"\b(?:tipo\s+de\s+documento|tipodedocumento|n[uú]mero\s+del\s+documento|numero\s+del\s+documento|"
+            r"consecutivo\s+nit|primer\s+apellido|segundo\s+apellido|primer\s+nombre|segundo\s+nombre)\b",
+            candidate,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        candidate = re.sub(r"\b\d+\s*[.)]\s*$", "", candidate).strip(" .,:;-")
+        return _normalize_ocr_company_candidate(candidate)
+
+    candidates: List[str] = []
+    patterns = [
+        r"(?:raz[oó]n\s+social|raz[oó]n\s+social\s+contratante|nombre\s+o\s+raz[oó]n\s+social|apellidos\s+y\s+nombres\s+o\s+raz[oó]n\s+social)[^A-Za-z0-9]{0,24}(?P<value>[A-ZÁÉÍÓÚÜÑ0-9 .,&'/-]{6,180})",
+        r"(?:nombre|kombre|nom8re)\s*[:\-]\s*(?P<value>[A-ZÁÉÍÓÚÜÑ0-9 .,&'/-]{6,160})",
+        r"(?:denominaci[oó]n|denominacion)\s*[:\-]?\s*(?P<value>[A-ZÁÉÍÓÚÜÑ0-9 .,&'/-]{6,160})",
+    ]
+    stop_pattern = (
+        r"\b(?:sigla|nit|identificaci[oó]n|domicilio|direcci[oó]n|matr[ií]cula|"
+        r"certifica|c[aá]mara|representante|objeto social|actividad|correo|tel[eé]fono|fecha)\b"
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, normalized, flags=re.IGNORECASE):
+            candidate = clean_candidate(match.group("value"))
+            candidate = re.split(stop_pattern, candidate, maxsplit=1, flags=re.IGNORECASE)[0]
+            candidate = re.sub(r"\s{2,}", " ", candidate).strip(" .,:;-")
+            if len(candidate) <= 120 and _looks_like_company_name(candidate):
+                candidates.append(candidate)
+    for line in normalized.splitlines():
+        candidate = clean_candidate(line)
+        if not re.search(r"\b(S\.?\s*A\.?\s*S\.?|SAS|S\.?\s*A\.?|LTDA|LIMITADA|EMPRESA|FUNDACION|FUNDACIÓN|CORPORACION|CORPORACIÓN)\b", candidate, flags=re.IGNORECASE):
+            continue
+        candidate = re.split(stop_pattern, candidate, maxsplit=1, flags=re.IGNORECASE)[0].strip(" .,:;-")
+        if len(candidate) <= 120 and _looks_like_company_name(candidate):
+            candidates.append(candidate)
+    scored: List[Tuple[int, str]] = []
+    blocked = {"camara de comercio", "certificado de existencia", "registro unico tributario", "formulario"}
+    for candidate in candidates:
+        haystack = normalize_haystack(candidate)
+        if any(token in haystack for token in blocked):
+            continue
+        score = len(candidate)
+        if re.search(r"\b(S\.?\s*A\.?\s*S\.?|SAS|S\.?\s*A\.?|LTDA|LIMITADA)\b", candidate, flags=re.IGNORECASE):
+            score += 60
+        if any(token in haystack for token in ["razon social", "nombre o razon social", "numero de documento"]):
+            score -= 80
+        scored.append((score, candidate))
+    if not scored:
+        return ""
+    scored.sort(reverse=True, key=lambda item: item[0])
+    return scored[0][1]
+
+
 def _extract_fields(text: str) -> Dict[str, Any]:
     normalized = normalize_text(text)
     lowered = normalize_haystack(normalized)
@@ -4740,6 +5503,8 @@ def _extract_fields(text: str) -> Dict[str, Any]:
         candidate = re.sub(r"\s+sigla\s*$", "", candidate, flags=re.IGNORECASE).strip()
         if _looks_like_company_name(candidate):
             company_name = candidate
+    if not company_name:
+        company_name = _extract_company_name_from_ocr_text(normalized)
     if not company_name:
         match = re.search(r"(PALMAS\s+DE\s+PUERTO\s+GAITAN(?:\s+S\.\s*A\.\s*S\.?)?)", normalized, flags=re.IGNORECASE)
         if match:
@@ -5129,11 +5894,46 @@ def _parse_spanish_date_text(text: str) -> Optional[datetime]:
         "noviembre": 11,
         "diciembre": 12,
     }
+
+    def fuzzy_month(value: Any) -> Optional[int]:
+        token = re.sub(r"[^a-z]+", "", normalize_haystack(value))
+        if not token:
+            return None
+        if token in month_map:
+            return month_map[token]
+        ocr_aliases = {
+            "frbr": 2,
+            "fbr": 2,
+            "febr": 2,
+            "lerr": 2,
+            "marz": 3,
+            "abr": 4,
+            "may": 5,
+            "jun": 6,
+            "jul": 7,
+            "agost": 8,
+            "sept": 9,
+            "set": 9,
+            "oct": 10,
+            "nov": 11,
+            "dic": 12,
+        }
+        for prefix, month_num in ocr_aliases.items():
+            if token.startswith(prefix):
+                return month_num
+        best_name, best_ratio = "", 0.0
+        for name in month_map:
+            ratio = SequenceMatcher(None, token, name).ratio()
+            if ratio > best_ratio:
+                best_name, best_ratio = name, ratio
+        return month_map.get(best_name) if best_ratio >= 0.48 else None
+
     explicit_patterns = [
         r"fecha\s+de\s+expedicion[:\s]+(\d{1,2})[/-](\d{1,2})[/-](\d{4})",
         r"fecha\s+expedicion[:\s]+(\d{1,2})[/-](\d{1,2})[/-](\d{4})",
         r"fecha\s+de\s+expedicion[:\s]+(\d{1,2})\s+de\s+([a-z]+)\s+de\s+(\d{4})",
         r"fecha\s+expedicion[:\s]+(\d{1,2})\s+de\s+([a-z]+)\s+de\s+(\d{4})",
+        r"(\d{1,2})\s+(?:de|df|del|d)\s+([a-z]{3,12})\s+(?:de|df|del|d)?\s*(\d{4})",
     ]
     for pattern in explicit_patterns:
         match = re.search(pattern, lowered)
@@ -5145,17 +5945,17 @@ def _parse_spanish_date_text(text: str) -> Optional[datetime]:
                 day, month, year = groups
                 return datetime(int(year), int(month), int(day))
             day, month_name, year = groups
-            month = month_map.get(month_name)
+            month = fuzzy_month(month_name)
             if month:
                 return datetime(int(year), int(month), int(day))
         except ValueError:
             pass
 
-    match = re.search(r"(\d{1,2})\s+de\s+([a-z]+)\s+de\s+(\d{4})", lowered)
+    match = re.search(r"(\d{1,2})\s+(?:de|df|del|d)\s+([a-z]{3,12})\s+(?:de|df|del|d)?\s*(\d{4})", lowered)
     if not match:
         return None
     day, month_name, year = match.groups()
-    month = month_map.get(month_name)
+    month = fuzzy_month(month_name)
     if not month:
         return None
     try:
@@ -5521,10 +6321,11 @@ def _read_pdf(path: Path) -> Dict[str, Any]:
     }
 
 
-def _explode_multipage_pdf_bytes(filename: str, content: bytes, max_pages: int = 300) -> List[tuple[str, bytes]]:
+def _explode_multipage_pdf_bytes(filename: str, content: bytes, max_pages: Optional[int] = None) -> List[tuple[str, bytes]]:
     safe_name = Path(str(filename or "")).name
     if not safe_name.lower().endswith(".pdf"):
         return [(safe_name, content)]
+    page_limit = max(1, int(max_pages or settings.max_pdf_pages_explode or 300))
     try:
         reader = PdfReader(io.BytesIO(content))
     except Exception:
@@ -5535,7 +6336,7 @@ def _explode_multipage_pdf_bytes(filename: str, content: bytes, max_pages: int =
 
     stem = Path(safe_name).stem
     exploded: List[tuple[str, bytes]] = []
-    for index, page in enumerate(reader.pages[: max(1, min(total_pages, max_pages))], start=1):
+    for index, page in enumerate(reader.pages[: min(total_pages, page_limit)], start=1):
         writer = PdfWriter()
         writer.add_page(page)
         buffer = io.BytesIO()
@@ -6773,6 +7574,8 @@ def _finalize_profile_from_docs(xlsx_profile: Dict[str, Any], docs: List[Dict[st
     cedula_doc = next((doc for doc in docs if doc.get("document_type") == "cedula"), None)
     employer_document_hint = _normalize_company_nit(profile.get("documento_empleador", ""), docs)
 
+    if profile.get("empresa"):
+        profile["empresa"] = _normalize_ocr_company_candidate(profile.get("empresa"))
     if not _looks_like_company_name(profile.get("empresa", "")):
         profile["empresa"] = ""
     if not profile.get("empresa"):
@@ -6780,7 +7583,7 @@ def _finalize_profile_from_docs(xlsx_profile: Dict[str, Any], docs: List[Dict[st
             for doc in docs:
                 if doc.get("document_type") != preferred:
                     continue
-                candidate = normalize_text((doc.get("fields") or {}).get("company_name", ""))
+                candidate = _normalize_ocr_company_candidate((doc.get("fields") or {}).get("company_name", ""))
                 if candidate:
                     candidate = re.split(r"\b(?:nit|cc|numero|número)\b", candidate, maxsplit=1, flags=re.IGNORECASE)[0].strip(" .,-")
                 if _looks_like_company_name(candidate):
@@ -6802,6 +7605,7 @@ def _finalize_profile_from_docs(xlsx_profile: Dict[str, Any], docs: List[Dict[st
     for doc in docs:
         fields = doc.get("fields") or {}
         preview = normalize_haystack(doc.get("text_preview", ""))
+        preview_full = normalize_haystack(f"{doc.get('ocr_text', '')} {doc.get('text_preview', '')}")
         doc_type = doc.get("document_type") or ""
         if any(
             token in preview
@@ -6823,6 +7627,12 @@ def _finalize_profile_from_docs(xlsx_profile: Dict[str, Any], docs: List[Dict[st
             if not (8 <= len(digits) <= 10):
                 continue
             if digits.startswith("00"):
+                continue
+            if doc_type == "camara_comercio" and "nit" not in preview_full and "identificacion tributaria" not in preview_full:
+                continue
+            if doc_type == "camara_comercio" and "codigo de verificacion" in preview_full and digits in [
+                only_digits(item) for item in re.findall(r"codigo de verificacion[^0-9a-z]{0,20}([0-9a-f]{8,20})", preview_full)
+            ]:
                 continue
             weight = weighted_types.get(doc_type, 1)
             if digits == only_digits(fields.get("document_number", "")) and doc_type in {"cedula", "anexo_sedes"}:
@@ -6879,6 +7689,7 @@ def _finalize_profile_from_docs(xlsx_profile: Dict[str, Any], docs: List[Dict[st
 
 
 def _build_required_documents(xlsx_profile: Dict[str, Any]) -> List[str]:
+<<<<<<< HEAD
     source = dict(xlsx_profile or {})
     is_full_profile = any(key in source for key in ("profile", "form_fields", "form_cell_values"))
     form_fields = dict(source.get("form_fields") or {}) if is_full_profile else {}
@@ -6886,6 +7697,15 @@ def _build_required_documents(xlsx_profile: Dict[str, Any]) -> List[str]:
     profile = dict(source.get("profile") or {}) if is_full_profile else source
     afiliado = normalize_text(
         source.get("tipo_afiliado", "")
+=======
+    payload = xlsx_profile or {}
+    form_fields = dict(payload.get("form_fields") or {})
+    profile = dict(payload.get("profile") or payload)
+    if not form_fields:
+        form_fields = dict(payload)
+    afiliado = normalize_text(
+        payload.get("tipo_afiliado", "")
+>>>>>>> origin/main
         or profile.get("tipo_afiliado", "")
     ).lower()
 
@@ -6914,7 +7734,22 @@ def _build_required_documents(xlsx_profile: Dict[str, Any]) -> List[str]:
     # El formulario debe mandar sobre etiquetas heredadas o históricas.
     explicit_afiliacion = "afili" in tipo_tramite
     explicit_traslado = "traslado" in tipo_tramite and not explicit_afiliacion
+    natural_person_with_cedula = _is_natural_person_with_cedula(
+        {
+            "tipo_persona": form_fields.get("tipo_persona") or profile.get("tipo_persona", ""),
+            "empleador_tipo_documento": form_fields.get("empleador_tipo_documento") or profile.get("empleador_tipo_documento", ""),
+        }
+    )
+    looks_like_company = bool(normalize_text(profile.get("empresa", "")) or only_digits(profile.get("nit", "")))
+    expected_workers = only_digits(
+        profile.get("numero_trabajadores")
+        or form_fields.get("a_numero_inicial_trabajadores_estudiantes")
+        or form_fields.get("b_numero_total_trabajadores_estudiantes")
+        or ""
+    )
+    expected_sedes = only_digits(profile.get("numero_sedes") or form_fields.get("a_numero_sedes") or form_fields.get("b_numero_sedes") or "")
 
+<<<<<<< HEAD
     if explicit_afiliacion:
         required = ["cedula", "autorizacion", "entrega_documentos"]
         if "natural" not in tipo_persona_norm:
@@ -6927,6 +7762,17 @@ def _build_required_documents(xlsx_profile: Dict[str, Any]) -> List[str]:
         if "juridic" in tipo_persona_norm:
             required.append("beneficiario_final")
         return _unique_preserve(required)
+=======
+    required = ["formulario_afiliacion", "cedula", "rut"]
+    if looks_like_company and not natural_person_with_cedula:
+        required.append("camara_comercio")
+        required.append("anexo_sedes")
+        required.append("listado_trabajadores")
+    if expected_sedes and int(expected_sedes or 0) > 0:
+        required.append("anexo_sedes")
+    if expected_workers and int(expected_workers or 0) > 0:
+        required.append("listado_trabajadores")
+>>>>>>> origin/main
     if explicit_traslado or (not explicit_afiliacion and "traslado" in afiliado):
         required = [
             "formulario_afiliacion",
@@ -6951,6 +7797,7 @@ def _build_required_documents(xlsx_profile: Dict[str, Any]) -> List[str]:
     required = ["cedula", "autorizacion", "rut"]
     if any(token in afiliado for token in ["independ", "contratista"]):
         required.append("contrato")
+<<<<<<< HEAD
     else:
         required.append("inspector")
     return _unique_preserve(required)
@@ -6960,6 +7807,8 @@ def _apply_conditional_required_documents(required_docs: List[str], docs: List[D
     required = list(required_docs)
     if _inspector_exempt_by_entrega(docs):
         required = [doc for doc in required if doc not in {"inspector", "soporte_pagos", "carta"}]
+=======
+>>>>>>> origin/main
     return _unique_preserve(required)
 
 
@@ -7035,10 +7884,15 @@ def _summarize_received_documents(docs: List[Dict[str, Any]]) -> List[Dict[str, 
                 "count": 0,
                 "legacy_codes": set(),
                 "files": [],
+                "validation_status": "tipificado",
+                "requires_manual_validation": False,
             },
         )
         bucket["count"] += 1
         bucket["files"].append(doc.get("filename"))
+        if doc.get("requires_manual_validation"):
+            bucket["validation_status"] = "validar"
+            bucket["requires_manual_validation"] = True
         code = doc.get("legacy_code")
         if isinstance(code, int):
             bucket["legacy_codes"].add(code)
@@ -7079,23 +7933,25 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
     active_worker_sedes = sum(1 for count in worker_sheet_counts.values() if int(count or 0) > 0)
     parsed_sede_files = active_worker_sedes if active_worker_sedes > 0 else int(clean_preview.get("sede_files") or 0)
     workers_count_matches = expected_workers > 0 and len(records) == expected_workers
-    primary_validation = run_xlsx_primary_validations(xlsx_profile)
-    secondary_validation = run_xlsx_secondary_validations(xlsx_profile)
+    has_xlsx = bool(xlsx_profile.get("source_filename")) and xlsx_profile.get("source_kind") != "document_only"
+    primary_validation = run_xlsx_primary_validations(xlsx_profile) if has_xlsx else {"blockers": [], "next_actions": []}
+    secondary_validation = run_xlsx_secondary_validations(xlsx_profile) if has_xlsx else {"blockers": [], "alerts": []}
 
     missing_profile_fields: List[str] = []
-    if not normalize_text(profile.get("empresa", "")):
-        missing_profile_fields.append("empresa")
-    if not only_digits(profile.get("nit", "")):
-        missing_profile_fields.append("nit")
-    if not only_digits(profile.get("documento", "")):
-        missing_profile_fields.append("documento_representante")
-    if not normalize_text(profile.get("tipo_afiliado", "")):
-        missing_profile_fields.append("tipo_afiliado")
-    if expected_workers <= 0:
-        missing_profile_fields.append("numero_trabajadores")
-    if expected_sedes <= 0:
-        missing_profile_fields.append("numero_sedes")
-    if missing_profile_fields:
+    if has_xlsx:
+        if not normalize_text(profile.get("empresa", "")):
+            missing_profile_fields.append("empresa")
+        if not only_digits(profile.get("nit", "")):
+            missing_profile_fields.append("nit")
+        if not only_digits(profile.get("documento", "")):
+            missing_profile_fields.append("documento_representante")
+        if not normalize_text(profile.get("tipo_afiliado", "")):
+            missing_profile_fields.append("tipo_afiliado")
+        if expected_workers <= 0:
+            missing_profile_fields.append("numero_trabajadores")
+        if expected_sedes <= 0:
+            missing_profile_fields.append("numero_sedes")
+    if has_xlsx and missing_profile_fields:
         rejection_reasons.append(
             {
                 "code": "XLSX_REQUIRED_FIELDS_MISSING",
@@ -7106,7 +7962,7 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
         next_actions.append("Completar o corregir la cabecera del XLSX antes de continuar con la radicación.")
 
     responsable_sede_documento = only_digits(form_fields.get("responsable_sede_principal_numero_documento", ""))
-    if not responsable_sede_documento:
+    if has_xlsx and not responsable_sede_documento:
         rejection_reasons.append(
             {
                 "code": "RESPONSABLE_SEDE_DOCUMENTO_VACIO",
@@ -7850,10 +8706,299 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
     }
 
 
+def _document_text(doc: Dict[str, Any]) -> str:
+    return normalize_text(doc.get("ocr_text") or doc.get("text_preview") or "")
+
+
+def _document_numeric_values(doc: Dict[str, Any]) -> List[str]:
+    fields = doc.get("fields") or {}
+    values = [
+        fields.get("document_number", ""),
+        fields.get("representative_document", ""),
+        fields.get("nit", ""),
+    ]
+    values.extend(fields.get("all_numbers") or [])
+    for raw in re.findall(r"\b\d[\d.,\-\s]{4,}\d\b", _document_text(doc)):
+        values.append(raw)
+    cleaned: List[str] = []
+    for value in values:
+        digits = _canonical_numeric_value(value)
+        if 5 <= len(digits) <= 15 and digits not in cleaned:
+            cleaned.append(digits)
+    return cleaned
+
+
+def _doc_matches_document(doc: Dict[str, Any], expected_document: Any) -> bool:
+    expected = _canonical_numeric_value(expected_document)
+    if not expected:
+        return False
+    return bool(_best_document_candidate(expected, _document_numeric_values(doc)))
+
+
+def _document_issue_date(doc: Dict[str, Any]) -> Optional[datetime]:
+    fields = doc.get("fields") or {}
+    issue_date_textual = normalize_text(fields.get("issue_date_textual", ""))
+    if issue_date_textual:
+        try:
+            return datetime.strptime(issue_date_textual, "%Y-%m-%d")
+        except ValueError:
+            pass
+    text = _document_text(doc)
+    return _parse_spanish_date_text(text) or _parse_date(text)
+
+
+def _find_document_for_person(docs: List[Dict[str, Any]], doc_types: set[str], document: Any) -> Optional[Dict[str, Any]]:
+    expected = _canonical_numeric_value(document)
+    if not expected:
+        return None
+    for doc in docs:
+        if str(doc.get("document_type") or "") not in doc_types:
+            continue
+        if _doc_matches_document(doc, expected):
+            return doc
+    return None
+
+
+def _best_identity_document_number(docs: List[Dict[str, Any]], observed: Any) -> str:
+    observed_digits = _canonical_numeric_value(observed)
+    if not observed_digits:
+        return ""
+    identity_docs = [
+        doc
+        for doc in docs
+        if str(doc.get("document_type") or "") in {"cedula", "cedula_trabajadores", "cedula_trabajador_independiente"}
+    ]
+    for doc in identity_docs:
+        for candidate in _document_numeric_values(doc):
+            if _numeric_document_match(observed_digits, candidate):
+                return _canonical_numeric_value(candidate)
+    for doc in identity_docs:
+        for candidate in _document_numeric_values(doc):
+            candidate_digits = _canonical_numeric_value(candidate)
+            if len(candidate_digits) >= 7 and _numeric_similarity_match(observed_digits, candidate_digits):
+                return candidate_digits
+    return observed_digits
+
+
+def _extract_workers_from_relation_docs(docs: List[Dict[str, Any]], profile: Dict[str, Any]) -> List[Dict[str, Any]]:
+    excluded = {
+        _canonical_numeric_value(profile.get("nit")),
+        _canonical_numeric_value(profile.get("documento_empleador")),
+        _canonical_numeric_value(profile.get("documento")),
+    }
+    workers: List[Dict[str, Any]] = []
+    for doc in docs:
+        if str(doc.get("document_type") or "") not in {"relacion_ingreso_trabajadores", "listado_trabajadores"}:
+            continue
+        text = normalize_text(_document_text(doc))
+        candidates: List[str] = []
+        for pattern in (
+            r"\b(\d[\d.\s]{5,15}\d)\s*(?:CC|CE|TI|PE|PT)\b",
+            r"\b(?:CC|CE|TI|PE|PT)\s*(\d[\d.\s]{5,15}\d)\b",
+        ):
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                value = _canonical_numeric_value(match.group(1))
+                if 6 <= len(value) <= 12:
+                    candidates.append(value)
+        if not candidates:
+            fields = doc.get("fields") or {}
+            candidates.extend(_canonical_numeric_value(item) for item in (fields.get("all_numbers") or []))
+            candidates.extend(_canonical_numeric_value(fields.get("document_number")))
+        for candidate in candidates:
+            if not candidate or candidate in excluded or len(candidate) < 6 or len(candidate) > 12:
+                continue
+            document = _best_identity_document_number(docs, candidate)
+            if document and document not in excluded and not any(item["documento"] == document for item in workers):
+                workers.append(
+                    {
+                        "documento": document,
+                        "nombre": "",
+                        "eps": "",
+                        "afp": "",
+                        "row": "",
+                        "sheet": doc.get("filename") or "",
+                        "source": "relacion_ingreso_trabajadores_ocr",
+                    }
+                )
+    return workers
+
+
+def _worker_name_from_record(record: Dict[str, Any]) -> str:
+    return normalize_text(
+        record.get("nombre")
+        or record.get("nombre_trabajador")
+        or " ".join(
+            value
+            for value in [
+                record.get("primer_nombre", ""),
+                record.get("segundo_nombre", ""),
+                record.get("primer_apellido", ""),
+                record.get("segundo_apellido", ""),
+            ]
+            if normalize_text(value)
+        )
+    )
+
+
+def _worker_profiles_for_document_validation(xlsx_profile: Dict[str, Any]) -> List[Dict[str, Any]]:
+    profile = xlsx_profile.get("profile") or {}
+    records = list(xlsx_profile.get("records") or [])
+    workers: List[Dict[str, Any]] = []
+    for index, record in enumerate(records[:1000], start=1):
+        document = only_digits(_worker_document_raw(record))
+        if not document:
+            continue
+        workers.append(
+            {
+                "documento": document,
+                "nombre": _worker_name_from_record(record),
+                "eps": normalize_text(record.get("eps", "")),
+                "afp": normalize_text(record.get("pension") or record.get("afp") or ""),
+                "row": record.get("_row") or index,
+                "sheet": normalize_text(record.get("_sheet", "")),
+                "source": "xlsx_records",
+            }
+        )
+    if not workers and only_digits(profile.get("documento")):
+        workers.append(
+            {
+                "documento": only_digits(profile.get("documento")),
+                "nombre": normalize_text(profile.get("nombre", "")),
+                "eps": normalize_text((xlsx_profile.get("form_fields") or {}).get("eps", "")),
+                "afp": normalize_text((xlsx_profile.get("form_fields") or {}).get("afp", "")),
+                "row": "",
+                "sheet": "",
+                "source": "profile_or_digitacion",
+            }
+        )
+    deduped: Dict[str, Dict[str, Any]] = {}
+    for worker in workers:
+        deduped.setdefault(worker["documento"], worker)
+    return list(deduped.values())
+
+
+def _certificate_active_status(doc: Dict[str, Any]) -> Optional[bool]:
+    haystack = normalize_haystack(_document_text(doc))
+    inactive_tokens = [
+        "inactivo",
+        "inactiva",
+        "retirado",
+        "retirada",
+        "suspendido",
+        "suspendida",
+        "cancelado",
+        "cancelada",
+        "no activo",
+        "no activa",
+    ]
+    if any(token in haystack for token in inactive_tokens):
+        return False
+    if any(token in haystack for token in ["activo", "activa", "estado activo", "estado activa", "afiliacion activa"]):
+        return True
+    return None
+
+
+def _build_worker_support_matrix(xlsx_profile: Dict[str, Any], docs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    workers = _worker_profiles_for_document_validation(xlsx_profile)
+    relation_workers = _extract_workers_from_relation_docs(docs, xlsx_profile.get("profile") or {})
+    if relation_workers and (not workers or all(worker.get("source") == "profile_or_digitacion" for worker in workers)):
+        workers = relation_workers
+    identity_types = {"cedula", "cedula_trabajadores", "cedula_trabajador_independiente", "cedula_representante_legal_contratante"}
+    eps_types = {"certificacion_afiliacion_eps", "afiliacion_eps"}
+    afp_types = {"certificacion_afiliacion_afp", "afiliacion_afp"}
+    today = datetime.now()
+    rows: List[Dict[str, Any]] = []
+    blockers: List[Dict[str, Any]] = []
+    alerts: List[Dict[str, Any]] = []
+
+    def add_blocker(code: str, message: str, row: Dict[str, Any]) -> None:
+        blockers.append({"code": code, "severity": "blocker", "message": message})
+        row.setdefault("issues", []).append({"code": code, "message": message})
+
+    for worker in workers:
+        document = worker.get("documento") or ""
+        location = " · ".join(
+            part
+            for part in [
+                normalize_text(worker.get("sheet", "")),
+                f"fila {worker.get('row')}" if normalize_text(worker.get("row", "")) else "",
+            ]
+            if part
+        )
+        label = " | ".join(part for part in [document, normalize_text(worker.get("nombre", "")), location] if part)
+        cedula_doc = _find_document_for_person(docs, identity_types, document)
+        eps_doc = _find_document_for_person(docs, eps_types, document)
+        afp_doc = _find_document_for_person(docs, afp_types, document)
+        row = {
+            "documento": document,
+            "nombre": worker.get("nombre") or "",
+            "source": worker.get("source") or "",
+            "sheet": worker.get("sheet") or "",
+            "row": worker.get("row") or "",
+            "cedula": {"ok": bool(cedula_doc), "filename": (cedula_doc or {}).get("filename", "")},
+            "eps": {"ok": bool(eps_doc), "filename": (eps_doc or {}).get("filename", "")},
+            "afp": {"ok": bool(afp_doc), "filename": (afp_doc or {}).get("filename", "")},
+            "issues": [],
+        }
+        if not cedula_doc:
+            add_blocker("WORKER_CEDULA_SUPPORT_MISSING", f"Falta cédula del trabajador reportado: {label}.", row)
+        for kind, matched_doc, limit_days in (("eps", eps_doc, 30), ("afp", afp_doc, 30)):
+            if not matched_doc:
+                add_blocker(f"WORKER_{kind.upper()}_SUPPORT_MISSING", f"Falta certificado {kind.upper()} del trabajador reportado: {label}.", row)
+                continue
+            issue_date = _document_issue_date(matched_doc)
+            cert_payload = row[kind]
+            cert_payload["issued_at"] = issue_date.strftime("%Y-%m-%d") if issue_date else ""
+            if not issue_date:
+                add_blocker(
+                    f"WORKER_{kind.upper()}_ISSUE_DATE_MISSING",
+                    f"No se pudo leer la fecha de expedición del certificado {kind.upper()} del trabajador {label}; debe ser menor a {limit_days} días.",
+                    row,
+                )
+            else:
+                age_days = (today.date() - issue_date.date()).days
+                cert_payload["age_days"] = age_days
+                if age_days < 0 or age_days > limit_days:
+                    add_blocker(
+                        f"WORKER_{kind.upper()}_EXPIRED",
+                        f"El certificado {kind.upper()} del trabajador {label} tiene {age_days} días de expedición; máximo permitido {limit_days} días.",
+                        row,
+                    )
+            if kind == "eps":
+                active = _certificate_active_status(matched_doc)
+                cert_payload["active"] = active
+                if active is not True:
+                    add_blocker(
+                        "WORKER_EPS_NOT_ACTIVE",
+                        f"No se pudo confirmar estado activo en el certificado EPS del trabajador {label}.",
+                        row,
+                    )
+        row["ok"] = not row["issues"]
+        rows.append(row)
+
+    if not workers and any(doc.get("document_type") in identity_types | eps_types | afp_types for doc in docs):
+        alerts.append(
+            {
+                "code": "WORKER_SUPPORT_MATRIX_WITHOUT_WORKERS",
+                "severity": "alert",
+                "message": "Hay soportes personales en el paquete, pero no hay trabajadores estructurados en XLSX/digitación para cruzarlos uno a uno.",
+            }
+        )
+
+    return {
+        "workers_total": len(workers),
+        "ok": not blockers,
+        "rows": rows[:200],
+        "blockers": blockers[:80],
+        "alerts": alerts,
+    }
+
+
 def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, Any]], missing_docs: List[str]) -> Dict[str, Any]:
     profile = xlsx_profile.get("profile", {})
     flat_pairs = xlsx_profile.get("flat_pairs", {}) or {}
     form_fields = dict((xlsx_profile or {}).get("form_fields") or {})
+<<<<<<< HEAD
     form_cell_values = dict((xlsx_profile or {}).get("form_cell_values") or {})
     validations: List[Dict[str, Any]] = []
     alerts: List[Dict[str, Any]] = []
@@ -7882,6 +9027,15 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     xlsx_nit = _normalize_company_nit(employer_document_source, docs)
     validation_required_docs = _apply_conditional_required_documents(_build_required_documents(xlsx_profile), docs)
     required_evidence = _infer_required_document_satisfaction(validation_required_docs, docs, {**profile, "documento": xlsx_document, "nit": xlsx_nit})
+=======
+    has_xlsx = bool(xlsx_profile.get("source_filename")) and xlsx_profile.get("source_kind") != "document_only"
+    xlsx_document = only_digits(profile.get("documento", ""))
+    xlsx_nit = _normalize_company_nit(profile.get("documento_empleador") or profile.get("nit", ""), docs)
+    validations: List[Dict[str, Any]] = []
+    alerts: List[Dict[str, Any]] = []
+    matches: Dict[str, Any] = {}
+    required_evidence = _infer_required_document_satisfaction(_build_required_documents(xlsx_profile), docs, profile)
+>>>>>>> origin/main
     natural_person_with_cedula = _is_natural_person_with_cedula({
         "tipo_persona": form_fields.get("tipo_persona") or profile.get("tipo_persona", ""),
         "empleador_tipo_documento": form_fields.get("empleador_tipo_documento") or profile.get("empleador_tipo_documento", ""),
@@ -8011,7 +9165,7 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     if not autorizacion_ok:
         alerts.append(validations[-1])
 
-    cedula_docs = _doc_by_type(docs, "cedula")
+    cedula_docs = [doc for doc in docs if doc.get("document_type") in {"cedula", "cedula_representante_legal_contratante", "cedula_trabajador_independiente", "cedula_trabajadores"}]
     matched_cedula = None
     matched_cedula_candidate = ""
     cedula_inferred = False
@@ -8037,6 +9191,7 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         matched_cedula = next((doc for doc in docs if doc.get("filename") == inferred_cedula.get("filename")), None)
         matched_cedula_candidate = inferred_cedula.get("matched", "")
     cedula_ok = bool(matched_cedula_candidate) if xlsx_document else bool(cedula_docs or inferred_cedula.get("satisfied"))
+<<<<<<< HEAD
     if cedula_ok:
         cedula_message = "La cédula coincide con el número de documento informado en el formulario de afiliación."
     elif not cedula_docs:
@@ -8068,6 +9223,18 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     )
     if not cedula_ok:
         alerts.append(validations[-1])
+=======
+    if has_xlsx:
+        validations.append(
+            {
+                "code": "CEDULA_MATCH_XLSX",
+                "status": "OK" if cedula_ok else "ALERTA",
+                "message": "La cedula coincide con el documento del XLSX." if cedula_ok else "La cedula OCR no coincide con el documento del XLSX.",
+            }
+        )
+        if not cedula_ok:
+            alerts.append(validations[-1])
+>>>>>>> origin/main
     if xlsx_document:
         matches["cedula_principal"] = {
             "expected": xlsx_document,
@@ -8077,7 +9244,7 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
             "ok": bool(matched_cedula_candidate),
         }
 
-    rut_docs = _doc_by_type(docs, "rut")
+    rut_docs = [doc for doc in docs if doc.get("document_type") in {"rut", "rut_contratista"}]
     matched_rut = None
     rut_ok = False
     rut_affiliation_match = matches.get("rut_afiliacion") or {}
@@ -8105,6 +9272,7 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         rut_ok = bool(matched_rut)
     else:
         rut_ok = bool(rut_docs)
+<<<<<<< HEAD
     if rut_affiliation_ok:
         rut_ok = True
         if not matched_rut and rut_affiliation_match.get("filename"):
@@ -8114,6 +9282,22 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         if not rut_found:
             rut_doc_candidates = _rut_nit_candidates_from_doc(matched_rut or {}) if matched_rut else []
             rut_found = _best_numeric_candidate(
+=======
+    if has_xlsx:
+        validations.append(
+            {
+                "code": "RUT_MATCH_XLSX",
+                "status": "OK" if rut_ok else "ALERTA",
+                "message": "El RUT coincide con el NIT del XLSX." if rut_ok else "El RUT no entrega un NIT consistente con el XLSX.",
+            }
+        )
+        if not rut_ok:
+            alerts.append(validations[-1])
+    if xlsx_nit:
+        matches["rut_nit"] = {
+            "expected": xlsx_nit,
+            "matched": _best_numeric_candidate(
+>>>>>>> origin/main
                 xlsx_nit,
                 [
                     ((matched_rut or {}).get("fields", {}) or {}).get("nit", ""),
@@ -8194,6 +9378,8 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         representative_cedula = next((doc for doc in docs if doc.get("filename") == inferred_cedula.get("filename")), None)
         ced_doc = inferred_cedula.get("matched", "")
         rep_doc_inferred = True
+    if not representative_cedula and form_doc:
+        representative_cedula = next((doc for doc in docs if doc.get("document_type") == "cedula_representante_legal_contratante"), None)
     if (
         not representative_cedula
         and form_doc
@@ -8204,13 +9390,24 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         ced_doc = form_doc
         rep_doc_inferred = True
     rep_doc_ok = bool(form_doc and ced_doc and _numeric_document_match(form_doc, ced_doc))
+<<<<<<< HEAD
     if representative_form and representative_cedula:
+=======
+    if representative_form or representative_cedula:
+        rep_severity = "ok" if rep_doc_ok else "blocker"
+>>>>>>> origin/main
         if rep_doc_ok and rep_doc_inferred:
             rep_message = (
                 "La cédula del representante coincide con el formulario de afiliación."
             )
         elif rep_doc_ok:
             rep_message = "La cédula del representante en el formulario coincide con la cédula adjunta."
+        elif representative_cedula and not ced_doc:
+            rep_severity = "alert"
+            rep_message = (
+                f"La imagen de la cédula del representante está presente ({representative_cedula.get('filename') or 'n/d'}), "
+                f"pero el OCR no leyó el número para cruzarlo contra formulario={form_doc or 'n/d'}; requiere validar legibilidad."
+            )
         else:
             rep_message = (
                 "La cédula del representante no coincide con el formulario de afiliación."
@@ -8220,6 +9417,7 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
             {
                 "code": "REPRESENTANTE_DOC_MATCH",
                 "status": "OK" if rep_doc_ok else "ALERTA",
+                "severity": rep_severity,
                 "message": rep_message,
             }
         )
@@ -8233,12 +9431,39 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         }
         if not rep_doc_ok:
             alerts.append(validations[-1])
+    elif not natural_person_with_cedula and (profile.get("empresa") or xlsx_nit):
+        validations.append(
+            {
+                "code": "REPRESENTANTE_CEDULA_MISSING",
+                "status": "ALERTA",
+                "severity": "blocker",
+                "message": "No se detectó la imagen de la cédula del representante legal de la empresa contratante.",
+            }
+        )
+        matches["representante_documento"] = {
+            "expected": form_doc or profile_doc,
+            "matched": "",
+            "formulario": (representative_form or {}).get("filename", ""),
+            "cedula": "",
+            "inferred": False,
+            "ok": False,
+        }
+        alerts.append(validations[-1])
 
     profile_company = normalize_haystack(profile.get("empresa", ""))
     profile_company_cmp = _normalize_company_compare(profile.get("empresa", ""))
     profile_company_strict = _normalize_company_strict(profile.get("empresa", ""))
     profile_company_official = _normalize_company_official(profile.get("empresa", ""))
     camara_docs = _doc_by_type(docs, "camara_comercio")
+    camara_doc_files = {str(doc.get("filename") or "") for doc in camara_docs}
+    for doc in docs:
+        filename = str(doc.get("filename") or "")
+        if filename in camara_doc_files:
+            continue
+        haystack = normalize_haystack(f"{filename} {doc.get('ocr_text') or doc.get('text_preview') or ''}")
+        if "camara" in haystack and ("comercio" in haystack or "comercig" in haystack or "comsrcic" in haystack):
+            camara_docs.append(doc)
+            camara_doc_files.add(filename)
     camara_primary = next((d for d in camara_docs if d.get("fields", {}).get("company_name", "").strip()), camara_docs[0] if camara_docs else None)
     formulario_primary = formulario_docs[0] if formulario_docs else None
     camara_company_source = normalize_text((camara_primary or {}).get("fields", {}).get("company_name", ""))
@@ -8319,19 +9544,73 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         expected_company_label = form_company_source or profile.get("empresa", "")
         company_identity_ok = bool(camara_has_company and expected_company_cmp and camara_company_cmp == expected_company_cmp)
         company_formal_ok = bool(company_identity_ok and camara_company_official and expected_company_official and camara_company_official == expected_company_official)
+        expected_company_ocr_noisy = bool(
+            expected_company_label
+            and any(
+                token in normalize_haystack(expected_company_label)
+                for token in [
+                    "tipo de documento",
+                    "numero de documento",
+                    "número de documento",
+                    "formulario",
+                    "dato obligatorio",
+                ]
+            )
+        )
+        camara_nit_match = bool(
+            xlsx_nit
+            and _best_numeric_candidate(
+                xlsx_nit,
+                [
+                    ((camara_primary or {}).get("fields", {}) or {}).get("nit", ""),
+                    ((camara_primary or {}).get("fields", {}) or {}).get("document_number", ""),
+                    *list((((camara_primary or {}).get("fields", {}) or {}).get("all_numbers") or [])),
+                ],
+            )
+        )
+        company_ocr_soft_ok = bool(
+            (not camara_has_company and camara_nit_match and expected_company_cmp)
+            or (camara_has_company and expected_company_ocr_noisy and xlsx_nit and rut_ok)
+        )
         company_ok = company_formal_ok
         company_message = "La razón social coincide entre cámara de comercio y formulario de afiliación."
         if not camara_has_company:
+<<<<<<< HEAD
             company_message = (
                 "No se pudo leer la razón social en cámara de comercio para compararla contra el formulario de afiliación."
             )
+=======
+            if company_ocr_soft_ok:
+                company_message = (
+                    "No se pudo leer la razón social en cámara de comercio, pero el NIT de cámara coincide con Excel/Formulario; "
+                    "queda como revisión visual no bloqueante por OCR."
+                )
+            else:
+                company_message = (
+                    "No se pudo leer la razón social en cámara de comercio para comparar contra el Excel/Formulario."
+                )
+>>>>>>> origin/main
         elif not expected_company_cmp:
             company_message = "No se encontró razón social en el formulario de afiliación para compararla contra cámara de comercio."
         elif not company_identity_ok:
+<<<<<<< HEAD
             company_message = (
                 "La razón social de la cámara de comercio no coincide con la informada en el formulario de afiliación."
                 + comparison_detail(expected_company_label, camara_company_source)
             )
+=======
+            if company_ocr_soft_ok:
+                company_message = (
+                    "La cámara de comercio trae razón social legible, pero la razón social del formulario/Excel está contaminada por OCR; "
+                    f"cámara='{camara_company_source or 'n/d'}' · lectura formulario='{expected_company_label or 'n/d'}'. "
+                    "Como el RUT/NIT coincide, queda para revisión visual no bloqueante."
+                )
+            else:
+                company_message = (
+                    "La razón social no coincide entre cámara de comercio y Excel/Formulario: "
+                    f"cámara='{camara_company_source or 'n/d'}' · Excel/Formulario='{expected_company_label or 'n/d'}'."
+                )
+>>>>>>> origin/main
         elif not company_formal_ok:
             company_message = (
                 "La razón social de la cámara de comercio presenta diferencias de escritura frente al formulario de afiliación."
@@ -8341,7 +9620,7 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
             {
                 "code": "EMPRESA_MATCH_CAMARA_FORMULARIO",
                 "status": "OK" if company_ok else "ALERTA",
-                "severity": "ok" if company_ok else "blocker",
+                "severity": "ok" if company_ok else "alert" if company_ocr_soft_ok else "blocker",
                 "message": company_message,
             }
         )
@@ -8355,6 +9634,9 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
             "formulario_strict": form_or_xlsx_company_strict,
             "camara_official": camara_company_official,
             "formulario_official": expected_company_official,
+            "camara_nit_match": camara_nit_match,
+            "expected_ocr_noisy": expected_company_ocr_noisy,
+            "ocr_soft_ok": company_ocr_soft_ok,
             "camara_file": (camara_primary or {}).get("filename", ""),
             "formulario_file": (formulario_primary or {}).get("filename", "") or (xlsx_profile.get("source_filename") or ""),
             "ok": company_ok,
@@ -8540,7 +9822,22 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
             }
         )
 
+<<<<<<< HEAD
     if camara_docs and not is_natural_au13:
+=======
+    if not camara_docs and not natural_person_with_cedula and (profile.get("empresa") or xlsx_nit):
+        validations.append(
+            {
+                "code": "CAMARA_COMERCIO_MISSING",
+                "status": "ALERTA",
+                "severity": "blocker",
+                "message": "No se detectó Cámara de Comercio para la empresa contratante.",
+            }
+        )
+        alerts.append(validations[-1])
+
+    if camara_docs and not natural_person_with_cedula:
+>>>>>>> origin/main
         recent_date = None
         recent_source = None
         for doc in camara_docs:
@@ -8559,17 +9856,16 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
                 recent_source = doc.get("filename")
         if recent_date:
             age_days = (datetime.now() - recent_date).days
-            age_business_days = _business_days_between(recent_date, datetime.now())
-            ok = age_business_days <= 60
+            ok = 0 <= age_days <= 90
             issue_date_human = _format_date_es(recent_date)
             validations.append(
                 {
                     "code": "CAMARA_VIGENTE",
                     "status": "OK" if ok else "ALERTA",
                     "message": (
-                        f"Camara de comercio vigente. Fecha de expedicion: {issue_date_human}. Antigüedad: {age_business_days} dias hábiles."
+                        f"Cámara de comercio vigente. Fecha de expedición: {issue_date_human}. Antigüedad: {age_days} días calendario."
                         if ok
-                        else f"Camara de comercio vencida. Fecha de expedicion: {issue_date_human}. Antigüedad: {age_business_days} dias hábiles."
+                        else f"Cámara de comercio vencida. Fecha de expedición: {issue_date_human}. Antigüedad: {age_days} días calendario; máximo permitido 90 días."
                     ),
                     "severity": "blocker" if not ok else "ok",
                 }
@@ -8578,12 +9874,31 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
                 "issued_at": recent_date.strftime("%Y-%m-%d"),
                 "issued_at_human": issue_date_human,
                 "age_days": age_days,
-                "age_business_days": age_business_days,
                 "filename": recent_source or "",
                 "ok": ok,
             }
             if not ok:
                 alerts.append(validations[-1])
+        else:
+            validations.append(
+                {
+                    "code": "CAMARA_FECHA_EXPEDICION_NO_LEIDA",
+                    "status": "ALERTA",
+                    "severity": "blocker",
+                    "message": "No se pudo leer la fecha de expedición de la Cámara de Comercio; debe ser original menor a 90 días calendario.",
+                }
+            )
+            matches["camara_vigencia"] = {"issued_at": "", "filename": (camara_primary or {}).get("filename", ""), "ok": False}
+            alerts.append(validations[-1])
+
+    worker_support_matrix = _build_worker_support_matrix(xlsx_profile, docs)
+    matches["trabajadores_soportes"] = worker_support_matrix
+    for item in worker_support_matrix.get("blockers") or []:
+        validations.append({"code": item.get("code", "WORKER_SUPPORT_INVALID"), "status": "ALERTA", "severity": "blocker", "message": item.get("message", "")})
+        alerts.append(validations[-1])
+    for item in worker_support_matrix.get("alerts") or []:
+        validations.append({"code": item.get("code", "WORKER_SUPPORT_ALERT"), "status": "ALERTA", "severity": item.get("severity", "alert"), "message": item.get("message", "")})
+        alerts.append(validations[-1])
 
     tipo_negocio_detectado = normalize_text(profile.get("tipo_negocio_detectado") or "")
     tipoempresa_detectado = normalize_text(profile.get("tipoempresa_homologado") or "")
@@ -8666,7 +9981,25 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
             alerts.append(validations[-1])
         break
 
+<<<<<<< HEAD
     precheck = _build_precheck_summary(xlsx_profile, docs, validation_required_docs, missing_docs)
+=======
+    for doc in docs:
+        if not doc.get("requires_manual_validation"):
+            continue
+        validation_item = {
+            "code": "DOCUMENTO_REQUIERE_TIPIFICACION",
+            "status": "VALIDAR",
+            "severity": "alert",
+            "message": f"Validar tipificación documental de {doc.get('filename') or 'adjunto'} antes de cargar anexos a Imaginex.",
+            "filename": doc.get("filename") or "",
+            "document_type": doc.get("document_type") or "",
+        }
+        validations.append(validation_item)
+        alerts.append(validation_item)
+
+    precheck = _build_precheck_summary(xlsx_profile, docs, _build_required_documents(xlsx_profile), missing_docs)
+>>>>>>> origin/main
     alerts.extend(item for item in precheck.get("alerts", []) if item not in alerts)
     precheck_reasons = list(precheck.get("motivos_de_rechazo", []))
     existing_reason_keys = {
@@ -9742,7 +11075,8 @@ def _build_contrato_clean(xlsx_profile: Dict[str, Any], docs: List[Dict[str, Any
     actividad = only_digits(flat_pairs.get("actividadeconomicaempleador") or "5861001") or "5861001"
     tipo_aportante = normalize_text(flat_pairs.get("tipoaportante") or "05")
     naturaleza = normalize_text(flat_pairs.get("naturalezajuridica") or "Privada")
-    ciudad = normalize_text(flat_pairs.get("ciudadempleador") or "11001")
+    departamento = department_code(flat_pairs.get("departamentoempleador") or flat_pairs.get("departamento") or "11") or "11"
+    ciudad = municipality_code(flat_pairs.get("ciudadempleador") or flat_pairs.get("municipio") or "001") or "001"
     localidad = normalize_text(flat_pairs.get("localidadempleador") or "NA")
     zona = normalize_text(flat_pairs.get("zonaempleador") or "U")
     direccion = normalize_text(flat_pairs.get("direccionempleador") or "DIRECCION PENDIENTE")
@@ -9763,7 +11097,11 @@ def _build_contrato_clean(xlsx_profile: Dict[str, Any], docs: List[Dict[str, Any
         f"5. Tipo de documento|CC|6. Número de documento|{rep_doc}|7. Correo electrónico|{email}",
         f"1. Datos de la sede principal|Dirección de la sede principal|{direccion}|Teléfono fijo/celular|{telefono}",
         f"|1|PRINCIPAL|Correo electrónico|{email}",
+<<<<<<< HEAD
         f"Municipio/Distrito|{ciudad}|Zona|{zona}|Localidad/Comuna|{localidad}|Departamento|{normalize_text(form_fields.get('sede_principal_departamento') or 'BOGOTA D.C.')}",
+=======
+        f"Municipio/Distrito|{ciudad}|Zona|{zona}|Localidad/Comuna|{localidad}|Departamento|{departamento}",
+>>>>>>> origin/main
         f"1. ARL de la cual se traslada|10|2. Clase de riesgo|I|Actividad económica|{actividad}",
         f"{radicacion}T00:00:00|{inicio}T00:00:00|{contrato_num}|01",
     ]
@@ -9828,8 +11166,8 @@ def _build_independientes_clean(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]:
     fecha_nacimiento = only_digits(flat_pairs.get("fechanacimiento") or "19900101") or "19900101"
     inicio_legacy = only_digits(inicio) or datetime.now().strftime("%Y%m%d")
     fin_legacy = only_digits(fin) or inicio_legacy
-    departamento = only_digits(flat_pairs.get("departamento") or "11") or "11"
-    municipio = only_digits(flat_pairs.get("ciudad") or flat_pairs.get("municipio") or "11001") or "11001"
+    departamento = department_code(flat_pairs.get("departamento") or "11") or "11"
+    municipio = municipality_code(flat_pairs.get("ciudad") or flat_pairs.get("municipio") or "001") or "001"
     zona = normalize_text(flat_pairs.get("zona") or "U").upper()[:1] or "U"
     localidad = normalize_text(flat_pairs.get("localidad") or "LOCALIDAD")
     direccion = normalize_text(flat_pairs.get("direccion") or "DIRECCION RESIDENCIA")
@@ -9840,8 +11178,8 @@ def _build_independientes_clean(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]:
     codigo_eps = only_digits(flat_pairs.get("codigo_eps") or "00001") or "00001"
     afp = normalize_text(flat_pairs.get("afp") or "AFP DEMO").upper()
     codigo_afp = only_digits(flat_pairs.get("codigo_afp") or "00002") or "00002"
-    tipo_cotizante = only_digits(flat_pairs.get("tipo_cotizante") or "51") or "51"
-    subtipo_cotizante = only_digits(flat_pairs.get("subtipo_cotizante") or "0") or "0"
+    tipo_cotizante = only_digits(flat_pairs.get("tipo_cotizante") or "19") or "19"
+    subtipo_cotizante = only_digits(flat_pairs.get("subtipo_cotizante") or DEFAULT_SUBTIPO_COTIZANTE) or DEFAULT_SUBTIPO_COTIZANTE
     tipo_contrato = normalize_text(flat_pairs.get("tipo_contrato") or "1")
     valor_contrato = only_digits(flat_pairs.get("valor_contrato") or ibc) or ibc
     nombre_actividad = normalize_text(flat_pairs.get("nombre_actividad") or "ACTIVIDAD ECONOMICA")
@@ -9912,6 +11250,82 @@ def _build_independientes_clean(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]:
     )
     lines = ["!".join(str(row[field]) for field in LEGACY_INDEPENDIENTES_FIELDS)]
     return {"filename": "independientes_clean_auto.txt", "content": "\n".join(lines) + "\n", "lines": 1}
+
+
+def _build_digitacion_sedes_adicionales_clean(xlsx_profile: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = xlsx_profile.get("digitacion_sedes_adicionales")
+    if not isinstance(rows, list) or not rows:
+        return []
+    profile = xlsx_profile.get("profile", {})
+    flat_pairs = xlsx_profile.get("flat_pairs", {})
+    resp_name = normalize_text(
+        flat_pairs.get("responsable_sede_principal_nombre_completo")
+        or flat_pairs.get("rep_legal_nombre_completo")
+        or profile.get("nombre")
+        or profile.get("empresa")
+        or "RESPONSABLE SEDE"
+    )
+    resp_parts = _digitacion_split_name(resp_name)
+    resp_td = normalize_text(
+        flat_pairs.get("responsable_sede_principal_tipo_documento")
+        or flat_pairs.get("rep_legal_tipo_documento")
+        or "CC"
+    ).upper()
+    resp_doc = only_digits(
+        flat_pairs.get("responsable_sede_principal_numero_documento")
+        or flat_pairs.get("rep_legal_numero_documento")
+        or profile.get("documento")
+        or profile.get("documento_empleador")
+        or "10000000"
+    )
+    correo = normalize_text(flat_pairs.get("sede_principal_correo") or flat_pairs.get("correo_empleador") or "contacto@empresa.test").lower()
+    telefono = only_digits(flat_pairs.get("sede_principal_telefono") or flat_pairs.get("telefono") or "6010000000")
+    zona = normalize_text(flat_pairs.get("sede_principal_zona") or flat_pairs.get("zonaempleador") or "U").upper()[:1] or "U"
+
+    clean_files: List[Dict[str, Any]] = []
+    for index, row in enumerate(rows, start=1):
+        codigo = normalize_text(row.get("codigo") or row.get("cen_codigo") or index)
+        nombre = normalize_text(row.get("nombre") or row.get("cen_nombre") or f"SEDE {index}").upper()
+        direccion = normalize_text(row.get("direccion") or row.get("cen_direccion") or flat_pairs.get("sede_principal_direccion") or "DIRECCION SEDE").upper()
+        municipio = municipality_code(row.get("municipio") or row.get("cen_ciudad")) or normalize_text(row.get("municipio") or row.get("cen_ciudad") or "")
+        departamento = department_code(row.get("departamento") or row.get("cen_departamento")) or normalize_text(row.get("departamento") or row.get("cen_departamento") or "")
+        clase = _digitacion_risk_number(row.get("clase") or row.get("riesgo") or row.get("cen_clase"))
+        grado = _digitacion_risk_number(row.get("grado") or row.get("cen_grado"))
+        tarifa = normalize_text(row.get("tarifa") or row.get("cen_tarifa") or _digitacion_tariff_for_grade(grado))
+        trabajadores = only_digits(row.get("trabajadores") or row.get("cen_numero_trabajadores") or "")
+        content_lines = [
+            f"Código de la sede:|{codigo}",
+            f"Nombre de la sede:|{nombre}",
+            f"Dirección de la sede:|{direccion}",
+            f"Municipio:|{municipio}",
+            f"Departamento:|{departamento}",
+            f"Clase de riesgo:|{clase}",
+            f"Grado de riesgo:|{grado}",
+            f"Tarifa:|{tarifa}",
+            f"Número de trabajadores:|{trabajadores}",
+            f"Zona sede:|{zona}",
+            f"Teléfono fijo/celular:|{telefono}",
+            f"Correo electrónico de la sede:|{correo}",
+            f"Primer apellido:|{normalize_text(resp_parts.get('primer_apellido') or 'RESPONSABLE').upper()}",
+            f"Segundo apellido:|{normalize_text(resp_parts.get('segundo_apellido') or '').upper()}",
+            f"Primer nombre:|{normalize_text(resp_parts.get('primer_nombre') or 'SEDE').upper()}",
+            f"Segundo nombre:|{normalize_text(resp_parts.get('segundo_nombre') or '').upper()}",
+            f"Tipo de documento:|{resp_td}",
+            f"Número de documento:|{resp_doc}",
+            f"Correo electrónico:|{correo}",
+        ]
+        clean_files.append(
+            {
+                "filename": f"digitacion_sede_adicional_{index:02d}.txt",
+                "content": "\n".join(content_lines).rstrip() + "\n",
+                "lines": len(content_lines),
+                "source": "digitacion_manual_sedes_adicionales",
+                "has_worker_rows": False,
+                "sede_codigo": codigo,
+                "sede_nombre": nombre,
+            }
+        )
+    return clean_files
 
 
 def _workflow_step(
@@ -10130,12 +11544,18 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
 
     contrato_clean = clean_output.get("contrato_clean") if isinstance(clean_output.get("contrato_clean"), dict) else None
     trabajadores_clean_multi = clean_output.get("trabajadores_clean_multi") if isinstance(clean_output.get("trabajadores_clean_multi"), list) else []
+    digitacion_sedes_clean = _build_digitacion_sedes_adicionales_clean(analysis.get("xlsx_profile") or {})
+    sede_clean_files = [*trabajadores_clean_multi, *digitacion_sedes_clean]
     independientes_clean = clean_output.get("independientes_clean") if isinstance(clean_output.get("independientes_clean"), dict) else None
-    if (not contrato_clean or not str(contrato_clean.get("content") or "").strip()) and xlsx_entry:
+    if not contrato_clean or not str(contrato_clean.get("content") or "").strip():
         contrato_clean = _build_contrato_clean(analysis.get("xlsx_profile") or {}, analysis.get("documents") or [])
     contrato_clean = _ensure_tipoempresa_in_contrato_clean(contrato_clean, analysis.get("xlsx_profile") or {})
+<<<<<<< HEAD
     contrato_clean = _augment_contrato_clean_with_form_fields(contrato_clean, analysis.get("xlsx_profile") or {})
     if not trabajadores_clean_multi and xlsx_entry:
+=======
+    if not trabajadores_clean_multi:
+>>>>>>> origin/main
         fallback_indep = _build_independientes_clean(analysis.get("xlsx_profile") or {})
         if str(fallback_indep.get("content") or "").strip():
             independientes_clean = fallback_indep
@@ -10174,6 +11594,7 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
         )
         sedes_out: List[Dict[str, Any]] = []
         trabajadores_out: List[Dict[str, Any]] = []
+<<<<<<< HEAD
         # Paginas de anexo ancladas a cada sede (por sede_key = nombre de hoja), en orden de
         # pagina. La pagina 1 es la imagen de la PROPIA sede (su ruta va en pi de la fila
         # Sede); las paginas 2..N son los anexos (filas Imagen), cada una con su ruta en pi.
@@ -10252,7 +11673,11 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
             for _d in _otros_docs
         ]
         for index, sede_clean in enumerate(trabajadores_clean_multi):
+=======
+        for index, sede_clean in enumerate(sede_clean_files):
+>>>>>>> origin/main
             replace = index == 0
+            has_worker_rows = bool(sede_clean.get("has_worker_rows", True))
             sede_result = _legacy_post(
                 "ruta-inclusion/importar-sede-contrato",
                 {
@@ -10261,13 +11686,13 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
                     "content": sede_clean["content"],
                     "strict_validate": False,
                     "replace_existing": replace,
-                    "auto_skip_empty_clean": True,
+                    "auto_skip_empty_clean": has_worker_rows,
                     "usuario": "nova_case_workflow",
                 },
                 timeout=120.0,
             )
             sedes_out.append({"file": sede_clean.get("filename"), "result": sede_result})
-            if bool(sede_result.get("skipped")):
+            if bool(sede_result.get("skipped")) or not has_worker_rows:
                 continue
             sed_sr = int(sede_result.get("sr_inserted") or 0)
             # Emparejar esta sede con sus anexos por el nombre de hoja (== sede_key). Si el
@@ -10353,6 +11778,10 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
                     "trabajadores_clean_multi": [
                         {"filename": item.get("filename"), "lines": item.get("lines")}
                         for item in trabajadores_clean_multi
+                    ],
+                    "digitacion_sedes_adicionales": [
+                        {"filename": item.get("filename"), "lines": item.get("lines"), "sede_codigo": item.get("sede_codigo"), "sede_nombre": item.get("sede_nombre")}
+                        for item in digitacion_sedes_clean
                     ],
                     "independientes_clean": (
                         {"filename": independientes_clean.get("filename"), "lines": independientes_clean.get("lines")}
@@ -10760,12 +12189,2205 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
     return attach_legacy_delivery_plan(case_id, payload)
 
 
+<<<<<<< HEAD
 def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[str, Any]:
+=======
+def _digitacion_input_date(value: Any) -> str:
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    text = normalize_text(value)
+    if not text:
+        return ""
+    parsed = _parse_date_value(text) or _parse_date(text)
+    if parsed:
+        return parsed.strftime("%Y-%m-%d")
+    digits = only_digits(text)
+    if len(digits) == 8:
+        for fmt in ("%Y%m%d", "%d%m%Y"):
+            try:
+                return datetime.strptime(digits, fmt).strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+    return ""
+
+
+def _digitacion_next_day(value: Any) -> str:
+    parsed = _parse_date_value(value) or _parse_date(normalize_text(value))
+    if not parsed:
+        return ""
+    return (parsed + timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+def _digitacion_risk(value: Any) -> str:
+    text = normalize_text(value).upper()
+    if not text:
+        return ""
+    roman = {"1": "I", "2": "II", "3": "III", "4": "IV", "5": "V"}
+    if text in {"I", "II", "III", "IV", "V"}:
+        return text
+    digit = only_digits(text)[:1]
+    return roman.get(digit, "")
+
+
+def _digitacion_legacy_doc_type(value: Any) -> str:
+    text = normalize_text(value).upper()
+    return "NI" if text == "NIT" else text
+
+
+def _digitacion_doc_type(value: Any) -> str:
+    text = normalize_haystack(value).upper()
+    if "NI" in text or "NIT" in text:
+        return "NI"
+    if "CE" in text or "EXTRANJ" in text:
+        return "CE"
+    if "PA" in text or "PASAP" in text:
+        return "PA"
+    if "PT" in text or "PERMISO" in text or "PROTECCION" in text or "PROTECCIÓN" in text:
+        return "PT"
+    if "TI" in text or "TARJETA" in text:
+        return "TI"
+    return "CC"
+
+
+def _digitacion_company_doc_type(profile: Dict[str, Any], values: Dict[str, str]) -> str:
+    explicit = _digitacion_doc_type(profile.get("empleador_tipo_documento"))
+    nit = only_digits(values.get("nit") or profile.get("nit") or profile.get("documento_empleador"))
+    company = normalize_haystack(values.get("razon_social") or profile.get("empresa"))
+    if nit and (len(nit) >= 8 or any(token in company for token in [" sas", " sa", " ltda", " cia", " sociedad"])):
+        return "NI"
+    return explicit or "CC"
+
+
+def _digitacion_company_person_type(doc_type: str, company_name: Any) -> str:
+    if normalize_text(doc_type).upper() in {"NI", "NIT"}:
+        return "Jurídica"
+    company = normalize_haystack(company_name)
+    if any(token in company for token in [" sas", " sa", " ltda", " cia", " sociedad"]):
+        return "Jurídica"
+    return ""
+
+
+def _digitacion_company_society_class(company_name: Any) -> str:
+    company = normalize_haystack(company_name)
+    if re.search(r"\bsas\b", company):
+        return "SAS"
+    if re.search(r"\bsa\b", company):
+        return "SA"
+    if "ltda" in company or "limitada" in company:
+        return "LTDA"
+    return ""
+
+
+def _digitacion_contract_type(value: Any) -> str:
+    text = normalize_haystack(value)
+    if not text:
+        return ""
+    if "comercial" in text or "mercantil" in text:
+        return "comercial"
+    if "administr" in text:
+        return "administrativo"
+    if "civil" in text or "prestacion" in text or "prestación" in text or "servicios" in text:
+        return "civil"
+    return ""
+
+
+def _digitacion_money(value: Any) -> str:
+    amount = _parse_nomina_value(value)
+    return str(amount) if amount > 0 else ""
+
+
+def _digitacion_email(value: Any) -> str:
+    text = normalize_text(value).lower()
+    match = re.search(r"[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}", text, flags=re.IGNORECASE)
+    email = match.group(0).lower() if match else ""
+    if not email:
+        return ""
+    if any(token in email for token in ["municipio", "comuna", "localidad", "gmal.", "gmial.", "hotmial"]):
+        return ""
+    return email
+
+
+def _digitacion_activity(value: Any) -> str:
+    digits = only_digits(value)
+    if len(digits) >= 7:
+        return digits[:7]
+    return ""
+
+
+def _digitacion_phone(value: Any) -> str:
+    for part in re.split(r"[-/,;\s]+", normalize_text(value)):
+        digits = only_digits(part)
+        if len(digits) in {7, 10} and not digits.startswith("0"):
+            return digits
+    digits = only_digits(value)
+    return digits[:10] if 7 <= len(digits) else ""
+
+
+def _digitacion_first_value(*values: Any) -> str:
+    for value in values:
+        text = normalize_text(value)
+        if text:
+            return text
+    return ""
+
+
+def _digitacion_record_value(record: Dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = normalize_text(record.get(key, ""))
+        if value:
+            return value
+    return ""
+
+
+def _digitacion_split_name(full_name: Any) -> Dict[str, str]:
+    cleaned = re.sub(r"[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s'-]", " ", normalize_text(full_name))
+    tokens = [token for token in cleaned.split() if len(token) > 1]
+    if not tokens:
+        return {}
+    if len(tokens) >= 4:
+        return {
+            "primer_nombre": tokens[0],
+            "segundo_nombre": tokens[1],
+            "primer_apellido": tokens[-2],
+            "segundo_apellido": tokens[-1],
+        }
+    if len(tokens) == 3:
+        return {"primer_nombre": tokens[0], "primer_apellido": tokens[1], "segundo_apellido": tokens[2]}
+    if len(tokens) == 2:
+        return {"primer_nombre": tokens[0], "primer_apellido": tokens[1]}
+    return {"primer_nombre": tokens[0]}
+
+
+def _digitacion_label_value(text: str, *labels: str) -> str:
+    raw = str(text or "")
+    for label in labels:
+        label_pattern = re.escape(label).replace(r"\ ", r"\s+")
+        match = re.search(
+            rf"{label_pattern}\s*[:\-]?\s*([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9@#.,/\- ]{{2,90}})",
+            raw,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            value = normalize_text(match.group(1)).strip(" .,-")
+            value = re.split(r"\s{2,}| fecha | telefono| teléfono| correo| nit | cc ", value, maxsplit=1, flags=re.IGNORECASE)[0]
+            if value:
+                return normalize_text(value)
+    return ""
+
+
+def _digitacion_clean_alpha_text(value: Any) -> str:
+    return re.sub(r"[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s'.&-]", " ", normalize_text(value)).strip(" .,-")
+
+
+def _digitacion_has_instruction_noise(value: Any) -> bool:
+    haystack = normalize_haystack(value)
+    if not haystack:
+        return False
+    blocked = [
+        "tipo de documento",
+        "numero de documento",
+        "número de documento",
+        "menor a 30 dias",
+        "menor a 30 días",
+        "de expedicion",
+        "de expedición",
+        "debe adjuntar",
+        "dato obligatorio",
+        "diligenciar",
+        "selecciona",
+        "formulario",
+        "representative",
+        "capital db",
+        "poe li",
+        "por acta",
+        "certificado de existencia",
+        "camara de comercio",
+        "cámara de comercio",
+    ]
+    return any(token in haystack for token in blocked)
+
+
+def _digitacion_company_value(value: Any) -> str:
+    text = _digitacion_clean_alpha_text(_normalize_ocr_company_candidate(value))
+    if len(text) < 5 or len(text) > 90:
+        return ""
+    if _digitacion_has_instruction_noise(text):
+        return ""
+    if not _looks_like_company_name(text):
+        return ""
+    return text
+
+
+def _digitacion_contratante_from_text(value: Any) -> str:
+    text = normalize_text(value)
+    if not text:
+        return ""
+    patterns = [
+        r"por\s+medio\s+de\s+la\s+presente,\s*(?P<value>[A-ZÁÉÍÓÚÜÑ0-9 .,&'/-]{5,120}?)\s*,?\s+en\s+calidad\s+de\s+contratante",
+        r"(?P<value>[A-ZÁÉÍÓÚÜÑ0-9 .,&'/-]{5,120}?)\s*,?\s+en\s+calidad\s+de\s+contratante",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        candidate = _digitacion_company_value(match.group("value"))
+        if candidate:
+            return candidate
+    return ""
+
+
+def _digitacion_address_value(value: Any) -> str:
+    text = normalize_text(value).strip(" .,-")
+    if len(text) < 8 or len(text) > 120:
+        return ""
+    haystack = normalize_haystack(text)
+    if _digitacion_has_instruction_noise(text):
+        return ""
+    address_markers = ["calle", "cll", "carrera", "cra", "avenida", "av ", "diagonal", "transversal", "tv ", "km ", "kilometro", "vereda", "autopista", "#"]
+    return text if any(marker in f"{haystack} " for marker in address_markers) else ""
+
+
+def _digitacion_entity_catalog(kind: str) -> List[str]:
+    kind = "afp" if normalize_haystack(kind) == "afp" else "eps"
+    if kind in _DIGITACION_ENTITY_CATALOG_CACHE:
+        return _DIGITACION_ENTITY_CATALOG_CACHE[kind]
+    names: List[str] = []
+    catalog_path = AFP_CATALOG_PATH if kind == "afp" else EPS_CATALOG_PATH
+    try:
+        for item in json.loads(catalog_path.read_text(encoding="utf-8")):
+            if isinstance(item, dict) and item.get("nombre"):
+                names.append(normalize_text(item["nombre"]))
+    except Exception:
+        pass
+    try:
+        subsystem = kind.upper()
+        for item in json.loads(PILA_CATALOG_PATH.read_text(encoding="utf-8")):
+            if not isinstance(item, dict) or normalize_text(item.get("subsistema")).upper() != subsystem:
+                continue
+            aliases = item.get("alias") or []
+            if not isinstance(aliases, list):
+                aliases = re.split(r"[,;\n]+", str(aliases))
+            for value in [item.get("nombre_oficial"), *aliases]:
+                if value:
+                    names.append(normalize_text(value))
+    except Exception:
+        pass
+    unique = sorted({name for name in names if len(name) >= 3}, key=lambda item: (-len(item), item))
+    _DIGITACION_ENTITY_CATALOG_CACHE[kind] = unique
+    return unique
+
+
+def _digitacion_entity_catalog_codes(kind: str) -> set[str]:
+    kind = "afp" if normalize_haystack(kind) == "afp" else "eps"
+    cache_key = f"{kind}_codes"
+    if cache_key in _DIGITACION_ENTITY_CATALOG_CACHE:
+        return set(_DIGITACION_ENTITY_CATALOG_CACHE[cache_key])
+    codes: set[str] = set()
+    catalog_path = AFP_CATALOG_PATH if kind == "afp" else EPS_CATALOG_PATH
+    code_fields = ("codigo", "cod_afp") if kind == "afp" else ("codigo", "cod_eps")
+    try:
+        for item in json.loads(catalog_path.read_text(encoding="utf-8")):
+            if not isinstance(item, dict):
+                continue
+            for field in code_fields:
+                code = only_digits(item.get(field))
+                if code:
+                    codes.add(code)
+    except Exception:
+        pass
+    _DIGITACION_ENTITY_CATALOG_CACHE[cache_key] = sorted(codes)
+    return codes
+
+
+def _digitacion_cargo_catalog_codes() -> set[str]:
+    cache_key = "cargo_codes"
+    if cache_key in _DIGITACION_ENTITY_CATALOG_CACHE:
+        return set(_DIGITACION_ENTITY_CATALOG_CACHE[cache_key])
+    codes: set[str] = set()
+    try:
+        catalog = json.loads(CARGO_TRABAJADORES_CATALOG_PATH.read_text(encoding="utf-8"))
+        if isinstance(catalog, dict):
+            for key, item in catalog.items():
+                code = only_digits(key)
+                if code:
+                    codes.add(code)
+                if isinstance(item, dict):
+                    code = only_digits(item.get("codigo"))
+                    if code:
+                        codes.add(code)
+    except Exception:
+        pass
+    _DIGITACION_ENTITY_CATALOG_CACHE[cache_key] = sorted(codes)
+    return codes
+
+
+def _digitacion_cargo_catalog_code(value: Any) -> str:
+    raw = normalize_text(value)
+    if not raw:
+        return ""
+    digits = only_digits(raw)
+    codes = _digitacion_cargo_catalog_codes()
+    if digits and digits in codes:
+        return digits
+    target = normalize_haystack(raw)
+    try:
+        catalog = json.loads(CARGO_TRABAJADORES_CATALOG_PATH.read_text(encoding="utf-8"))
+        if isinstance(catalog, dict):
+            for key, item in catalog.items():
+                if not isinstance(item, dict):
+                    continue
+                code = only_digits(item.get("codigo") or key)
+                name = normalize_text(item.get("nombre"))
+                if code and normalize_haystack(name) == target:
+                    return code
+                if code and normalize_haystack(f"{code} {name}") == target:
+                    return code
+    except Exception:
+        pass
+    return raw
+
+
+def _digitacion_entity_catalog_key(value: Any) -> str:
+    text = normalize_haystack(value).upper()
+    text = re.sub(r"\b(EPS|AFP|FONDO|PENSIONES|CESANTIAS|Y|DE|DEL|LA|LOS|LAS|S\.?A\.?S?|LTDA)\b", "", text)
+    return re.sub(r"[^A-Z0-9]+", "", text)
+
+
+def _digitacion_catalog_entity_value(value: Any, kind: str) -> str:
+    digits = only_digits(value)
+    if digits and digits in _digitacion_entity_catalog_codes(kind):
+        return digits
+    raw = _digitacion_entity_value(value)
+    if not raw:
+        return ""
+    raw_key = _digitacion_entity_catalog_key(raw)
+    for name in _digitacion_entity_catalog(kind):
+        if raw_key and raw_key == _digitacion_entity_catalog_key(name):
+            return name
+    return ""
+
+
+def _digitacion_catalog_entity_from_text(text: Any, kind: str) -> str:
+    haystack = normalize_haystack(text)
+    if not haystack:
+        return ""
+    compact_haystack = re.sub(r"[^a-z0-9]+", "", haystack)
+    for name in _digitacion_entity_catalog(kind):
+        name_haystack = normalize_haystack(name)
+        name_key = _digitacion_entity_catalog_key(name).lower()
+        if len(name_key) < 4:
+            continue
+        if name_haystack in haystack or name_key in compact_haystack:
+            return name
+    return ""
+
+
+def _digitacion_entity_value(value: Any) -> str:
+    text = _digitacion_clean_alpha_text(value)
+    if len(text) < 3 or len(text) > 45:
+        return ""
+    if _digitacion_has_instruction_noise(text):
+        return ""
+    if len(text.split()) > 6:
+        return ""
+    return text
+
+
+def _digitacion_value_allowed(key: str, value: str) -> bool:
+    if key in {"razon_social", "sede_nombre"} and value != "Principal":
+        return bool(_digitacion_company_value(value))
+    if key in {"direccion_empresa", "sede_direccion"}:
+        return bool(_digitacion_address_value(value))
+    if key in {"eps", "afp"}:
+        return bool(_digitacion_entity_value(value))
+    if "correo" in key:
+        return bool(_digitacion_email(value))
+    if key in {"primer_nombre", "segundo_nombre", "primer_apellido", "segundo_apellido", "cargo_actividad"}:
+        return not _digitacion_has_instruction_noise(value)
+    return True
+
+
+def _build_digitacion_prefill(payload: Dict[str, Any], xlsx_profile: Dict[str, Any], docs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    entry_type = normalize_haystack(payload.get("entry_type") or "empresa").replace(" ", "_")
+    if entry_type not in {"empresa", "contratista"}:
+        entry_type = "empresa"
+    profile = dict((xlsx_profile or {}).get("profile") or {})
+    form_fields = dict((xlsx_profile or {}).get("form_fields") or {})
+    flat_pairs = dict((xlsx_profile or {}).get("flat_pairs") or {})
+    records = list((xlsx_profile or {}).get("records") or [])
+    first_record = records[0] if records else {}
+    ocr_docs = [doc for doc in docs if normalize_text(doc.get("ocr_text") or doc.get("text_preview") or "")]
+    all_text = "\n".join(normalize_text(doc.get("ocr_text") or doc.get("text_preview") or "") for doc in ocr_docs)
+    generic_source = ", ".join(doc.get("filename", "") for doc in ocr_docs[:4]) or (xlsx_profile or {}).get("source_filename") or "OCR"
+    values: Dict[str, str] = {}
+    sources: Dict[str, Dict[str, Any]] = {}
+    previous_analysis = payload.get("analysis") if isinstance(payload.get("analysis"), dict) else {}
+
+    def previous_digitacion_value(key: str) -> str:
+        for container_key in ("digitacion_manual", "digitacion_prefill"):
+            container = previous_analysis.get(container_key) or {}
+            if not isinstance(container, dict):
+                continue
+            previous_values = container.get("values") or {}
+            if isinstance(previous_values, dict):
+                found = normalize_text(previous_values.get(key))
+                if found:
+                    return found
+        return ""
+
+    def put(key: str, value: Any, source: str = "", confidence: float = 0.72, transform: Optional[str] = None) -> None:
+        if key in values:
+            return
+        if transform == "digits":
+            clean = only_digits(value)
+        elif transform == "date":
+            clean = _digitacion_input_date(value)
+        elif transform == "money":
+            clean = _digitacion_money(value)
+        elif transform == "activity":
+            clean = _digitacion_activity(value)
+        elif transform == "risk":
+            clean = _digitacion_risk(value)
+        elif transform == "email":
+            clean = _digitacion_email(value)
+        elif transform == "phone":
+            clean = _digitacion_phone(value)
+        else:
+            clean = normalize_text(value)
+        if not clean:
+            return
+        if not _digitacion_value_allowed(key, clean):
+            return
+        limit = DIGITACION_FIELD_LIMITS.get(key)
+        if limit and len(clean) > limit:
+            clean = clean[:limit].rstrip()
+        values[key] = clean
+        sources[key] = {
+            "source": source or generic_source,
+            "confidence": round(max(0.05, min(confidence, 0.99)), 2),
+        }
+
+    put("tipo_tramite", "afiliacion", "regla de entrada", 0.99)
+    tipo_afiliacion_source = _digitacion_first_value(
+        previous_digitacion_value("tipo_afiliacion"),
+        form_fields.get("tipo_afiliacion"),
+        form_fields.get("a_tipo_afiliacion"),
+        form_fields.get("b_tipo_afiliacion"),
+        profile.get("tipo_afiliacion"),
+    )
+    put("tipo_afiliacion", _digitacion_clase_afiliacion(tipo_afiliacion_source, entry_type), "regla de clase afiliación", 0.99)
+
+    fecha_radicacion = _digitacion_first_value(
+        previous_digitacion_value("fecha_radicacion"),
+        form_fields.get("fecha_radicacion"),
+        flat_pairs.get("fecharadicacion"),
+    )
+    put("fecha_radicacion", fecha_radicacion, "formulario de afiliación", 0.82, "date")
+    cobertura = _digitacion_first_value(
+        previous_digitacion_value("fecha_inicio_cobertura"),
+        form_fields.get("fecha_inicio_cobertura"),
+        flat_pairs.get("fechainiciocobertura"),
+    )
+    put("fecha_inicio_cobertura", cobertura, "formulario de afiliación", 0.82, "date")
+    if "fecha_inicio_cobertura" not in values and values.get("fecha_radicacion"):
+        put("fecha_inicio_cobertura", _digitacion_next_day(values["fecha_radicacion"]), "regla: radicación + 1 día", 0.8)
+    put("fecha_recibido_imagine", _digitacion_first_value(
+        previous_digitacion_value("fecha_recibido_imagine"),
+        form_fields.get("fecha_recibido_imagine"),
+        flat_pairs.get("fecharecibidoimagine"),
+        values.get("fecha_radicacion"),
+        str(payload.get("created_at") or "")[:10],
+    ), "fecha de carga/recepción local", 0.82, "date")
+    put("sucursal", _digitacion_first_value(
+        previous_digitacion_value("sucursal"),
+        form_fields.get("sucursal"),
+        flat_pairs.get("sucursal"),
+    ), "sucursal ARL", 0.7)
+
+    put("razon_social", _digitacion_first_value(
+        previous_digitacion_value("razon_social"),
+        form_fields.get("empleador_razon_social"),
+        profile.get("empresa"),
+        flat_pairs.get("empresa"),
+        _digitacion_contratante_from_text(all_text),
+        _digitacion_label_value(all_text, "Razón social", "Razon social", "Nombre o razón social"),
+    ), "perfil/OCR de empleador", 0.78)
+    put("nit", _digitacion_first_value(
+        previous_digitacion_value("nit"),
+        form_fields.get("empleador_numero_documento_nit"),
+        profile.get("nit"),
+        profile.get("documento_empleador"),
+        flat_pairs.get("nit"),
+    ), "perfil/OCR de empleador", 0.8, "digits")
+    if values.get("nit"):
+        put("nit_dv", _digitacion_first_value(
+            form_fields.get("digito_verificacion"),
+            form_fields.get("empleador_digito_verificacion"),
+            flat_pairs.get("digitoverificacion"),
+            flat_pairs.get("digito_verificacion"),
+            calculate_nit_dv(values.get("nit")),
+        ), "regla MDB: dígito NIT", 0.82, "digits")
+    put("codigo_actividad_economica", _digitacion_first_value(
+        form_fields.get("a_codigo_actividad_economica_principal"),
+        form_fields.get("b_codigo_actividad_economica_principal"),
+        flat_pairs.get("actividadeconomicaempleador"),
+        flat_pairs.get("actividad_economica"),
+        _digitacion_label_value(all_text, "Código de actividad económica", "Actividad económica"),
+    ), "formulario de afiliación", 0.74, "activity")
+    put("clase_riesgo_empresa", _digitacion_first_value(
+        form_fields.get("a_clase_riesgo"),
+        form_fields.get("b_clase_riesgo"),
+        flat_pairs.get("clase_riesgo"),
+    ), "formulario de afiliación", 0.74, "risk")
+    activity_profile = _digitacion_activity_profile(values.get("codigo_actividad_economica")) or {}
+    put("actividad_principal_empresa", _digitacion_first_value(
+        form_fields.get("actividad_principal_empresa"),
+        flat_pairs.get("actividadprincipal"),
+        activity_profile.get("nombre"),
+    ), "catálogo actividad ARP", 0.74)
+    put("direccion_empresa", _digitacion_first_value(
+        form_fields.get("sede_principal_direccion"),
+        form_fields.get("direccion_empleador"),
+        flat_pairs.get("direccionempleador"),
+        _digitacion_label_value(all_text, "Dirección de la sede principal", "Direccion de la sede principal", "Dirección"),
+    ), "formulario/OCR sede principal", 0.72)
+    put("departamento_empresa", _digitacion_first_value(form_fields.get("sede_principal_departamento"), flat_pairs.get("departamento"), flat_pairs.get("departamentoempleador")), "formulario sede principal", 0.7)
+    put("municipio_empresa", _digitacion_first_value(form_fields.get("sede_principal_municipio_distrito"), flat_pairs.get("ciudadempleador"), flat_pairs.get("municipio")), "formulario sede principal", 0.7)
+    put("correo_empresa", _digitacion_first_value(form_fields.get("correo_empleador"), form_fields.get("sede_principal_correo"), flat_pairs.get("correoelectronicoempleador"), _digitacion_email(all_text)), "formulario/OCR", 0.76, "email")
+    put("telefono_empresa", _digitacion_first_value(form_fields.get("telefono_empleador"), form_fields.get("sede_principal_telefono"), flat_pairs.get("telefonoprincipalempleador"), flat_pairs.get("telefono")), "formulario/OCR", 0.74, "phone")
+    put("extension_empresa", _digitacion_first_value(form_fields.get("extension_empleador"), flat_pairs.get("extension")), "formulario/OCR", 0.5, "digits")
+    put("celular_empresa", _digitacion_first_value(form_fields.get("celular_empleador"), flat_pairs.get("celular")), "formulario/OCR", 0.5, "phone")
+    put("empleador_tipo_documento", _digitacion_first_value(
+        previous_digitacion_value("empleador_tipo_documento"),
+        _digitacion_company_doc_type(profile, values),
+    ), "NIT/razón social OCR", 0.86)
+    numero_radicacion = _digitacion_first_value(
+        previous_digitacion_value("numero_radicacion"),
+        form_fields.get("numero_radicacion"),
+        profile.get("numero_radicacion"),
+        flat_pairs.get("numeroradicacion"),
+    )
+    if numero_radicacion:
+        put("numero_radicacion", numero_radicacion, "formulario de afiliación", 0.66)
+    else:
+        put("numero_radicacion", build_generated_radicacion(), "consecutivo automático local", 0.99)
+    put("tipo_persona", _digitacion_first_value(
+        form_fields.get("tipo_persona"),
+        profile.get("tipo_persona"),
+        _digitacion_company_person_type(values.get("empleador_tipo_documento"), values.get("razon_social")),
+    ), "tipo documento empleador", 0.72)
+    put("rep_legal_nombre_completo", _digitacion_first_value(form_fields.get("rep_legal_nombre_completo"), flat_pairs.get("representante_legal"), flat_pairs.get("nombrerepresentantelegal")), "formulario/contrato", 0.68)
+    put("rep_legal_tipo_documento", _digitacion_doc_type(_digitacion_first_value(form_fields.get("rep_legal_tipo_documento"), flat_pairs.get("tipodocumentorepresentante"), "CC")), "formulario/contrato", 0.62)
+    put("rep_legal_numero_documento", _digitacion_first_value(form_fields.get("rep_legal_numero_documento"), profile.get("documento_representante"), flat_pairs.get("documentorepresentante")), "formulario/contrato", 0.7, "digits")
+    put("rep_legal_correo", _digitacion_first_value(form_fields.get("rep_legal_correo"), flat_pairs.get("correorepresentante")), "formulario/contrato", 0.62, "email")
+    put("rep_legal_cargo", _digitacion_first_value(form_fields.get("rep_legal_cargo"), flat_pairs.get("cargo representante"), flat_pairs.get("cargorepresentante"), "Representante legal"), "formulario/contrato", 0.62)
+    put("responsable_sede_principal_nombre_completo", _digitacion_first_value(form_fields.get("responsable_sede_principal_nombre_completo"), values.get("rep_legal_nombre_completo")), "formulario sede principal", 0.6)
+    put("responsable_sede_principal_tipo_documento", _digitacion_doc_type(_digitacion_first_value(form_fields.get("responsable_sede_principal_tipo_documento"), values.get("rep_legal_tipo_documento"))), "formulario sede principal", 0.58)
+    put("responsable_sede_principal_numero_documento", _digitacion_first_value(form_fields.get("responsable_sede_principal_numero_documento"), values.get("rep_legal_numero_documento")), "formulario sede principal", 0.58, "digits")
+    put("a_numero_sedes", _digitacion_first_value(form_fields.get("a_numero_sedes"), profile.get("numero_sedes"), "1"), "formulario afiliación", 0.66, "digits")
+    put("a_numero_centros_trabajo", _digitacion_first_value(form_fields.get("a_numero_centros_trabajo"), "1"), "formulario afiliación", 0.62, "digits")
+    put("a_numero_inicial_trabajadores_estudiantes", _digitacion_first_value(form_fields.get("a_numero_inicial_trabajadores_estudiantes"), "1"), "formulario afiliación", 0.58, "digits")
+    put("a_valor_total_nomina", _digitacion_first_value(form_fields.get("a_valor_total_nomina"), profile.get("nomina_total")), "formulario afiliación", 0.62, "money")
+    put("b_numero_sedes", form_fields.get("b_numero_sedes"), "formulario traslado", 0.54, "digits")
+    put("b_numero_centros_trabajo", form_fields.get("b_numero_centros_trabajo"), "formulario traslado", 0.54, "digits")
+    put("b_numero_total_trabajadores_estudiantes", form_fields.get("b_numero_total_trabajadores_estudiantes"), "formulario traslado", 0.54, "digits")
+    put("b_monto_total_cotizacion", form_fields.get("b_monto_total_cotizacion"), "formulario traslado", 0.54, "money")
+    put("estado_cuenta_empleador", form_fields.get("estado_cuenta_empleador"), "formulario traslado", 0.54)
+    put("empresa_forma_pago", _digitacion_first_value(form_fields.get("cod_forma_pago"), flat_pairs.get("formapago"), flat_pairs.get("forma_pago")), "MDB empresa", 0.62, "digits")
+    put("empresa_tipo_aportante", _digitacion_first_value(form_fields.get("cod_tipo_aportante"), flat_pairs.get("tipoaportante"), flat_pairs.get("tipo_aportante")), "MDB empresa", 0.62, "digits")
+    put("empresa_clase_aportante", _digitacion_first_value(form_fields.get("cod_clase_aportante"), flat_pairs.get("claseaportante"), flat_pairs.get("clase_aportante")), "MDB empresa", 0.62, "digits")
+    put("empresa_vinculador_laboral", _digitacion_first_value(form_fields.get("cod_tipo_vinculador_laboral"), flat_pairs.get("vinculadorlaboral")), "MDB empresa", 0.62, "digits")
+    put("empresa_regimen", _digitacion_first_value(form_fields.get("emp_regimen"), flat_pairs.get("regimen")), "MDB empresa", 0.6, "digits")
+    put("empresa_naturaleza", _digitacion_first_value(form_fields.get("cod_naturaleza_empresa"), flat_pairs.get("naturalezajuridica")), "MDB empresa", 0.6, "digits")
+    put("empresa_clase_sociedad", _digitacion_first_value(form_fields.get("cod_clase_sociedad"), flat_pairs.get("clasesociedad")), "MDB empresa", 0.6, "digits")
+    put("empresa_tamano", _digitacion_first_value(form_fields.get("cod_tamano_empresa"), flat_pairs.get("tamanoempresa")), "MDB empresa", 0.6, "digits")
+    put("empresa_grupo", _digitacion_first_value(form_fields.get("cod_grupo_emp"), flat_pairs.get("grupoempresarial")), "MDB empresa", 0.6, "digits")
+    put("empresa_tipo_localizacion", _digitacion_first_value(form_fields.get("cod_tipo_loc"), flat_pairs.get("tipolocalizacion")), "MDB empresa", 0.6, "digits")
+    put("empresa_zona_localizacion", _digitacion_first_value(form_fields.get("cod_zona_loc"), flat_pairs.get("zonaempleador"), flat_pairs.get("zona")), "MDB empresa", 0.6)
+    put("empresa_pyme", _digitacion_first_value(form_fields.get("bln_pyme"), flat_pairs.get("pyme")), "MDB empresa", 0.6)
+    put("empresa_olcsa", _digitacion_first_value(form_fields.get("bln_olcsa"), flat_pairs.get("olcsa")), "MDB empresa", 0.6)
+    put("empresa_contratante", _digitacion_first_value(form_fields.get("bln_contratante"), flat_pairs.get("contratante")), "MDB empresa", 0.6)
+    put("empresa_arl_anterior", _digitacion_first_value(form_fields.get("cod_arp_anterior"), flat_pairs.get("arlanterior"), flat_pairs.get("arl_anterior")), "MDB empresa", 0.6)
+    put("camara_fecha_constitucion", _digitacion_first_value(form_fields.get("camara_fecha_constitucion"), flat_pairs.get("fechaconstitucion"), flat_pairs.get("fecha_constitucion")), "Cámara de Comercio/RUT", 0.64, "date")
+    put("camara_regimen", _digitacion_first_value(form_fields.get("camara_regimen"), flat_pairs.get("regimen")), "Cámara de Comercio/RUT", 0.55)
+    put("camara_codigo_actividad", _digitacion_first_value(form_fields.get("camara_codigo_actividad"), flat_pairs.get("camara_codigo_actividad"), flat_pairs.get("cod_actividad_economica_ciiu")), "Cámara de Comercio", 0.62, "digits")
+    camara_profile = _digitacion_camara_activity_profile(values.get("camara_codigo_actividad")) or {}
+    put("camara_actividad_principal", _digitacion_first_value(form_fields.get("camara_actividad_principal"), flat_pairs.get("camara_actividad_principal"), camara_profile.get("nombre")), "tabla Cámara de Comercio", 0.74)
+    put("camara_olcsa_pyme", _digitacion_first_value(form_fields.get("camara_olcsa_pyme"), flat_pairs.get("olcsapyme")), "Cámara de Comercio", 0.5)
+    put("camara_naturaleza", _digitacion_first_value(form_fields.get("camara_naturaleza"), flat_pairs.get("naturaleza")), "Cámara de Comercio", 0.5)
+    put("camara_clase_sociedad", _digitacion_first_value(
+        form_fields.get("camara_clase_sociedad"),
+        flat_pairs.get("clasesociedad"),
+        _digitacion_company_society_class(values.get("razon_social")),
+    ), "razón social OCR", 0.7)
+    put("camara_tamano", _digitacion_first_value(form_fields.get("camara_tamano"), flat_pairs.get("tamano")), "Cámara de Comercio", 0.5)
+    put("camara_grupo_empresarial", _digitacion_first_value(form_fields.get("camara_grupo_empresarial"), flat_pairs.get("grupoempresarial")), "Cámara de Comercio", 0.48)
+    put("camara_tipo_localizacion", _digitacion_first_value(form_fields.get("camara_tipo_localizacion"), values.get("empresa_tipo_localizacion")), "Cámara de Comercio", 0.48)
+    put("camara_zona_localizacion", _digitacion_first_value(form_fields.get("camara_zona_localizacion"), values.get("empresa_zona_localizacion")), "Cámara de Comercio", 0.48)
+    for prefix, label in (("contacto_pagos", "contacto pagos"), ("contacto_sst", "contacto SST")):
+        put(f"{prefix}_nombre", form_fields.get(f"{prefix}_nombre"), label, 0.55)
+        put(f"{prefix}_cargo", form_fields.get(f"{prefix}_cargo"), label, 0.55)
+        put(f"{prefix}_correo", form_fields.get(f"{prefix}_correo"), label, 0.58, "email")
+        put(f"{prefix}_direccion", form_fields.get(f"{prefix}_direccion"), label, 0.58)
+        put(f"{prefix}_departamento", form_fields.get(f"{prefix}_departamento"), label, 0.58)
+        put(f"{prefix}_municipio", form_fields.get(f"{prefix}_municipio"), label, 0.58)
+        put(f"{prefix}_telefono", form_fields.get(f"{prefix}_telefono"), label, 0.58, "phone")
+        put(f"{prefix}_extension", form_fields.get(f"{prefix}_extension"), label, 0.45, "digits")
+        put(f"{prefix}_celular", form_fields.get(f"{prefix}_celular"), label, 0.45, "phone")
+
+    put("sede_sucursal", values.get("sucursal"), "formulario sede principal", 0.72)
+    put("sede_nombre", _digitacion_first_value(form_fields.get("sede_principal_nombre"), values.get("razon_social"), "Principal"), "formulario sede principal", 0.72)
+    put(
+        "sede_centro_trabajo_nombre",
+        _digitacion_first_value(
+            form_fields.get("sede_principal_nombre_centro_trabajo"),
+            form_fields.get("nombre_centro_trabajo"),
+            form_fields.get("cen_nombre"),
+            values.get("sede_nombre"),
+            "Principal",
+        ),
+        "formulario sede principal",
+        0.72,
+    )
+    put("sede_codigo", _digitacion_first_value(form_fields.get("sede_principal_codigo"), "1"), "formulario sede principal", 0.72, "digits")
+    put("sede_direccion", values.get("direccion_empresa"), "formulario sede principal", 0.72)
+    put("sede_departamento", values.get("departamento_empresa"), "formulario sede principal", 0.7)
+    put("sede_municipio", values.get("municipio_empresa"), "formulario sede principal", 0.7)
+    zona = normalize_haystack(_digitacion_first_value(form_fields.get("sede_principal_zona"), flat_pairs.get("zonaempleador"), flat_pairs.get("zona")))
+    if zona.startswith("u"):
+        put("sede_zona", "urbana", "formulario sede principal", 0.72)
+    elif zona.startswith("r"):
+        put("sede_zona", "rural", "formulario sede principal", 0.72)
+    put("sede_telefono", _digitacion_first_value(form_fields.get("sede_principal_telefono"), form_fields.get("telefono_empleador"), flat_pairs.get("telefonoprincipalempleador"), flat_pairs.get("telefono")), "formulario sede principal", 0.72, "phone")
+    put("sede_celular", _digitacion_first_value(form_fields.get("sede_principal_celular"), values.get("celular_empresa")), "formulario sede principal", 0.5, "phone")
+    put("sede_fax", _digitacion_first_value(form_fields.get("sede_principal_fax"), flat_pairs.get("fax")), "MDB centro", 0.58, "phone")
+    put("sede_correo", _digitacion_first_value(form_fields.get("sede_principal_correo"), values.get("correo_empresa")), "formulario sede principal", 0.72, "email")
+    put("sede_transporte", _digitacion_first_value(form_fields.get("cen_transporte"), flat_pairs.get("transporte")), "MDB centro", 0.58)
+    put("sede_grado", _digitacion_first_value(form_fields.get("cen_grado"), flat_pairs.get("grado")), "MDB centro", 0.58, "digits")
+    put("sede_tarifa", _digitacion_first_value(form_fields.get("cen_tarifa"), flat_pairs.get("tarifa")), "MDB centro", 0.58)
+    put("sede_tipo_localizacion", _digitacion_first_value(form_fields.get("cen_cod_tipo_loc"), flat_pairs.get("tipolocalizacionct")), "MDB centro", 0.58, "digits")
+    put("sede_contacto", _digitacion_first_value(form_fields.get("cen_contacto"), flat_pairs.get("contactocentro")), "MDB centro", 0.58)
+    put("sede_cargo_contacto", _digitacion_first_value(form_fields.get("cen_cargo_contacto"), flat_pairs.get("cargocontacto")), "MDB centro", 0.58)
+    put("sede_codigo_actividad", values.get("codigo_actividad_economica"), "formulario sede principal", 0.72, "activity")
+    put("sede_clase_riesgo", values.get("clase_riesgo_empresa"), "formulario sede principal", 0.72, "risk")
+    put("sede_numero_trabajadores", values.get("a_numero_inicial_trabajadores_estudiantes"), "formulario sede principal", 0.7, "digits")
+
+    relation_workers = _extract_workers_from_relation_docs(docs, profile)
+    relation_worker_doc = relation_workers[0]["documento"] if relation_workers else ""
+    worker_doc = _digitacion_first_value(
+        _digitacion_record_value(first_record, "documento", "numero_documento", "num_id_trabajador", "numero_de_identificacion"),
+        relation_worker_doc if entry_type == "empresa" else "",
+        profile.get("documento"),
+    )
+    for doc in docs:
+        fields = doc.get("fields") or {}
+        doc_type = str(doc.get("document_type") or "")
+        if doc_type in {"cedula", "formulario_afiliacion", "contrato_contratista_contratante", "eps", "afp", "constancia_afiliacion"}:
+            worker_doc = worker_doc or only_digits(fields.get("representative_document") or fields.get("document_number") or "")
+    put("tipo_documento_afiliado", _digitacion_doc_type(_digitacion_first_value(_digitacion_record_value(first_record, "tipo_documento", "tipo_de_documento"), "CC")), "OCR/documento de identidad", 0.7)
+    put("documento_afiliado", worker_doc, "OCR/documento de identidad", 0.78, "digits")
+
+    name_parts = {
+        "primer_apellido": _digitacion_record_value(first_record, "primer_apellido", "apellido1"),
+        "segundo_apellido": _digitacion_record_value(first_record, "segundo_apellido", "apellido2"),
+        "primer_nombre": _digitacion_record_value(first_record, "primer_nombre", "nombre1"),
+        "segundo_nombre": _digitacion_record_value(first_record, "segundo_nombre", "nombre2"),
+    }
+    full_name = _digitacion_first_value(
+        _digitacion_record_value(first_record, "nombre", "nombre_completo", "trabajador"),
+        profile.get("nombre"),
+    )
+    if not any(name_parts.values()):
+        name_parts.update(_digitacion_split_name(full_name))
+    for key, value in name_parts.items():
+        put(key, value, "OCR/XLSX trabajador", 0.62)
+
+    put("fecha_nacimiento", _digitacion_first_value(
+        _digitacion_record_value(first_record, "fecha_nacimiento", "fecha_de_nacimiento"),
+        _digitacion_label_value(all_text, "Fecha de nacimiento", "Nacimiento"),
+    ), "OCR/XLSX trabajador", 0.64, "date")
+    genero = normalize_text(_digitacion_record_value(first_record, "genero", "sexo")).upper()[:1]
+    put("genero", genero if genero in {"F", "M", "T", "O"} else "", "OCR/XLSX trabajador", 0.6)
+    eps_doc_text = "\n".join(
+        normalize_text(doc.get("ocr_text") or doc.get("text_preview") or "")
+        for doc in docs
+        if doc.get("document_type") in {"certificacion_afiliacion_eps", "afiliacion_eps"}
+    )
+    afp_doc_text = "\n".join(
+        normalize_text(doc.get("ocr_text") or doc.get("text_preview") or "")
+        for doc in docs
+        if doc.get("document_type") in {"certificacion_afiliacion_afp", "afiliacion_afp"}
+    )
+    eps_candidate = _digitacion_first_value(
+        _digitacion_catalog_entity_value(_digitacion_record_value(first_record, "eps", "nombre_eps"), "eps"),
+        _digitacion_catalog_entity_value(flat_pairs.get("eps"), "eps"),
+        _digitacion_catalog_entity_from_text(eps_doc_text, "eps"),
+    )
+    afp_candidate = _digitacion_first_value(
+        _digitacion_catalog_entity_value(_digitacion_record_value(first_record, "afp", "nombre_afp"), "afp"),
+        _digitacion_catalog_entity_value(flat_pairs.get("afp"), "afp"),
+        _digitacion_catalog_entity_from_text(afp_doc_text, "afp"),
+    )
+    put("eps", eps_candidate, "certificación EPS/catálogo", 0.78)
+    put("afp", afp_candidate, "certificación AFP/catálogo", 0.78)
+    put("ibc", _digitacion_first_value(_digitacion_record_value(first_record, "ibc", "ingreso_base_de_cotizacion"), flat_pairs.get("ibc"), flat_pairs.get("ingresomensual")), "XLSX/OCR afiliación", 0.68, "money")
+    put("cargo_actividad", _digitacion_first_value(_digitacion_record_value(first_record, "cargo", "actividad", "ocupacion"), flat_pairs.get("nombre_actividad")), "XLSX/OCR afiliación", 0.62)
+    put("tipo_cotizante", _digitacion_first_value(_digitacion_record_value(first_record, "tipo_cotizante", "afi_tipo_cotizante"), "19" if str(payload.get("entry_type") or "").lower() == "contratista" else "1"), "MDB afi_medio_local", 0.78, "digits")
+    put("subtipo_cotizante", _digitacion_first_value(_digitacion_record_value(first_record, "subtipo_cotizante", "afi_subtipo_cotizante"), DEFAULT_SUBTIPO_COTIZANTE), "MDB afi_medio_local", 0.78, "digits")
+    put("numero_contrato", _digitacion_first_value(profile.get("numero_contrato"), flat_pairs.get("numerocontrato"), flat_pairs.get("numero_contrato")), "contrato/OCR", 0.76, "digits")
+    put("tipo_contrato", _digitacion_contract_type(_digitacion_first_value(flat_pairs.get("tipo_contrato"), _digitacion_label_value(all_text, "Tipo de contrato"))), "contrato/OCR", 0.56)
+    put("fecha_inicio_contrato", _digitacion_first_value(_digitacion_record_value(first_record, "fecha_inicio_contrato", "fecha_inicio"), flat_pairs.get("fecha_inicio_contrato")), "contrato/OCR", 0.66, "date")
+    put("fecha_fin_contrato", _digitacion_first_value(_digitacion_record_value(first_record, "fecha_fin_contrato", "fecha_fin"), flat_pairs.get("fecha_fin_contrato")), "contrato/OCR", 0.66, "date")
+    put("valor_total_contrato", _digitacion_first_value(flat_pairs.get("valor_contrato"), flat_pairs.get("valor_total_contrato")), "contrato/OCR", 0.62, "money")
+    put("valor_mensual_contrato", _digitacion_first_value(_digitacion_record_value(first_record, "valor_mensual"), flat_pairs.get("valor_mensual")), "contrato/OCR", 0.62, "money")
+
+    return {
+        "entry_type": entry_type,
+        "form_target": "contratista" if entry_type == "contratista" else "empresa",
+        "values": values,
+        "sources": sources,
+        "documents_processed": len(docs),
+        "ocr_documents_ok": len(ocr_docs),
+        "updated_at": utc_now(),
+    }
+
+
+DIGITACION_SECTION_KEYS = {
+    "afiliacion": {
+        "tipo_tramite", "tipo_afiliacion", "fecha_radicacion", "fecha_inicio_cobertura",
+        "fecha_recibido_imagine", "sucursal",
+        "razon_social", "nit", "nit_dv", "codigo_actividad_economica", "clase_riesgo_empresa",
+        "direccion_empresa", "municipio_empresa", "departamento_empresa", "correo_empresa",
+        "telefono_empresa", "extension_empresa", "celular_empresa", "actividad_principal_empresa",
+        "empleador_tipo_documento", "numero_radicacion", "tipo_persona",
+        "rep_legal_nombre_completo", "rep_legal_tipo_documento", "rep_legal_numero_documento", "rep_legal_correo",
+        "rep_legal_cargo",
+        "responsable_sede_principal_nombre_completo", "responsable_sede_principal_tipo_documento",
+        "responsable_sede_principal_numero_documento",
+        "a_numero_sedes", "a_numero_centros_trabajo", "a_numero_inicial_trabajadores_estudiantes",
+        "a_valor_total_nomina", "b_numero_sedes", "b_numero_centros_trabajo",
+        "b_numero_total_trabajadores_estudiantes", "b_monto_total_cotizacion", "estado_cuenta_empleador",
+        "numero_contrato", "tipo_contrato",
+        "fecha_inicio_contrato", "fecha_fin_contrato", "valor_total_contrato", "valor_mensual_contrato",
+        "empresa_forma_pago", "empresa_tipo_aportante", "empresa_clase_aportante", "empresa_vinculador_laboral", "empresa_regimen",
+        "empresa_naturaleza", "empresa_clase_sociedad", "empresa_tamano", "empresa_grupo",
+        "empresa_tipo_localizacion", "empresa_zona_localizacion", "empresa_pyme", "empresa_olcsa",
+        "empresa_contratante", "empresa_arl_anterior",
+        "camara_fecha_constitucion", "camara_regimen", "camara_codigo_actividad", "camara_actividad_principal",
+        "camara_olcsa_pyme", "camara_naturaleza", "camara_clase_sociedad", "camara_tamano",
+        "camara_grupo_empresarial", "camara_tipo_localizacion", "camara_zona_localizacion",
+        "contacto_pagos_nombre", "contacto_pagos_cargo", "contacto_pagos_correo", "contacto_pagos_direccion",
+        "contacto_pagos_departamento", "contacto_pagos_municipio", "contacto_pagos_telefono", "contacto_pagos_celular",
+        "contacto_pagos_extension", "contacto_pagos_celular",
+        "contacto_sst_nombre", "contacto_sst_cargo", "contacto_sst_correo", "contacto_sst_direccion",
+        "contacto_sst_departamento", "contacto_sst_municipio", "contacto_sst_telefono", "contacto_sst_celular",
+        "contacto_sst_extension", "contacto_sst_celular",
+    },
+    "sedes": {
+        "sede_sucursal", "sede_nombre", "sede_centro_trabajo_nombre", "sede_codigo", "sede_direccion", "sede_municipio", "sede_departamento",
+        "sede_zona", "sede_telefono", "sede_celular", "sede_fax", "sede_correo", "sede_codigo_actividad",
+        "sede_clase_riesgo", "sede_transporte", "sede_grado", "sede_tarifa",
+        "sede_tipo_localizacion", "sede_numero_trabajadores", "sede_contacto", "sede_cargo_contacto", "sedes_adicionales",
+    },
+    "novedades": {
+        "trabajador_centro_trabajo", "tipo_documento_afiliado", "documento_afiliado",
+        "primer_apellido", "segundo_apellido", "primer_nombre", "segundo_nombre",
+        "fecha_nacimiento", "edad", "genero", "eps", "afp", "ibc", "cargo_actividad",
+        "tipo_cotizante", "subtipo_cotizante", "trabajadores_adicionales",
+    },
+}
+
+DIGITACION_WORKER_KEYS = [
+    "trabajador_centro_trabajo",
+    "tipo_documento_afiliado",
+    "documento_afiliado",
+    "primer_apellido",
+    "segundo_apellido",
+    "primer_nombre",
+    "segundo_nombre",
+    "fecha_nacimiento",
+    "edad",
+    "genero",
+    "tipo_cotizante",
+    "ibc",
+    "cargo_actividad",
+    "eps",
+    "afp",
+]
+
+DIGITACION_REQUIRED_KEYS = {
+    "afiliacion": {
+        "tipo_tramite", "tipo_afiliacion", "fecha_radicacion", "fecha_inicio_cobertura",
+        "fecha_recibido_imagine", "sucursal",
+        "razon_social", "nit", "nit_dv", "codigo_actividad_economica", "clase_riesgo_empresa",
+        "direccion_empresa", "municipio_empresa", "departamento_empresa", "correo_empresa", "telefono_empresa",
+        "empleador_tipo_documento", "rep_legal_nombre_completo", "rep_legal_tipo_documento",
+        "rep_legal_numero_documento", "rep_legal_correo", "rep_legal_cargo",
+        "empresa_tipo_aportante", "empresa_clase_aportante", "empresa_vinculador_laboral",
+        "camara_fecha_constitucion", "camara_regimen", "camara_codigo_actividad", "camara_actividad_principal",
+        "camara_olcsa_pyme", "camara_naturaleza", "camara_clase_sociedad", "camara_tamano",
+        "contacto_pagos_nombre", "contacto_pagos_cargo", "contacto_pagos_correo", "contacto_pagos_direccion",
+        "contacto_pagos_departamento", "contacto_pagos_municipio", "contacto_pagos_telefono",
+        "contacto_sst_nombre", "contacto_sst_cargo", "contacto_sst_correo", "contacto_sst_direccion",
+        "contacto_sst_departamento", "contacto_sst_municipio", "contacto_sst_telefono",
+    },
+    "sedes": {
+        "sede_sucursal", "sede_nombre", "sede_centro_trabajo_nombre", "sede_codigo", "sede_direccion", "sede_municipio", "sede_departamento",
+        "sede_zona", "sede_codigo_actividad", "sede_clase_riesgo", "sede_numero_trabajadores",
+        "sede_telefono", "sede_celular", "sede_transporte", "sede_contacto", "sede_cargo_contacto", "sede_correo",
+        "sede_grado", "sede_tarifa",
+    },
+    "novedades": {
+        "trabajador_centro_trabajo", "tipo_documento_afiliado", "documento_afiliado",
+        "primer_apellido", "primer_nombre", "fecha_nacimiento", "genero",
+        "tipo_cotizante", "ibc", "cargo_actividad", "eps", "afp",
+    },
+}
+
+DIGITACION_REQUIRED_AFILIACION_LEGACY_KEYS: set[str] = set()
+DIGITACION_REQUIRED_TRASLADO_LEGACY_KEYS: set[str] = set()
+
+DIGITACION_ALPHA_KEYS = {
+    "primer_apellido", "segundo_apellido", "primer_nombre", "segundo_nombre",
+    "sede_nombre", "sede_contacto", "sede_cargo_contacto", "arl_anterior",
+    "empresa_arl_anterior", "nuevo_centro_trabajo", "rep_legal_nombre_completo",
+    "rep_legal_cargo", "responsable_sede_principal_nombre_completo",
+    "contacto_pagos_nombre", "contacto_pagos_cargo", "contacto_sst_nombre", "contacto_sst_cargo",
+}
+DIGITACION_SN_KEYS = {"empresa_pyme", "empresa_olcsa", "empresa_contratante", "sede_transporte", "novedad_traslado"}
+DIGITACION_MONEY_KEYS = {"ibc", "nuevo_ibc", "valor_total_contrato", "valor_mensual_contrato", "novedad_valor_anterior", "novedad_valor_nuevo"}
+DIGITACION_THREE_DIGIT_KEYS = {
+    "empresa_forma_pago", "empresa_tipo_aportante", "empresa_clase_aportante", "empresa_vinculador_laboral", "empresa_regimen",
+    "empresa_naturaleza", "empresa_clase_sociedad", "empresa_tamano", "empresa_grupo",
+    "empresa_tipo_localizacion", "sede_grado", "sede_tipo_localizacion", "novedad_dias",
+}
+DIGITACION_LEGACY_COUNT_KEYS = {
+    "a_numero_sedes", "a_numero_centros_trabajo", "a_numero_inicial_trabajadores_estudiantes",
+    "sede_numero_trabajadores", "b_numero_sedes", "b_numero_centros_trabajo", "b_numero_total_trabajadores_estudiantes",
+}
+DIGITACION_CLASE_AFILIACION_VALUES = {
+    "primera vez": "Primera vez",
+    "traslado": "Traslado",
+    "independiente contratista": "Independiente - Contratista",
+    "independiente empresa no afiliada": "Independiente - Contratista",
+}
+DIGITACION_CLASE_AFILIACION_ALIASES = {
+    "individual": "Independiente - Contratista",
+    "contratista": "Independiente - Contratista",
+    "independiente": "Independiente - Contratista",
+    "independiente empresa no afiliada": "Independiente - Contratista",
+    "empresa no afiliada": "Independiente - Contratista",
+    "independiente contratista": "Independiente - Contratista",
+    "colectiva": "Primera vez",
+    "empresa": "Primera vez",
+    "primera": "Primera vez",
+    "primera vez": "Primera vez",
+    "traslado": "Traslado",
+}
+DIGITACION_FIELD_LIMITS = {
+    "razon_social": AFILEGA_MDB_FIELD_LIMITS["empleador_razon_social"],
+    "empleador_tipo_documento": AFILEGA_MDB_FIELD_LIMITS["empleador_tipo_documento"],
+    "nit": AFILEGA_MDB_FIELD_LIMITS["empleador_numero_documento_nit"],
+    "codigo_actividad_economica": AFILEGA_MDB_FIELD_LIMITS["a_codigo_actividad_economica_principal"],
+    "direccion_empresa": AFILEGA_MDB_FIELD_LIMITS["sede_principal_direccion"],
+    "correo_empresa": AFILEGA_MDB_FIELD_LIMITS["sede_principal_correo"],
+    "telefono_empresa": AFILEGA_MDB_FIELD_LIMITS["sede_principal_telefono"],
+    "extension_empresa": 6,
+    "celular_empresa": 10,
+    "actividad_principal_empresa": 250,
+    "numero_radicacion": 30,
+    "sucursal": 40,
+    "tipo_persona": 30,
+    "rep_legal_nombre_completo": AFILEGA_MDB_FIELD_LIMITS["rep_legal_nombre_completo"],
+    "rep_legal_tipo_documento": AFILEGA_MDB_FIELD_LIMITS["rep_legal_tipo_documento"],
+    "rep_legal_numero_documento": AFILEGA_MDB_FIELD_LIMITS["rep_legal_numero_documento"],
+    "rep_legal_correo": AFILEGA_MDB_FIELD_LIMITS["sede_principal_correo"],
+    "rep_legal_cargo": 80,
+    "responsable_sede_principal_nombre_completo": AFILEGA_MDB_FIELD_LIMITS["rep_legal_nombre_completo"],
+    "responsable_sede_principal_tipo_documento": AFILEGA_MDB_FIELD_LIMITS["rep_legal_tipo_documento"],
+    "responsable_sede_principal_numero_documento": AFILEGA_MDB_FIELD_LIMITS["rep_legal_numero_documento"],
+    "a_numero_sedes": 3,
+    "a_numero_centros_trabajo": 3,
+    "a_numero_inicial_trabajadores_estudiantes": 6,
+    "a_valor_total_nomina": 20,
+    "b_numero_sedes": 3,
+    "b_numero_centros_trabajo": 3,
+    "b_numero_total_trabajadores_estudiantes": 6,
+    "b_monto_total_cotizacion": 20,
+    "estado_cuenta_empleador": 40,
+    "tipo_documento_afiliado": AFILEGA_MDB_WORKER_FIELD_LIMITS["tipo_documento"],
+    "documento_afiliado": AFILEGA_MDB_WORKER_FIELD_LIMITS["documento"],
+    "primer_apellido": AFILEGA_MDB_WORKER_FIELD_LIMITS["primer_apellido"],
+    "segundo_apellido": AFILEGA_MDB_WORKER_FIELD_LIMITS["segundo_apellido"],
+    "primer_nombre": AFILEGA_MDB_WORKER_FIELD_LIMITS["primer_nombre"],
+    "segundo_nombre": AFILEGA_MDB_WORKER_FIELD_LIMITS["segundo_nombre"],
+    "eps": AFILEGA_MDB_WORKER_FIELD_LIMITS["eps"],
+    "afp": AFILEGA_MDB_WORKER_FIELD_LIMITS["afp"],
+    "cargo_actividad": AFILEGA_MDB_WORKER_FIELD_LIMITS["cargo"],
+    "tipo_cotizante": AFILEGA_MDB_WORKER_FIELD_LIMITS["tipo_cotizante"],
+    "subtipo_cotizante": AFILEGA_MDB_WORKER_FIELD_LIMITS["subtipo_cotizante"],
+    "sede_nombre": AFILEGA_MDB_FIELD_LIMITS["sede_principal_nombre"],
+    "sede_centro_trabajo_nombre": 60,
+    "sede_codigo": AFILEGA_MDB_FIELD_LIMITS["sede_principal_codigo"],
+    "sede_direccion": AFILEGA_MDB_FIELD_LIMITS["sede_principal_direccion"],
+    "sede_telefono": AFILEGA_MDB_FIELD_LIMITS["sede_principal_telefono"],
+    "sede_celular": 10,
+    "sede_numero_trabajadores": 6,
+    "sede_fax": AFILEGA_MDB_WORKER_FIELD_LIMITS["sede_fax"],
+    "sede_correo": AFILEGA_MDB_FIELD_LIMITS["sede_principal_correo"],
+    "sede_codigo_actividad": AFILEGA_MDB_FIELD_LIMITS["a_codigo_actividad_economica_principal"],
+    "sede_transporte": AFILEGA_MDB_WORKER_FIELD_LIMITS["sede_transporte"],
+    "sede_grado": AFILEGA_MDB_WORKER_FIELD_LIMITS["sede_grado"],
+    "sede_tarifa": AFILEGA_MDB_WORKER_FIELD_LIMITS["sede_tarifa"],
+    "sede_tipo_localizacion": AFILEGA_MDB_WORKER_FIELD_LIMITS["sede_tipo_localizacion"],
+    "sede_contacto": AFILEGA_MDB_WORKER_FIELD_LIMITS["sede_contacto"],
+    "sede_cargo_contacto": AFILEGA_MDB_WORKER_FIELD_LIMITS["sede_cargo_contacto"],
+    "tipo_contrato": 50,
+    "numero_contrato": 50,
+    "valor_total_contrato": 20,
+    "valor_mensual_contrato": 20,
+    "nuevo_centro_trabajo": AFILEGA_MDB_WORKER_FIELD_LIMITS["sede_contacto"],
+    "nuevo_codigo_ocupacion": 10,
+    "novedad_contrato": 50,
+    "novedad_estado": 1,
+    "novedad_autoliquidacion": 1,
+    "novedad_origen": 1,
+    "novedad_valor_anterior": 20,
+    "novedad_valor_nuevo": 20,
+    "novedad_traslado": 1,
+    **{
+        key: 80 for key in (
+            "camara_regimen", "camara_olcsa_pyme", "camara_naturaleza", "camara_clase_sociedad",
+            "camara_tamano", "camara_grupo_empresarial", "camara_tipo_localizacion",
+            "contacto_pagos_nombre", "contacto_pagos_cargo", "contacto_sst_nombre", "contacto_sst_cargo",
+        )
+    },
+    "camara_codigo_actividad": AFILEGA_MDB_FIELD_LIMITS["a_codigo_actividad_economica_principal"],
+    "camara_actividad_principal": 250,
+    "camara_zona_localizacion": 1,
+    "contacto_pagos_correo": AFILEGA_MDB_FIELD_LIMITS["sede_principal_correo"],
+    "contacto_sst_correo": AFILEGA_MDB_FIELD_LIMITS["sede_principal_correo"],
+    "contacto_pagos_direccion": AFILEGA_MDB_FIELD_LIMITS["sede_principal_direccion"],
+    "contacto_sst_direccion": AFILEGA_MDB_FIELD_LIMITS["sede_principal_direccion"],
+    "contacto_pagos_telefono": AFILEGA_MDB_FIELD_LIMITS["sede_principal_telefono"],
+    "contacto_sst_telefono": AFILEGA_MDB_FIELD_LIMITS["sede_principal_telefono"],
+    "contacto_pagos_extension": 6,
+    "contacto_sst_extension": 6,
+    "contacto_pagos_celular": 10,
+    "contacto_sst_celular": 10,
+    **{key: AFILEGA_MDB_FIELD_LIMITS[key] for key in (
+        "empresa_forma_pago", "empresa_tipo_aportante", "empresa_vinculador_laboral",
+        "empresa_regimen", "empresa_naturaleza", "empresa_clase_sociedad", "empresa_tamano",
+        "empresa_grupo", "empresa_tipo_localizacion", "empresa_zona_localizacion",
+        "empresa_pyme", "empresa_olcsa", "empresa_contratante", "empresa_arl_anterior",
+    )},
+}
+
+
+def _digitacion_clase_afiliacion(value: Any, entry_type: str = "empresa") -> str:
+    raw = normalize_text(value)
+    normalized = normalize_haystack(raw).replace("–", "-")
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized).strip()
+    if normalized in DIGITACION_CLASE_AFILIACION_VALUES:
+        return DIGITACION_CLASE_AFILIACION_VALUES[normalized]
+    if normalized in DIGITACION_CLASE_AFILIACION_ALIASES:
+        return DIGITACION_CLASE_AFILIACION_ALIASES[normalized]
+    if entry_type == "contratista":
+        return "Independiente - Contratista"
+    return "Primera vez"
+
+
+def _digitacion_section_for_key(key: str) -> str:
+    for section, keys in DIGITACION_SECTION_KEYS.items():
+        if key in keys:
+            return section
+    return ""
+
+
+def _digitacion_error(errors: List[Dict[str, Any]], key: str, message: str, severity: str = "blocker") -> None:
+    errors.append({
+        "key": key,
+        "section": _digitacion_section_for_key(key),
+        "severity": severity,
+        "message": message,
+    })
+
+
+def _digitacion_document_number_error(doc_type: Any, document_value: Any, field_label: str = "documento_afiliado") -> str:
+    raw_value = normalize_text(document_value)
+    digits = only_digits(raw_value)
+    if not raw_value:
+        return ""
+    if digits != raw_value:
+        return f"{field_label} debe ser numérico."
+    normalized_type = normalize_text(doc_type).upper()
+    if normalized_type in {"CC", "TI"}:
+        if len(digits) > 6 and len(digits) < 11 and len(digits) != 9:
+            return ""
+        return f"{field_label} debe tener 7, 8 o 10 dígitos cuando tipo_documento_afiliado es {normalized_type}."
+    if normalized_type == "CE":
+        return "" if len(digits) < 6 else f"{field_label} debe tener menos de 6 dígitos cuando tipo_documento_afiliado es CE."
+    return "" if re.fullmatch(r"\d{5,15}", digits) else f"{field_label} debe tener entre 5 y 15 dígitos."
+
+
+def _digitacion_section_has_data(values: Dict[str, Any], section: str) -> bool:
+    return any(normalize_text(values.get(key)) for key in DIGITACION_SECTION_KEYS.get(section, set()))
+
+
+def _digitacion_is_traslado(values: Dict[str, Any]) -> bool:
+    return "traslado" in normalize_haystack(values.get("tipo_tramite")) or "traslado" in normalize_haystack(values.get("tipo_afiliacion"))
+
+
+def _digitacion_is_contratista(values: Dict[str, Any]) -> bool:
+    value = normalize_haystack(values.get("tipo_afiliacion"))
+    return "contratista" in value or "independiente" in value
+
+
+def _digitacion_required_sections(values: Dict[str, Any], require_all: bool) -> Dict[str, set[str]]:
+    required: Dict[str, set[str]] = {"afiliacion": set(DIGITACION_REQUIRED_KEYS["afiliacion"])}
+    if require_all or _digitacion_section_has_data(values, "sedes"):
+        required["sedes"] = set(DIGITACION_REQUIRED_KEYS["sedes"])
+    if _digitacion_is_contratista(values):
+        required["afiliacion"].update(DIGITACION_REQUIRED_AFILIACION_LEGACY_KEYS)
+        return required
+    if _digitacion_is_traslado(values):
+        required["afiliacion"].update(DIGITACION_REQUIRED_TRASLADO_LEGACY_KEYS)
+        required["novedades"] = set(DIGITACION_REQUIRED_KEYS["novedades"])
+    else:
+        required["afiliacion"].update(DIGITACION_REQUIRED_AFILIACION_LEGACY_KEYS)
+        if require_all or _digitacion_section_has_data(values, "novedades"):
+            required["novedades"] = set(DIGITACION_REQUIRED_KEYS["novedades"])
+    if required.get("novedades") and _digitacion_parse_trabajadores(values.get("trabajadores_adicionales")):
+        required["novedades"] = set()
+    return required
+
+
+def _digitacion_is_date(value: Any) -> bool:
+    return bool(_digitacion_input_date(value))
+
+
+def _digitacion_decimal(value: Any) -> Optional[Decimal]:
+    text = normalize_text(value).replace("$", "").replace(" ", "").replace(",", "")
+    if not text:
+        return None
+    try:
+        return Decimal(text)
+    except InvalidOperation:
+        return None
+
+
+def _digitacion_risk_number(value: Any) -> str:
+    roman = {"I": "1", "II": "2", "III": "3", "IV": "4", "V": "5"}
+    text = normalize_text(value).upper()
+    return roman.get(text, only_digits(text)[:1])
+
+
+DIGITACION_RISK_TARIFFS = {
+    "1": "0.522",
+    "2": "1.044",
+    "3": "2.436",
+    "4": "4.360",
+    "5": "6.960",
+}
+
+
+def _digitacion_tariff_for_grade(value: Any) -> str:
+    return DIGITACION_RISK_TARIFFS.get(_digitacion_risk_number(value), "")
+
+
+_DIGITACION_ACTIVITY_CATALOG_CACHE: Optional[Dict[str, Dict[str, Any]]] = None
+_DIGITACION_CAMARA_ACTIVITY_CATALOG_CACHE: Optional[Dict[str, Dict[str, Any]]] = None
+_DIGITACION_TIPO_COTIZANTE_CATALOG_CACHE: Optional[Dict[str, Dict[str, Any]]] = None
+_DIGITACION_VINCULADOR_LABORAL_CATALOG_CACHE: Optional[Dict[str, Dict[str, Any]]] = None
+
+
+def _digitacion_mdb_value_catalogs() -> Dict[str, List[str]]:
+    global _DIGITACION_MDB_VALUE_CATALOGS_CACHE
+    if _DIGITACION_MDB_VALUE_CATALOGS_CACHE is not None:
+        return _DIGITACION_MDB_VALUE_CATALOGS_CACHE
+    try:
+        parsed = json.loads(AFILEGA_MDB_VALUE_CATALOGS_PATH.read_text(encoding="utf-8"))
+        catalogs = parsed.get("catalogs") if isinstance(parsed, dict) else parsed
+        if isinstance(catalogs, dict):
+            _DIGITACION_MDB_VALUE_CATALOGS_CACHE = {
+                str(key): [normalize_text(item) for item in value if normalize_text(item)]
+                for key, value in catalogs.items()
+                if isinstance(value, list)
+            }
+        else:
+            _DIGITACION_MDB_VALUE_CATALOGS_CACHE = {}
+    except Exception:
+        _DIGITACION_MDB_VALUE_CATALOGS_CACHE = {}
+    return _DIGITACION_MDB_VALUE_CATALOGS_CACHE
+
+
+def _digitacion_value_in_mdb_catalog(key: str, value: Any) -> bool:
+    if key == "tipo_cotizante" and _digitacion_tipo_cotizante_catalog():
+        return True
+    if key == "empresa_vinculador_laboral" and _digitacion_vinculador_laboral_catalog():
+        return True
+    catalog = _digitacion_mdb_value_catalogs().get(key) or []
+    if not catalog:
+        return True
+    current = normalize_text(value).upper()
+    allowed = {normalize_text(item).upper() for item in catalog if normalize_text(item)}
+    return current in allowed
+
+
+def _digitacion_activity_catalog() -> Dict[str, Dict[str, Any]]:
+    global _DIGITACION_ACTIVITY_CATALOG_CACHE
+    if _DIGITACION_ACTIVITY_CATALOG_CACHE is not None:
+        return _DIGITACION_ACTIVITY_CATALOG_CACHE
+    catalog: Dict[str, Dict[str, Any]] = {}
+    try:
+        parsed = json.loads(ACTIVITY_RISK_CATALOG_PATH.read_text(encoding="utf-8"))
+        if isinstance(parsed, dict):
+            catalog = {only_digits(key)[-7:]: value for key, value in parsed.items() if only_digits(key)}
+    except Exception:
+        catalog = {}
+    if catalog:
+        _DIGITACION_ACTIVITY_CATALOG_CACHE = catalog
+        return catalog
+    path = Path(__file__).resolve().parents[2] / "frontend-nova" / "digitacion-catalogs.js"
+    try:
+        text = path.read_text(encoding="utf-8")
+        match = re.search(r"ACTIVITY_RISK_CATALOG\s*=\s*(\{.*?\});", text, flags=re.DOTALL)
+        if match:
+            parsed = json.loads(match.group(1))
+            if isinstance(parsed, dict):
+                catalog = {only_digits(key)[-7:]: value for key, value in parsed.items() if only_digits(key)}
+    except Exception:
+        catalog = {}
+    _DIGITACION_ACTIVITY_CATALOG_CACHE = catalog
+    return catalog
+
+
+def _digitacion_activity_profile(value: Any) -> Optional[Dict[str, Any]]:
+    code = only_digits(value)[-7:]
+    return _digitacion_activity_catalog().get(code) if code else None
+
+
+def _digitacion_camara_activity_catalog() -> Dict[str, Dict[str, Any]]:
+    global _DIGITACION_CAMARA_ACTIVITY_CATALOG_CACHE
+    if _DIGITACION_CAMARA_ACTIVITY_CATALOG_CACHE is not None:
+        return _DIGITACION_CAMARA_ACTIVITY_CATALOG_CACHE
+    catalog: Dict[str, Dict[str, Any]] = {}
+    try:
+        parsed = json.loads(CAMARA_COMERCIO_ACTIVITY_CATALOG_PATH.read_text(encoding="utf-8"))
+        if isinstance(parsed, dict):
+            catalog = {only_digits(key)[-7:]: value for key, value in parsed.items() if only_digits(key)}
+    except Exception:
+        catalog = {}
+    if catalog:
+        _DIGITACION_CAMARA_ACTIVITY_CATALOG_CACHE = catalog
+        return catalog
+    path = Path(__file__).resolve().parents[2] / "frontend-nova" / "camara-comercio-catalog.js"
+    try:
+        text = path.read_text(encoding="utf-8")
+        match = re.search(r"CAMARA_COMERCIO_ACTIVITY_CATALOG\s*=\s*(\{.*?\});", text, flags=re.DOTALL)
+        if match:
+            parsed = json.loads(match.group(1))
+            if isinstance(parsed, dict):
+                catalog = {only_digits(key)[-7:]: value for key, value in parsed.items() if only_digits(key)}
+    except Exception:
+        catalog = {}
+    _DIGITACION_CAMARA_ACTIVITY_CATALOG_CACHE = catalog
+    return catalog
+
+
+def _digitacion_camara_activity_profile(value: Any) -> Optional[Dict[str, Any]]:
+    code = only_digits(value)
+    return _digitacion_camara_activity_catalog().get(code) if code else None
+
+
+def _digitacion_tipo_cotizante_catalog() -> Dict[str, Dict[str, Any]]:
+    global _DIGITACION_TIPO_COTIZANTE_CATALOG_CACHE
+    if _DIGITACION_TIPO_COTIZANTE_CATALOG_CACHE is not None:
+        return _DIGITACION_TIPO_COTIZANTE_CATALOG_CACHE
+    catalog: Dict[str, Dict[str, Any]] = {}
+    try:
+        parsed = json.loads(TIPO_COTIZANTE_TRABAJADORES_CATALOG_PATH.read_text(encoding="utf-8"))
+        if isinstance(parsed, dict):
+            catalog = {only_digits(key): value for key, value in parsed.items() if only_digits(key)}
+    except Exception:
+        catalog = {}
+    _DIGITACION_TIPO_COTIZANTE_CATALOG_CACHE = catalog
+    return catalog
+
+
+def _digitacion_vinculador_laboral_catalog() -> Dict[str, Dict[str, Any]]:
+    global _DIGITACION_VINCULADOR_LABORAL_CATALOG_CACHE
+    if _DIGITACION_VINCULADOR_LABORAL_CATALOG_CACHE is not None:
+        return _DIGITACION_VINCULADOR_LABORAL_CATALOG_CACHE
+    catalog: Dict[str, Dict[str, Any]] = {}
+    try:
+        parsed = json.loads(VINCULADOR_LABORAL_CONTRATANTE_CATALOG_PATH.read_text(encoding="utf-8"))
+        if isinstance(parsed, dict):
+            catalog = {only_digits(key): value for key, value in parsed.items() if only_digits(key)}
+    except Exception:
+        catalog = {}
+    _DIGITACION_VINCULADOR_LABORAL_CATALOG_CACHE = catalog
+    return catalog
+
+
+def _digitacion_parse_sedes_adicionales(value: Any) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    for line in str(value or "").splitlines():
+        parts = [part.strip() for part in line.split("|")]
+        if len(parts) < 6:
+            continue
+        if len(parts) >= 20:
+            (
+                codigo, nombre, sucursal, direccion, departamento, municipio, zona, telefono, celular, fax,
+                correo, codigo_actividad, riesgo, trabajadores, transporte, grado, tarifa, tipo_localizacion,
+                contacto, cargo_contacto,
+            ) = parts[:20]
+        else:
+            codigo, nombre, direccion, municipio, departamento, riesgo = parts[:6]
+            grado = parts[6] if len(parts) > 6 else riesgo
+            tarifa = parts[7] if len(parts) > 7 else ""
+            trabajadores = parts[8] if len(parts) > 8 else ""
+            sucursal = zona = telefono = celular = fax = correo = codigo_actividad = transporte = tipo_localizacion = contacto = cargo_contacto = ""
+        grado_num = _digitacion_risk_number(grado)
+        zona_norm = normalize_haystack(zona)
+        rows.append({
+            "codigo": codigo,
+            "nombre": nombre,
+            "sucursal": sucursal,
+            "direccion": direccion,
+            "municipio": municipio,
+            "departamento": departamento,
+            "zona": zona,
+            "telefono": only_digits(telefono),
+            "celular": only_digits(celular),
+            "fax": only_digits(fax),
+            "correo": normalize_text(correo).lower(),
+            "codigo_actividad": only_digits(codigo_actividad),
+            "riesgo": riesgo,
+            "clase": _digitacion_risk_number(riesgo),
+            "grado": grado_num,
+            "tarifa": tarifa or _digitacion_tariff_for_grade(grado_num),
+            "trabajadores": only_digits(trabajadores),
+            "transporte": normalize_text(transporte).upper(),
+            "tipo_localizacion": only_digits(tipo_localizacion),
+            "contacto": contacto,
+            "cargo_contacto": cargo_contacto,
+            "cen_sucursal": sucursal,
+            "cen_codigo": codigo,
+            "cen_nombre": nombre,
+            "cen_direccion": direccion,
+            "cen_ciudad": municipality_code(municipio),
+            "cen_departamento": department_code(departamento),
+            "cen_zona": "U" if zona_norm.startswith("urb") else "R" if zona_norm.startswith("rur") else normalize_text(zona).upper(),
+            "cen_telefono": only_digits(telefono),
+            "cen_celular": only_digits(celular),
+            "cen_fax": only_digits(fax),
+            "cen_email": normalize_text(correo).lower(),
+            "cen_actividad": only_digits(codigo_actividad),
+            "cen_clase": _digitacion_risk_number(riesgo),
+            "cen_grado": grado_num,
+            "cen_tarifa": tarifa or _digitacion_tariff_for_grade(grado_num),
+            "cen_numero_trabajadores": only_digits(trabajadores),
+            "cen_transporte": normalize_text(transporte).upper(),
+            "cen_cod_tipo_loc": only_digits(tipo_localizacion),
+            "cen_contacto": contacto,
+            "cen_cargo_contacto": cargo_contacto,
+        })
+    return rows
+
+
+def _digitacion_normalize_birth_digits(value: Any) -> str:
+    normalized = _digitacion_input_date(value)
+    if normalized:
+        return only_digits(normalized)
+    return only_digits(value)[:8]
+
+
+def _digitacion_age_from_birth(value: Any) -> str:
+    normalized = _digitacion_input_date(value)
+    if not normalized:
+        return ""
+    try:
+        return str(_age_years(datetime.strptime(normalized, "%Y-%m-%d")))
+    except Exception:
+        return ""
+
+
+def _digitacion_parse_trabajadores(value: Any) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    for line in str(value or "").splitlines():
+        parts = [part.strip() for part in line.split("|")]
+        if len(parts) < 15:
+            continue
+        row = dict(zip(DIGITACION_WORKER_KEYS, parts[:15]))
+        row["documento_afiliado"] = only_digits(row.get("documento_afiliado"))
+        row["fecha_nacimiento"] = _digitacion_normalize_birth_digits(row.get("fecha_nacimiento"))
+        row["edad"] = only_digits(row.get("edad")) or _digitacion_age_from_birth(row.get("fecha_nacimiento"))
+        row["cargo_actividad"] = _digitacion_cargo_catalog_code(row.get("cargo_actividad"))
+        rows.append(row)
+    return rows
+
+
+def _digitacion_current_worker(values: Dict[str, Any]) -> Dict[str, str]:
+    row = {key: normalize_text(values.get(key)) for key in DIGITACION_WORKER_KEYS}
+    row["documento_afiliado"] = only_digits(row.get("documento_afiliado"))
+    row["fecha_nacimiento"] = _digitacion_normalize_birth_digits(row.get("fecha_nacimiento"))
+    row["edad"] = only_digits(row.get("edad")) or _digitacion_age_from_birth(row.get("fecha_nacimiento"))
+    row["cargo_actividad"] = _digitacion_cargo_catalog_code(row.get("cargo_actividad"))
+    return row
+
+
+def _digitacion_worker_has_data(row: Dict[str, Any]) -> bool:
+    return any(
+        normalize_text(row.get(key))
+        for key in DIGITACION_WORKER_KEYS
+        if key not in {"trabajador_centro_trabajo", "edad"}
+    )
+
+
+def _digitacion_worker_rows(values: Dict[str, Any]) -> List[Dict[str, str]]:
+    rows = _digitacion_parse_trabajadores(values.get("trabajadores_adicionales"))
+    current = _digitacion_current_worker(values)
+    if _digitacion_worker_has_data(current):
+        rows.append(current)
+    return rows
+
+
+def _digitacion_expected_workers_by_center(values: Dict[str, Any]) -> List[Dict[str, Any]]:
+    centers: List[Dict[str, Any]] = []
+    main_code = normalize_text(values.get("sede_codigo") or "1") or "1"
+    main_expected = only_digits(values.get("sede_numero_trabajadores"))
+    if main_expected:
+        centers.append({
+            "code": main_code,
+            "expected": int(main_expected),
+            "key": "sede_numero_trabajadores",
+            "label": f"Centro {main_code}",
+        })
+    for index, row in enumerate(_digitacion_parse_sedes_adicionales(values.get("sedes_adicionales")), start=2):
+        code = normalize_text(row.get("codigo") or str(index))
+        expected = only_digits(row.get("trabajadores"))
+        if not code or not expected:
+            continue
+        label = f"Centro {code}"
+        if normalize_text(row.get("nombre")):
+            label = f"{label} · {normalize_text(row.get('nombre'))}"
+        centers.append({
+            "code": code,
+            "expected": int(expected),
+            "key": "sedes_adicionales",
+            "label": label,
+        })
+    return centers
+
+
+def _digitacion_legacy_worker(row: Dict[str, Any], default_subtipo: Any = "") -> Dict[str, str]:
+    return {
+        "afi_tipoid": normalize_text(row.get("tipo_documento_afiliado")).upper(),
+        "afi_nroid": only_digits(row.get("documento_afiliado")),
+        "afi_centro_trabajo": normalize_text(row.get("trabajador_centro_trabajo")),
+        "afi_apellido1": normalize_text(row.get("primer_apellido")),
+        "afi_apellido2": normalize_text(row.get("segundo_apellido")),
+        "afi_nombre1": normalize_text(row.get("primer_nombre")),
+        "afi_nombre2": normalize_text(row.get("segundo_nombre")),
+        "afi_fecha_nacimiento": _digitacion_normalize_birth_digits(row.get("fecha_nacimiento")),
+        "afi_edad": only_digits(row.get("edad")) or _digitacion_age_from_birth(row.get("fecha_nacimiento")),
+        "afi_genero": normalize_text(row.get("genero")).upper(),
+        "afi_ibc": normalize_text(row.get("ibc")),
+        "afi_cod_cargo": _digitacion_cargo_catalog_code(row.get("cargo_actividad")),
+        "afi_cod_eps": normalize_text(row.get("eps")),
+        "afi_cod_afp": normalize_text(row.get("afp")),
+        "afi_tipo_cotizante": normalize_text(row.get("tipo_cotizante")),
+        "afi_subtipo_cotizante": normalize_text(row.get("subtipo_cotizante") or default_subtipo),
+    }
+
+
+def _digitacion_legacy_mdb_payload(values: Dict[str, Any]) -> Dict[str, Any]:
+    dept_empresa = department_code(values.get("departamento_empresa"))
+    mun_empresa = municipality_code(values.get("municipio_empresa"))
+    dept_sede = department_code(values.get("sede_departamento"))
+    mun_sede = municipality_code(values.get("sede_municipio"))
+    sede_zona = normalize_haystack(values.get("sede_zona"))
+    trabajadores = [
+        _digitacion_legacy_worker(row, values.get("subtipo_cotizante"))
+        for row in _digitacion_worker_rows(values)
+    ]
+    trabajador_principal = trabajadores[0] if trabajadores else {}
+    return {
+        "source": f"Afiliaciones.mdb v{AFILEGA_MDB_VERSION}",
+        "formulario": {
+            "tipo_tramite": normalize_text(values.get("tipo_tramite")),
+            "tipo_afiliacion": normalize_text(values.get("tipo_afiliacion")),
+            "numero_radicacion": normalize_text(values.get("numero_radicacion")),
+            "fecha_radicacion": normalize_text(values.get("fecha_radicacion")),
+            "fecha_inicio_cobertura": normalize_text(values.get("fecha_inicio_cobertura")),
+            "fecha_recibido_imagine": normalize_text(values.get("fecha_recibido_imagine")),
+            "sucursal": normalize_text(values.get("sucursal")),
+            "tipo_persona": normalize_text(values.get("tipo_persona")),
+            "a_numero_sedes": only_digits(values.get("a_numero_sedes")),
+            "a_numero_centros_trabajo": only_digits(values.get("a_numero_centros_trabajo")),
+            "a_numero_inicial_trabajadores_estudiantes": only_digits(values.get("a_numero_inicial_trabajadores_estudiantes")),
+            "a_valor_total_nomina": normalize_text(values.get("a_valor_total_nomina")),
+            "b_numero_sedes": only_digits(values.get("b_numero_sedes")),
+            "b_numero_centros_trabajo": only_digits(values.get("b_numero_centros_trabajo")),
+            "b_numero_total_trabajadores_estudiantes": only_digits(values.get("b_numero_total_trabajadores_estudiantes")),
+            "b_monto_total_cotizacion": normalize_text(values.get("b_monto_total_cotizacion")),
+            "estado_cuenta_empleador": normalize_text(values.get("estado_cuenta_empleador")),
+        },
+        "empresa": {
+            "emp_tipoid": _digitacion_legacy_doc_type(values.get("empleador_tipo_documento") or "NIT"),
+            "emp_nit": only_digits(values.get("nit")),
+            "emp_digito": normalize_text(values.get("nit_dv")) or calculate_nit_dv(values.get("nit")),
+            "emp_razonsocial": normalize_text(values.get("razon_social")),
+            "emp_departamento": dept_empresa,
+            "emp_ciudad": mun_empresa,
+            "emp_direccion": normalize_text(values.get("direccion_empresa")),
+            "emp_email": normalize_text(values.get("correo_empresa")).lower(),
+            "emp_telefono": only_digits(values.get("telefono_empresa")),
+            "emp_extension": only_digits(values.get("extension_empresa")),
+            "emp_celular": only_digits(values.get("celular_empresa")),
+            "emp_actividad": only_digits(values.get("codigo_actividad_economica")),
+            "emp_actividad_principal": normalize_text(values.get("actividad_principal_empresa")),
+            "emp_clase": _digitacion_risk_number(values.get("clase_riesgo_empresa")),
+            "emp_forma_pago": only_digits(values.get("empresa_forma_pago")),
+            "emp_aportante": only_digits(values.get("empresa_tipo_aportante")),
+            "emp_clase_aportante": only_digits(values.get("empresa_clase_aportante")),
+            "emp_vinculador": only_digits(values.get("empresa_vinculador_laboral")),
+            "emp_regimen": only_digits(values.get("empresa_regimen")),
+            "emp_cod_naturaleza": only_digits(values.get("empresa_naturaleza")),
+            "emp_cod_clase_soc": only_digits(values.get("empresa_clase_sociedad")),
+            "emp_cod_tam_empresa": only_digits(values.get("empresa_tamano")),
+            "emp_cod_grupo_emp": only_digits(values.get("empresa_grupo")),
+            "emp_cod_tipo_loc": only_digits(values.get("empresa_tipo_localizacion")),
+            "emp_cod_zona_loc": normalize_text(values.get("empresa_zona_localizacion")).upper(),
+            "emp_pyme": normalize_text(values.get("empresa_pyme")).upper(),
+            "emp_olcsa": normalize_text(values.get("empresa_olcsa")).upper(),
+            "bln_contratante": normalize_text(values.get("empresa_contratante")).upper(),
+            "emp_arp": normalize_text(values.get("empresa_arl_anterior")),
+        },
+        "representante_legal": {
+            "rep_legal_nombre_completo": normalize_text(values.get("rep_legal_nombre_completo")),
+            "rep_legal_tipo_documento": normalize_text(values.get("rep_legal_tipo_documento")).upper(),
+            "rep_legal_numero_documento": only_digits(values.get("rep_legal_numero_documento")),
+            "rep_legal_correo": normalize_text(values.get("rep_legal_correo")).lower(),
+            "rep_legal_cargo": normalize_text(values.get("rep_legal_cargo")),
+        },
+        "camara_comercio": {
+            "fecha_constitucion": normalize_text(values.get("camara_fecha_constitucion")),
+            "regimen": normalize_text(values.get("camara_regimen")),
+            "codigo_actividad": only_digits(values.get("camara_codigo_actividad")),
+            "actividad_principal": normalize_text(values.get("camara_actividad_principal")),
+            "olcsa_pyme": normalize_text(values.get("camara_olcsa_pyme")),
+            "naturaleza": normalize_text(values.get("camara_naturaleza")),
+            "clase_sociedad": normalize_text(values.get("camara_clase_sociedad")),
+            "tamano": normalize_text(values.get("camara_tamano")),
+            "grupo_empresarial": normalize_text(values.get("camara_grupo_empresarial")),
+            "tipo_localizacion": normalize_text(values.get("camara_tipo_localizacion")),
+            "zona_localizacion": normalize_text(values.get("camara_zona_localizacion")).upper(),
+        },
+        "contacto_pagos": {
+            "nombre": normalize_text(values.get("contacto_pagos_nombre")),
+            "cargo": normalize_text(values.get("contacto_pagos_cargo")),
+            "correo": normalize_text(values.get("contacto_pagos_correo")).lower(),
+            "direccion": normalize_text(values.get("contacto_pagos_direccion")),
+            "departamento": department_code(values.get("contacto_pagos_departamento")),
+            "ciudad": municipality_code(values.get("contacto_pagos_municipio")),
+            "telefono": only_digits(values.get("contacto_pagos_telefono")),
+            "extension": only_digits(values.get("contacto_pagos_extension")),
+            "celular": only_digits(values.get("contacto_pagos_celular")),
+        },
+        "contacto_sst": {
+            "nombre": normalize_text(values.get("contacto_sst_nombre")),
+            "cargo": normalize_text(values.get("contacto_sst_cargo")),
+            "correo": normalize_text(values.get("contacto_sst_correo")).lower(),
+            "direccion": normalize_text(values.get("contacto_sst_direccion")),
+            "departamento": department_code(values.get("contacto_sst_departamento")),
+            "ciudad": municipality_code(values.get("contacto_sst_municipio")),
+            "telefono": only_digits(values.get("contacto_sst_telefono")),
+            "extension": only_digits(values.get("contacto_sst_extension")),
+            "celular": only_digits(values.get("contacto_sst_celular")),
+        },
+        "centro_trabajo": {
+            "sucursal": normalize_text(values.get("sede_sucursal")),
+            "cen_codigo": normalize_text(values.get("sede_codigo")),
+            "cen_nombre": normalize_text(values.get("sede_centro_trabajo_nombre") or values.get("sede_nombre")),
+            "cen_departamento": dept_sede,
+            "cen_ciudad": mun_sede,
+            "cen_direccion": normalize_text(values.get("sede_direccion")),
+            "cen_telefono": only_digits(values.get("sede_telefono")),
+            "cen_celular": only_digits(values.get("sede_celular")),
+            "cen_fax": only_digits(values.get("sede_fax")),
+            "cen_email": normalize_text(values.get("sede_correo")).lower(),
+            "cen_transporte": normalize_text(values.get("sede_transporte")).upper(),
+            "cen_clase": _digitacion_risk_number(values.get("sede_clase_riesgo")),
+            "cen_grado": only_digits(values.get("sede_grado")),
+            "cen_tarifa": normalize_text(values.get("sede_tarifa")),
+            "cen_actividad": only_digits(values.get("sede_codigo_actividad")),
+            "cen_numero_trabajadores": only_digits(values.get("sede_numero_trabajadores")),
+            "cen_cod_tipo_loc": only_digits(values.get("sede_tipo_localizacion")),
+            "cen_zona": "U" if sede_zona.startswith("urb") else "R" if sede_zona.startswith("rur") else normalize_text(values.get("sede_zona")).upper(),
+            "cen_contacto": normalize_text(values.get("sede_contacto")),
+            "cen_cargo_contacto": normalize_text(values.get("sede_cargo_contacto")),
+        },
+        "centros_trabajo_adicionales": _digitacion_parse_sedes_adicionales(values.get("sedes_adicionales")),
+        "responsable_sede_principal": {
+            "responsable_sede_principal_nombre_completo": normalize_text(values.get("responsable_sede_principal_nombre_completo")),
+            "responsable_sede_principal_tipo_documento": normalize_text(values.get("responsable_sede_principal_tipo_documento")).upper(),
+            "responsable_sede_principal_numero_documento": only_digits(values.get("responsable_sede_principal_numero_documento")),
+        },
+        "trabajador": {
+            "afi_tipoid": trabajador_principal.get("afi_tipoid", ""),
+            "afi_nroid": trabajador_principal.get("afi_nroid", ""),
+            "afi_centro_trabajo": trabajador_principal.get("afi_centro_trabajo", ""),
+            "afi_apellido1": trabajador_principal.get("afi_apellido1", ""),
+            "afi_apellido2": trabajador_principal.get("afi_apellido2", ""),
+            "afi_nombre1": trabajador_principal.get("afi_nombre1", ""),
+            "afi_nombre2": trabajador_principal.get("afi_nombre2", ""),
+            "afi_fecha_nacimiento": trabajador_principal.get("afi_fecha_nacimiento", ""),
+            "afi_edad": trabajador_principal.get("afi_edad", ""),
+            "afi_genero": trabajador_principal.get("afi_genero", ""),
+            "afi_ibc": trabajador_principal.get("afi_ibc", ""),
+            "afi_cod_cargo": trabajador_principal.get("afi_cod_cargo", ""),
+            "afi_cod_eps": trabajador_principal.get("afi_cod_eps", ""),
+            "afi_cod_afp": trabajador_principal.get("afi_cod_afp", ""),
+            "afi_tipo_cotizante": trabajador_principal.get("afi_tipo_cotizante", ""),
+            "afi_subtipo_cotizante": trabajador_principal.get("afi_subtipo_cotizante", ""),
+        },
+        "trabajadores": trabajadores,
+        "contrato": {
+            "numero_contrato": normalize_text(values.get("numero_contrato")),
+            "tipo_contrato": normalize_text(values.get("tipo_contrato")),
+            "fecha_inicio_contrato": normalize_text(values.get("fecha_inicio_contrato")),
+            "fecha_fin_contrato": normalize_text(values.get("fecha_fin_contrato")),
+            "valor_total_contrato": normalize_text(values.get("valor_total_contrato")),
+            "valor_mensual_contrato": normalize_text(values.get("valor_mensual_contrato")),
+        },
+        "novedad": {
+            "cod_tipo_novedad_trabajador": normalize_text(values.get("tipo_novedad")),
+            "fec_inicio": normalize_text(values.get("fecha_novedad_inicio")),
+            "fec_final": normalize_text(values.get("fecha_novedad_fin")),
+            "arl_anterior": normalize_text(values.get("arl_anterior")),
+            "nuevo_ibc": normalize_text(values.get("nuevo_ibc")),
+            "nuevo_centro_trabajo": normalize_text(values.get("nuevo_centro_trabajo")),
+            "nuevo_codigo_ocupacion": only_digits(values.get("nuevo_codigo_ocupacion")),
+            "novedad_contrato": normalize_text(values.get("novedad_contrato")),
+            "num_dias": only_digits(values.get("novedad_dias")),
+            "cod_estado_novedad": normalize_text(values.get("novedad_estado")),
+            "bln_autoliquidacion": normalize_text(values.get("novedad_autoliquidacion")).upper(),
+            "valor_anterior": normalize_text(values.get("novedad_valor_anterior")),
+            "valor_nuevo": normalize_text(values.get("novedad_valor_nuevo")),
+            "traslado": normalize_text(values.get("novedad_traslado")).upper(),
+            "origen": normalize_text(values.get("novedad_origen")).upper(),
+            "observaciones": normalize_text(values.get("novedad_observaciones")),
+        },
+    }
+
+
+def validate_digitacion_payload(draft: Dict[str, Any], require_all: bool = False) -> Dict[str, Any]:
+    values = dict((draft or {}).get("values") or {})
+    errors: List[Dict[str, Any]] = []
+    warnings: List[Dict[str, Any]] = []
+
+    if require_all:
+        for section, keys in _digitacion_required_sections(values, require_all=True).items():
+            for key in sorted(keys):
+                if not normalize_text(values.get(key)):
+                    _digitacion_error(errors, key, f"{key} es obligatorio para la digitación {section}.")
+
+    for key, raw in values.items():
+        value = normalize_text(raw)
+        if not value:
+            continue
+        limit = DIGITACION_FIELD_LIMITS.get(key)
+        if limit and len(value) > limit:
+            _digitacion_error(errors, key, f"{key} excede el máximo MDB v{AFILEGA_MDB_VERSION} ({limit} caracteres).")
+        if not _digitacion_value_in_mdb_catalog(key, value):
+            allowed = ", ".join(_digitacion_mdb_value_catalogs().get(key) or [])
+            _digitacion_error(errors, key, f"{key} no existe en el catálogo de valores del MDB AFILEGA ({allowed}).")
+        if key in DIGITACION_ALPHA_KEYS and not re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ .'-]{2,150}", value):
+            _digitacion_error(errors, key, f"{key} solo permite letras, espacios y puntuación básica.")
+        if key == "sede_centro_trabajo_nombre" and not re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9 .,&'°#/-]{2,60}", value):
+            _digitacion_error(errors, key, f"{key} debe ser alfanumérico y tener máximo 60 caracteres.")
+        if "correo" in key and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value):
+            _digitacion_error(errors, key, f"{key} debe contener @ y un dominio válido.")
+        if key in {"eps", "afp"} and not _digitacion_catalog_entity_value(value, key):
+            _digitacion_error(errors, key, f"{key} debe ser un código válido del catálogo {key.upper()}/PILA.")
+        if key == "cargo_actividad" and only_digits(_digitacion_cargo_catalog_code(value)) not in _digitacion_cargo_catalog_codes():
+            _digitacion_error(errors, key, f"{key} debe ser un código válido del catálogo de cargos de trabajadores.")
+        if key in DIGITACION_SN_KEYS and value.upper() not in ALLOWED_BOOLEAN_SN:
+            _digitacion_error(errors, key, f"{key} debe ser S o N según el MDB.")
+        if key in DIGITACION_THREE_DIGIT_KEYS and not re.fullmatch(r"\d{1,3}", value):
+            _digitacion_error(errors, key, f"{key} debe ser código numérico de máximo 3 dígitos según el MDB.")
+        if key in DIGITACION_LEGACY_COUNT_KEYS and not re.fullmatch(r"\d{1,6}", value):
+            _digitacion_error(errors, key, f"{key} debe ser un conteo numérico válido para el legacy.")
+        if "telefono" in key and not re.fullmatch(r"\d{10}", value):
+            _digitacion_error(errors, key, f"{key} debe ser numérico de 10 dígitos.")
+        if "celular" in key and not re.fullmatch(r"\d{10}", value):
+            _digitacion_error(errors, key, f"{key} debe ser numérico de 10 dígitos.")
+        if "extension" in key and not re.fullmatch(r"\d{1,6}", value):
+            _digitacion_error(errors, key, f"{key} debe contener solo dígitos.")
+        if key in DIGITACION_MONEY_KEYS:
+            amount = _digitacion_decimal(value)
+            if amount is None or amount < 0 or (key in {"ibc", "nuevo_ibc", "valor_total_contrato", "valor_mensual_contrato"} and amount <= 0):
+                _digitacion_error(errors, key, f"{key} debe ser un valor numérico válido.")
+            elif key in {"ibc", "nuevo_ibc"}:
+                year, smmlv = _resolve_smmlv_value({
+                    "fecha_radicacion": values.get("fecha_radicacion"),
+                    "fecha_inicio_cobertura": values.get("fecha_inicio_cobertura"),
+                })
+                allows_below_smmlv = key == "ibc" and only_digits(values.get("tipo_cotizante")) == "51"
+                if smmlv and not allows_below_smmlv and amount < Decimal(smmlv):
+                    _digitacion_error(errors, key, f"{key} no puede ser inferior al SMMLV {year} ({smmlv}).")
+                if smmlv and amount > (Decimal(smmlv) * Decimal(25)):
+                    _digitacion_error(errors, key, f"{key} no puede superar 25 SMMLV {year} ({Decimal(smmlv) * Decimal(25)}).")
+        if key in {"a_valor_total_nomina", "b_monto_total_cotizacion", "sede_tarifa"}:
+            amount = _digitacion_decimal(value)
+            if amount is None or amount < 0:
+                _digitacion_error(errors, key, f"{key} debe ser numérico y no negativo.")
+            elif key == "sede_tarifa":
+                expected_tariff = _digitacion_tariff_for_grade(values.get("sede_grado"))
+                if expected_tariff and normalize_text(value) != expected_tariff:
+                    _digitacion_error(errors, key, f"{key} debe ser {expected_tariff} para grado de riesgo {_digitacion_risk_number(values.get('sede_grado'))}.")
+        if "clase_riesgo" in key and _digitacion_risk_number(value) not in {"1", "2", "3", "4", "5"}:
+            _digitacion_error(errors, key, f"{key} debe estar entre 1 y 5.")
+        if key == "sede_grado" and _digitacion_risk_number(value) not in {"1", "2", "3", "4", "5"}:
+            _digitacion_error(errors, key, f"{key} debe estar entre 1 y 5.")
+        if key == "camara_codigo_actividad":
+            code = only_digits(value)
+            if not re.fullmatch(r"\d{4,7}", code):
+                _digitacion_error(errors, key, f"{key} debe tener un código numérico de la tabla de Cámara de Comercio.")
+            elif _digitacion_camara_activity_catalog() and not _digitacion_camara_activity_profile(code):
+                _digitacion_error(errors, key, f"{key} no existe en la tabla de actividad de Cámara de Comercio.")
+        elif "codigo_actividad" in key:
+            code = only_digits(value)
+            if not re.fullmatch(r"\d{7}", code):
+                _digitacion_error(errors, key, f"{key} debe tener 7 dígitos.")
+            elif _digitacion_activity_catalog() and not _digitacion_activity_profile(code):
+                _digitacion_error(errors, key, f"{key} no existe en el catálogo ARP/926.")
+        if key in {"fecha_radicacion", "fecha_inicio_vigencia", "fecha_inicio_cobertura", "fecha_recibido_imagine", "camara_fecha_constitucion", "fecha_nacimiento", "fecha_inicio_contrato", "fecha_fin_contrato", "fecha_novedad_inicio", "fecha_novedad_fin"} and not _digitacion_is_date(value):
+            _digitacion_error(errors, key, f"{key} debe ser una fecha válida.")
+
+    nit = values.get("nit")
+    nit_dv = values.get("nit_dv")
+    nit_digits = only_digits(nit)
+    tipo_doc_empleador = normalize_text(values.get("empleador_tipo_documento")).upper()
+    if nit and tipo_doc_empleador in {"NIT", "NI"} and len(nit_digits) != 9:
+        _digitacion_error(errors, "nit", "nit debe tener 9 dígitos cuando empleador_tipo_documento es NIT.")
+    elif nit and tipo_doc_empleador == "CC" and not (len(nit_digits) > 6 and len(nit_digits) < 11 and len(nit_digits) != 9):
+        _digitacion_error(errors, "nit", "nit debe tener 7, 8 o 10 dígitos cuando empleador_tipo_documento es CC.")
+    elif nit and not re.fullmatch(r"\d{5,15}", nit_digits):
+        _digitacion_error(errors, "nit", "nit debe tener entre 5 y 15 dígitos.")
+    if nit and nit_dv and not validate_nit_dv(nit, nit_dv):
+        _digitacion_error(errors, "nit_dv", f"nit_dv no coincide con el cálculo MDB; esperado {calculate_nit_dv(nit) or 'n/d'}.")
+    document_error = _digitacion_document_number_error(values.get("tipo_documento_afiliado"), values.get("documento_afiliado"))
+    if document_error:
+        _digitacion_error(errors, "documento_afiliado", document_error)
+    if values.get("tipo_documento_afiliado") and normalize_text(values.get("tipo_documento_afiliado")).upper() not in {"CC", "TI", "PE", "PT", "CE"}:
+        _digitacion_error(errors, "tipo_documento_afiliado", "tipo_documento_afiliado debe ser CC, TI, PE, PT o CE.")
+    for key in ("empleador_tipo_documento", "rep_legal_tipo_documento", "responsable_sede_principal_tipo_documento"):
+        if values.get(key) and normalize_text(values.get(key)).upper() not in ALLOWED_DOCUMENT_TYPES:
+            _digitacion_error(errors, key, f"{key} no es válido según el catálogo legacy.")
+    if values.get("genero") and normalize_text(values.get("genero")).upper() not in {"F", "M"}:
+        _digitacion_error(errors, "genero", "genero debe ser M o F.")
+    if values.get("edad") and not re.fullmatch(r"\d{1,3}", only_digits(values.get("edad"))):
+        _digitacion_error(errors, "edad", "edad debe ser numérica y se calcula con la fecha de nacimiento.")
+    for key in ("rep_legal_numero_documento", "responsable_sede_principal_numero_documento"):
+        if values.get(key) and not re.fullmatch(r"\d{5,15}", only_digits(values.get(key))):
+            _digitacion_error(errors, key, f"{key} debe tener entre 5 y 15 dígitos.")
+    tipo_cotizante_catalog = set(_digitacion_tipo_cotizante_catalog().keys()) or ALLOWED_TIPO_COTIZANTE
+    if values.get("tipo_cotizante") and normalize_text(values.get("tipo_cotizante")) not in tipo_cotizante_catalog:
+        _digitacion_error(errors, "tipo_cotizante", "tipo_cotizante debe existir en la tabla de tipo cotizante de trabajadores.")
+    vinculador_catalog = set(_digitacion_vinculador_laboral_catalog().keys())
+    if values.get("empresa_vinculador_laboral") and vinculador_catalog and normalize_text(values.get("empresa_vinculador_laboral")) not in vinculador_catalog:
+        _digitacion_error(errors, "empresa_vinculador_laboral", "empresa_vinculador_laboral debe existir en la tabla de vinculador laboral del contratante.")
+    if values.get("subtipo_cotizante") and normalize_text(values.get("subtipo_cotizante")) != DEFAULT_SUBTIPO_COTIZANTE:
+        _digitacion_error(errors, "subtipo_cotizante", f"subtipo_cotizante debe ser {DEFAULT_SUBTIPO_COTIZANTE}.")
+    if values.get("tipo_novedad") and normalize_text(values.get("tipo_novedad")) not in ALLOWED_NOVEDAD_CODES:
+        _digitacion_error(errors, "tipo_novedad", "tipo_novedad debe ser 00 u 08 según Plano_Nov_Tmp.")
+    if values.get("novedad_estado") and normalize_text(values.get("novedad_estado")) not in ALLOWED_NOVEDAD_ESTADO:
+        _digitacion_error(errors, "novedad_estado", "novedad_estado debe ser 1 según Plano_Nov_Tmp.")
+    if values.get("novedad_autoliquidacion") and normalize_text(values.get("novedad_autoliquidacion")).upper() not in ALLOWED_NOVEDAD_AUTOLIQUIDACION:
+        _digitacion_error(errors, "novedad_autoliquidacion", "novedad_autoliquidacion debe ser N según Plano_Nov_Tmp.")
+    if values.get("novedad_origen") and normalize_text(values.get("novedad_origen")).upper() not in ALLOWED_NOVEDAD_ORIGEN:
+        _digitacion_error(errors, "novedad_origen", "novedad_origen debe ser C según Plano_Nov_Tmp.")
+    if values.get("empresa_zona_localizacion") and normalize_text(values.get("empresa_zona_localizacion")).upper() not in ALLOWED_ZONA:
+        _digitacion_error(errors, "empresa_zona_localizacion", "empresa_zona_localizacion debe ser U o R.")
+    if values.get("estado_cuenta_empleador") and normalize_haystack(values.get("estado_cuenta_empleador")) not in {normalize_haystack(item) for item in ALLOWED_ESTADO_CUENTA}:
+        _digitacion_error(errors, "estado_cuenta_empleador", "estado_cuenta_empleador no es válido para traslado legacy.")
+    if values.get("tipo_afiliacion"):
+        clase_key = re.sub(r"[^a-z0-9]+", " ", normalize_haystack(values.get("tipo_afiliacion"))).strip()
+        if clase_key not in DIGITACION_CLASE_AFILIACION_VALUES and clase_key not in DIGITACION_CLASE_AFILIACION_ALIASES:
+            _digitacion_error(errors, "tipo_afiliacion", "tipo_afiliacion debe ser Primera vez, Traslado o Independiente - Contratista.")
+
+    for key in ("departamento_empresa", "sede_departamento", "contacto_pagos_departamento", "contacto_sst_departamento"):
+        if values.get(key) and not department_code(values.get(key)):
+            _digitacion_error(errors, key, f"{key} no existe en la tabla/código de departamentos.")
+    for key in ("municipio_empresa", "sede_municipio", "contacto_pagos_municipio", "contacto_sst_municipio"):
+        if values.get(key) and not municipality_code(values.get(key)):
+            _digitacion_error(errors, key, f"{key} debe venir como código municipio de 3 o 5 dígitos, o ciudad homologada.")
+
+    radicacion = _parse_date_value(values.get("fecha_radicacion")) or _parse_date(normalize_text(values.get("fecha_radicacion")))
+    cobertura = _parse_date_value(values.get("fecha_inicio_cobertura")) or _parse_date(normalize_text(values.get("fecha_inicio_cobertura")))
+    if radicacion and cobertura and cobertura < radicacion:
+        _digitacion_error(errors, "fecha_inicio_cobertura", "La cobertura no puede ser anterior a la radicación.")
+    if normalize_haystack(values.get("tipo_tramite")) in {"afiliacion", "afiliación"} and radicacion and cobertura:
+        is_traslado = "traslado" in normalize_haystack(values.get("tipo_afiliacion"))
+        inicio_vigencia = _parse_date_value(values.get("fecha_inicio_vigencia")) or _parse_date(normalize_text(values.get("fecha_inicio_vigencia")))
+        expected_cobertura = inicio_vigencia if is_traslado and inicio_vigencia else radicacion + timedelta(days=1)
+        if cobertura != expected_cobertura:
+            message = (
+                "Para traslado, la cobertura debe coincidir con la fecha inicio vigencia."
+                if is_traslado
+                else "Para afiliación inicial, la cobertura debe ser exactamente un día después de la radicación."
+            )
+            _digitacion_error(errors, "fecha_inicio_cobertura", message)
+    trabajadores_sede = only_digits(values.get("sede_numero_trabajadores"))
+    trabajadores_afiliacion = only_digits(values.get("a_numero_inicial_trabajadores_estudiantes"))
+    if trabajadores_sede and trabajadores_afiliacion and trabajadores_sede != trabajadores_afiliacion:
+        _digitacion_error(errors, "sede_numero_trabajadores", "sede_numero_trabajadores debe coincidir con a_numero_inicial_trabajadores_estudiantes.")
+    nacimiento_text = _digitacion_input_date(values.get("fecha_nacimiento"))
+    nacimiento = _parse_date_value(nacimiento_text) if nacimiento_text else None
+    nacimiento_date = nacimiento.date() if isinstance(nacimiento, datetime) else nacimiento
+    if nacimiento_date and nacimiento_date >= datetime.now().date():
+        _digitacion_error(errors, "fecha_nacimiento", "La fecha de nacimiento debe ser anterior a hoy.")
+    camara_fecha_text = _digitacion_input_date(values.get("camara_fecha_constitucion"))
+    camara_fecha = _parse_date_value(camara_fecha_text) if camara_fecha_text else None
+    camara_fecha_date = camara_fecha.date() if isinstance(camara_fecha, datetime) else camara_fecha
+    if camara_fecha_date and camara_fecha_date > datetime.now().date():
+        _digitacion_error(errors, "camara_fecha_constitucion", "La fecha de constitución en Cámara de Comercio no puede ser mayor a la fecha actual.")
+    inicio_contrato = _parse_date_value(values.get("fecha_inicio_contrato")) or _parse_date(normalize_text(values.get("fecha_inicio_contrato")))
+    fin_contrato = _parse_date_value(values.get("fecha_fin_contrato")) or _parse_date(normalize_text(values.get("fecha_fin_contrato")))
+    if inicio_contrato and fin_contrato and fin_contrato < inicio_contrato:
+        _digitacion_error(errors, "fecha_fin_contrato", "La fecha de terminación no puede ser anterior al inicio del contrato.")
+    valor_total = _digitacion_decimal(values.get("valor_total_contrato"))
+    valor_mensual = _digitacion_decimal(values.get("valor_mensual_contrato"))
+    if valor_total is not None and valor_mensual is not None and valor_total > 0 and valor_mensual > valor_total:
+        _digitacion_error(errors, "valor_mensual_contrato", "El valor mensual no puede ser mayor al valor total del contrato.")
+    inicio_novedad = _parse_date_value(values.get("fecha_novedad_inicio")) or _parse_date(normalize_text(values.get("fecha_novedad_inicio")))
+    fin_novedad = _parse_date_value(values.get("fecha_novedad_fin")) or _parse_date(normalize_text(values.get("fecha_novedad_fin")))
+    if inicio_novedad and fin_novedad and fin_novedad < inicio_novedad:
+        _digitacion_error(errors, "fecha_novedad_fin", "La fecha final de novedad no puede ser anterior a la fecha inicial.")
+
+    for activity_key, risk_key in (
+        ("codigo_actividad_economica", "clase_riesgo_empresa"),
+        ("sede_codigo_actividad", "sede_clase_riesgo"),
+    ):
+        profile = _digitacion_activity_profile(values.get(activity_key))
+        expected_risk = normalize_text((profile or {}).get("clase"))
+        actual_risk = _digitacion_risk_number(values.get(risk_key))
+        if expected_risk and actual_risk and expected_risk != actual_risk:
+            _digitacion_error(errors, risk_key, f"{risk_key} no coincide con la actividad {only_digits(values.get(activity_key))}; el catálogo indica clase {expected_risk}.")
+
+    sede_activity_first = only_digits(values.get("sede_codigo_actividad"))[:1]
+    sede_grade = _digitacion_risk_number(values.get("sede_grado"))
+    if sede_activity_first and sede_grade and sede_activity_first != sede_grade:
+        _digitacion_error(
+            errors,
+            "sede_grado",
+            f"sede_grado debe ser {sede_activity_first} porque sede_codigo_actividad inicia en {sede_activity_first}.",
+        )
+
+    if values.get("sedes_adicionales"):
+        for index, line in enumerate(str(values.get("sedes_adicionales") or "").splitlines(), start=1):
+            parts = [part.strip() for part in line.split("|")]
+            if not any(parts):
+                continue
+            if len(parts) < 6:
+                _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: usa código | nombre | dirección | municipio | departamento | clase | grado | tarifa | trabajadores.")
+                continue
+            row = _digitacion_parse_sedes_adicionales(line)[0]
+            codigo = row.get("codigo", "")
+            nombre = row.get("nombre", "")
+            sucursal = row.get("sucursal", "")
+            direccion = row.get("direccion", "")
+            municipio = row.get("municipio", "")
+            departamento = row.get("departamento", "")
+            zona = row.get("zona", "")
+            telefono = row.get("telefono", "")
+            celular = row.get("celular", "")
+            correo = row.get("correo", "")
+            codigo_actividad = row.get("codigo_actividad", "")
+            riesgo = row.get("clase", "")
+            trabajadores = row.get("trabajadores", "")
+            transporte = row.get("transporte", "")
+            grado = row.get("grado", "")
+            tarifa = row.get("tarifa", "")
+            contacto = row.get("contacto", "")
+            cargo_contacto = row.get("cargo_contacto", "")
+            if not re.fullmatch(r"[0-9A-Za-z.-]{1,20}", codigo):
+                _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: código inválido.")
+            if not re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ .'-]{2,150}", nombre):
+                _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: nombre solo permite letras y espacios.")
+            if len(parts) >= 20 and not sucursal:
+                _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: sucursal es obligatoria.")
+            if len(direccion) < 5:
+                _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: dirección demasiado corta.")
+            if not department_code(departamento):
+                _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: departamento no existe en la tabla.")
+            if not municipality_code(municipio):
+                _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: municipio no existe en la tabla.")
+            if len(parts) >= 20:
+                zona_norm = normalize_haystack(zona)
+                if not (zona_norm.startswith("urb") or zona_norm.startswith("rur") or normalize_text(zona).upper() in {"U", "R"}):
+                    _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: zona es obligatoria.")
+                if not re.fullmatch(r"\d{10}", telefono):
+                    _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: teléfono debe tener 10 dígitos.")
+                if celular and not re.fullmatch(r"\d{10}", celular):
+                    _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: celular debe tener 10 dígitos.")
+                if correo and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", correo):
+                    _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: correo no es válido.")
+                if _digitacion_activity_catalog() and not _digitacion_activity_profile(codigo_actividad):
+                    _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: código actividad no existe en catálogo ARP/926.")
+            if _digitacion_risk_number(riesgo) not in {"1", "2", "3", "4", "5"}:
+                _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: clase de riesgo debe estar entre 1 y 5.")
+            if len(parts) >= 20 and not re.fullmatch(r"\d{1,6}", trabajadores):
+                _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: número de trabajadores debe ser numérico.")
+            if len(parts) >= 20 and not transporte:
+                _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: transporte es obligatorio.")
+            if len(parts) >= 20 and transporte and transporte.upper() not in {"S", "N"}:
+                _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: transporte debe ser S o N.")
+            if _digitacion_risk_number(grado) not in {"1", "2", "3", "4", "5"}:
+                _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: grado de riesgo debe estar entre 1 y 5.")
+            activity_first = only_digits(codigo_actividad)[:1]
+            if activity_first and _digitacion_risk_number(grado) and activity_first != _digitacion_risk_number(grado):
+                _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: grado de riesgo debe ser {activity_first} porque código actividad inicia en {activity_first}.")
+            expected_tariff = _digitacion_tariff_for_grade(grado)
+            if expected_tariff and tarifa and normalize_text(tarifa) != expected_tariff:
+                _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: tarifa debe ser {expected_tariff} para grado {_digitacion_risk_number(grado)}.")
+            if len(parts) >= 20 and not re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ .'-]{2,150}", contacto):
+                _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: contacto solo permite letras y espacios.")
+            if len(parts) >= 20 and not re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ .'-]{2,150}", cargo_contacto):
+                _digitacion_error(errors, "sedes_adicionales", f"Centro adicional línea {index}: cargo contacto solo permite letras y espacios.")
+
+    if values.get("trabajador_centro_trabajo"):
+        centros_validos = {normalize_text(values.get("sede_codigo") or "1")}
+        centros_validos.update(normalize_text(row.get("codigo")) for row in _digitacion_parse_sedes_adicionales(values.get("sedes_adicionales")))
+        centros_validos = {item for item in centros_validos if item}
+        if normalize_text(values.get("trabajador_centro_trabajo")) not in centros_validos:
+            _digitacion_error(errors, "trabajador_centro_trabajo", "trabajador_centro_trabajo debe corresponder a un centro de trabajo registrado.")
+
+    centros_validos_trabajador = {normalize_text(values.get("sede_codigo") or "1")}
+    centros_validos_trabajador.update(normalize_text(row.get("codigo")) for row in _digitacion_parse_sedes_adicionales(values.get("sedes_adicionales")))
+    centros_validos_trabajador = {item for item in centros_validos_trabajador if item}
+    trabajadores_guardados = _digitacion_parse_trabajadores(values.get("trabajadores_adicionales"))
+    trabajadores_para_validar = list(trabajadores_guardados)
+    trabajador_actual = _digitacion_current_worker(values)
+    if _digitacion_worker_has_data(trabajador_actual):
+        trabajadores_para_validar.append(trabajador_actual)
+
+    if _digitacion_is_contratista(values):
+        if any(_digitacion_worker_has_data(trabajador) for trabajador in trabajadores_para_validar):
+            _digitacion_error(errors, "trabajadores_adicionales", "Las afiliaciones Independiente - Contratista no deben registrar trabajadores.")
+        trabajadores_para_validar = []
+
+    actual_workers_by_center: Dict[str, int] = {}
+    if not _digitacion_is_contratista(values):
+        for trabajador in trabajadores_para_validar:
+            if not _digitacion_worker_has_data(trabajador):
+                continue
+            center_code = normalize_text(trabajador.get("trabajador_centro_trabajo"))
+            if not center_code:
+                continue
+            actual_workers_by_center[center_code] = actual_workers_by_center.get(center_code, 0) + 1
+        for center in _digitacion_expected_workers_by_center(values):
+            actual = actual_workers_by_center.get(center["code"], 0)
+            if actual != center["expected"]:
+                _digitacion_error(
+                    errors,
+                    center["key"],
+                    f"{center['label']}: Nro trabajadores declara {center['expected']}, pero hay {actual} trabajador(es) registrados en la pestaña Trabajadores.",
+                )
+
+    seen_worker_identities: Dict[Tuple[str, str], int] = {}
+    for index, trabajador in enumerate(trabajadores_para_validar, start=1):
+        worker_doc = only_digits(trabajador.get("documento_afiliado"))
+        worker_doc_type = normalize_text(trabajador.get("tipo_documento_afiliado")).upper()
+        employer_doc = only_digits(values.get("nit"))
+        worker_identity = (worker_doc_type, worker_doc)
+        for key in sorted(DIGITACION_REQUIRED_KEYS["novedades"]):
+            if not normalize_text(trabajador.get(key)):
+                _digitacion_error(errors, "trabajadores_adicionales", f"Trabajador {index}: {key} es obligatorio.")
+        if worker_doc and employer_doc and worker_doc == employer_doc:
+            _digitacion_error(errors, "trabajadores_adicionales", f"Trabajador {index}: la cédula del trabajador no puede ser la misma que el número de identificación de la empresa.")
+        if worker_doc_type and worker_doc:
+            previous_index = seen_worker_identities.get(worker_identity)
+            if previous_index:
+                _digitacion_error(errors, "trabajadores_adicionales", f"Trabajador {index}: ya existe un trabajador con el mismo tipo y número de documento que el Trabajador {previous_index}.")
+            else:
+                seen_worker_identities[worker_identity] = index
+        if normalize_text(trabajador.get("trabajador_centro_trabajo")) not in centros_validos_trabajador:
+            _digitacion_error(errors, "trabajadores_adicionales", f"Trabajador {index}: centro de trabajo no existe.")
+        if normalize_text(trabajador.get("tipo_documento_afiliado")).upper() not in {"CC", "TI", "PE", "PT", "CE"}:
+            _digitacion_error(errors, "trabajadores_adicionales", f"Trabajador {index}: tipo_documento_afiliado debe ser CC, TI, PE, PT o CE.")
+        document_error = _digitacion_document_number_error(worker_doc_type, trabajador.get("documento_afiliado"), f"Trabajador {index}: documento_afiliado")
+        if document_error:
+            _digitacion_error(errors, "trabajadores_adicionales", document_error)
+        for key in ("primer_apellido", "segundo_apellido", "primer_nombre", "segundo_nombre"):
+            if normalize_text(trabajador.get(key)) and not re.fullmatch(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ .'-]{2,150}", normalize_text(trabajador.get(key))):
+                _digitacion_error(errors, "trabajadores_adicionales", f"Trabajador {index}: {key} solo permite letras y espacios.")
+        if not _digitacion_is_date(trabajador.get("fecha_nacimiento")):
+            _digitacion_error(errors, "trabajadores_adicionales", f"Trabajador {index}: fecha_nacimiento debe ser numérica DDMMAAAA y válida.")
+        nacimiento = _parse_date_value(_digitacion_input_date(trabajador.get("fecha_nacimiento")))
+        if nacimiento and nacimiento.date() >= datetime.now().date():
+            _digitacion_error(errors, "trabajadores_adicionales", f"Trabajador {index}: fecha_nacimiento debe ser anterior a hoy.")
+        if normalize_text(trabajador.get("genero")).upper() not in {"F", "M"}:
+            _digitacion_error(errors, "trabajadores_adicionales", f"Trabajador {index}: genero debe ser M o F.")
+        if normalize_text(trabajador.get("tipo_cotizante")) not in tipo_cotizante_catalog:
+            _digitacion_error(errors, "trabajadores_adicionales", f"Trabajador {index}: tipo_cotizante debe existir en la tabla de tipo cotizante.")
+        ibc = _digitacion_decimal(trabajador.get("ibc"))
+        if ibc is None or ibc <= 0:
+            _digitacion_error(errors, "trabajadores_adicionales", f"Trabajador {index}: ibc debe ser un salario válido.")
+        else:
+            year, smmlv = _resolve_smmlv_value({
+                "fecha_radicacion": values.get("fecha_radicacion"),
+                "fecha_inicio_cobertura": values.get("fecha_inicio_cobertura"),
+            })
+            allows_below_smmlv = normalize_text(trabajador.get("tipo_cotizante")) == "51"
+            if smmlv and not allows_below_smmlv and ibc < Decimal(smmlv):
+                _digitacion_error(errors, "trabajadores_adicionales", f"Trabajador {index}: ibc no puede ser inferior al SMMLV {year} ({smmlv}).")
+            if smmlv and ibc > Decimal(smmlv) * Decimal(25):
+                _digitacion_error(errors, "trabajadores_adicionales", f"Trabajador {index}: ibc no puede superar 25 SMMLV {year}.")
+        if not _digitacion_catalog_entity_value(trabajador.get("eps"), "eps"):
+            _digitacion_error(errors, "trabajadores_adicionales", f"Trabajador {index}: EPS debe ser un código válido del catálogo.")
+        if not _digitacion_catalog_entity_value(trabajador.get("afp"), "afp"):
+            _digitacion_error(errors, "trabajadores_adicionales", f"Trabajador {index}: AFP debe ser un código válido del catálogo.")
+        if only_digits(_digitacion_cargo_catalog_code(trabajador.get("cargo_actividad"))) not in _digitacion_cargo_catalog_codes():
+            _digitacion_error(errors, "trabajadores_adicionales", f"Trabajador {index}: cargo debe ser un código válido del catálogo.")
+
+    legacy_mdb = _digitacion_legacy_mdb_payload(values)
+    if values.get("departamento_empresa") and not legacy_mdb["empresa"]["emp_departamento"]:
+        _digitacion_error(errors, "departamento_empresa", "No se pudo homologar departamento_empresa a código MDB.")
+    if values.get("municipio_empresa") and not legacy_mdb["empresa"]["emp_ciudad"]:
+        _digitacion_error(errors, "municipio_empresa", "No se pudo homologar municipio_empresa a código MDB.")
+    if values.get("sede_departamento") and not legacy_mdb["centro_trabajo"]["cen_departamento"]:
+        _digitacion_error(errors, "sede_departamento", "No se pudo homologar sede_departamento a código MDB.")
+    if values.get("sede_municipio") and not legacy_mdb["centro_trabajo"]["cen_ciudad"]:
+        _digitacion_error(errors, "sede_municipio", "No se pudo homologar sede_municipio a código MDB.")
+
+    return {
+        "ok": not errors,
+        "source": f"Afiliaciones.mdb v{AFILEGA_MDB_VERSION}",
+        "errors": errors,
+        "warnings": warnings,
+        "legacy_mdb": legacy_mdb,
+        "validated_at": utc_now(),
+    }
+
+
+def load_digitacion_draft(case_id: str) -> Dict[str, Any]:
+    payload = load_case(case_id)
+    analysis = payload.get("analysis") or {}
+    draft = analysis.get("digitacion_manual") or {}
+    if draft:
+        return draft
+    prefill = analysis.get("digitacion_prefill") or {}
+    if prefill:
+        return {
+            "proyecto": "AFILEGA_FA_IMA_LA_V2",
+            "formato": f"digitacion_{prefill.get('form_target') or prefill.get('entry_type') or 'afiliacion'}",
+            "source_case_id": case_id,
+            "source_entry_type": prefill.get("entry_type") or payload.get("entry_type") or "",
+            "source_label": payload.get("label") or "",
+            "prefill_sources": prefill.get("sources") or {},
+            "values": prefill.get("values") or {},
+            "updated_at": prefill.get("updated_at") or payload.get("updated_at") or utc_now(),
+            "validation": validate_digitacion_payload({"values": prefill.get("values") or {}}, require_all=False),
+        }
+    return {
+        "proyecto": "AFILEGA_FA_IMA_LA_V2",
+        "formato": "digitacion_formato_afiliacion",
+        "source_case_id": case_id,
+        "source_entry_type": payload.get("entry_type") or "",
+        "source_label": payload.get("label") or "",
+        "values": {},
+        "updated_at": payload.get("updated_at") or utc_now(),
+        "validation": validate_digitacion_payload({"values": {}}, require_all=False),
+    }
+
+
+def save_digitacion_draft(case_id: str, draft: Dict[str, Any], require_all: bool = False) -> Dict[str, Any]:
+    payload = load_case(case_id)
+    analysis = payload.setdefault("analysis", {}) or {}
+    if payload.get("analysis") is None:
+        payload["analysis"] = analysis
+    saved = dict(draft or {})
+    saved["proyecto"] = "AFILEGA_FA_IMA_LA_V2"
+    saved["source_case_id"] = case_id
+    saved["source_entry_type"] = saved.get("source_entry_type") or payload.get("entry_type") or ""
+    saved["source_label"] = saved.get("source_label") or payload.get("label") or ""
+    saved["updated_at"] = utc_now()
+    saved["validation"] = validate_digitacion_payload(saved, require_all=require_all)
+    saved["legacy_mdb"] = saved["validation"]["legacy_mdb"]
+    analysis["digitacion_manual"] = saved
+    payload["analysis"] = analysis
+    payload["updated_at"] = utc_now()
+    save_case(payload)
+    return saved
+
+
+def _digitacion_manual_is_usable(draft: Dict[str, Any]) -> bool:
+    if not isinstance(draft, dict) or not isinstance(draft.get("values"), dict):
+        return False
+    validation = draft.get("validation") or {}
+    if isinstance(validation, dict) and validation.get("ok") is False:
+        return False
+    # Drafts without a validation object can still be old saved drafts; validate them
+    # before allowing them to override OCR.
+    if not validation:
+        validation = validate_digitacion_payload(draft, require_all=False)
+        if validation.get("ok") is False:
+            return False
+    return True
+
+
+def _digitacion_manual_has_926_minimum(draft: Dict[str, Any]) -> bool:
+    if not _digitacion_manual_is_usable(draft):
+        return False
+    values = dict((draft or {}).get("values") or {})
+    required = [
+        "razon_social",
+        "nit",
+        "nit_dv",
+        "sede_nombre",
+        "sede_codigo",
+        "documento_afiliado",
+        "primer_apellido",
+        "primer_nombre",
+        "fecha_nacimiento",
+        "ibc",
+        "codigo_actividad_economica",
+        "clase_riesgo_empresa",
+    ]
+    return all(normalize_text(values.get(key)) for key in required)
+
+
+def _apply_digitacion_manual_to_xlsx_profile(xlsx_profile: Dict[str, Any], draft: Dict[str, Any]) -> Dict[str, Any]:
+    if not _digitacion_manual_is_usable(draft):
+        return xlsx_profile
+    values = dict(draft.get("values") or {})
+    profile = xlsx_profile.setdefault("profile", {})
+    form_fields = xlsx_profile.setdefault("form_fields", {})
+    flat_pairs = xlsx_profile.setdefault("flat_pairs", {})
+
+    def put_profile(key: str, value: Any, *, digits: bool = False) -> None:
+        clean = only_digits(value) if digits else normalize_text(value)
+        if clean:
+            profile[key] = clean
+
+    def put_form(key: str, value: Any, *, digits: bool = False) -> None:
+        clean = only_digits(value) if digits else normalize_text(value)
+        if clean:
+            form_fields[key] = clean
+            flat_pairs[key] = clean
+
+    put_profile("empresa", values.get("razon_social"))
+    put_profile("nit", values.get("nit"), digits=True)
+    put_profile("documento_empleador", values.get("nit"), digits=True)
+    put_profile("documento", values.get("documento_afiliado"), digits=True)
+    full_name = " ".join(
+        part
+        for part in [
+            normalize_text(values.get("primer_nombre")),
+            normalize_text(values.get("segundo_nombre")),
+            normalize_text(values.get("primer_apellido")),
+            normalize_text(values.get("segundo_apellido")),
+        ]
+        if part
+    ).strip()
+    put_profile("nombre", full_name)
+    put_profile("tipo_afiliado", values.get("tipo_cotizante") or draft.get("source_entry_type"))
+    put_profile("numero_contrato", values.get("numero_contrato"), digits=True)
+    put_profile("idtramite", values.get("numero_contrato"), digits=True)
+    put_profile("nomina_total", values.get("ibc"), digits=True)
+    put_profile("numero_sedes", values.get("a_numero_sedes") or values.get("b_numero_sedes"), digits=True)
+    put_profile("tipo_persona", values.get("tipo_persona"))
+    put_profile("documento_representante", values.get("rep_legal_numero_documento"), digits=True)
+    put_profile("fecha_nacimiento", values.get("fecha_nacimiento"))
+    put_profile("tipo_contrato", values.get("tipo_contrato"))
+    put_profile("valor_total_contrato", values.get("valor_total_contrato"), digits=True)
+    put_profile("valor_mensual_contrato", values.get("valor_mensual_contrato"), digits=True)
+
+    put_form("fecha_radicacion", values.get("fecha_radicacion"))
+    put_form("fecha_inicio_cobertura", values.get("fecha_inicio_cobertura"))
+    put_form("numero_radicacion", values.get("numero_radicacion"))
+    put_form("tipo_tramite", values.get("tipo_tramite"))
+    put_form("tipo_persona", values.get("tipo_persona"))
+    put_form("empleador_tipo_documento", values.get("empleador_tipo_documento"))
+    put_form("empleador_razon_social", values.get("razon_social"))
+    put_form("empleador_numero_documento_nit", values.get("nit"), digits=True)
+    put_form("digito_verificacion", values.get("nit_dv"), digits=True)
+    put_form("rep_legal_nombre_completo", values.get("rep_legal_nombre_completo"))
+    put_form("rep_legal_numero_documento", values.get("rep_legal_numero_documento"), digits=True)
+    put_form("rep_legal_tipo_documento", values.get("rep_legal_tipo_documento"))
+    put_form("rep_legal_correo", values.get("rep_legal_correo"))
+    put_form("a_codigo_actividad_economica_principal", values.get("codigo_actividad_economica"), digits=True)
+    put_form("a_clase_riesgo", values.get("clase_riesgo_empresa"))
+    put_form("a_numero_sedes", values.get("a_numero_sedes"), digits=True)
+    put_form("a_numero_centros_trabajo", values.get("a_numero_centros_trabajo"), digits=True)
+    put_form("a_numero_inicial_trabajadores_estudiantes", values.get("a_numero_inicial_trabajadores_estudiantes"), digits=True)
+    put_form("a_valor_total_nomina", values.get("a_valor_total_nomina"), digits=True)
+    put_form("b_arl_de_la_cual_se_traslada", values.get("empresa_arl_anterior") or values.get("arl_anterior"))
+    put_form("b_clase_riesgo", values.get("clase_riesgo_empresa"))
+    put_form("b_codigo_actividad_economica_principal", values.get("codigo_actividad_economica"), digits=True)
+    put_form("b_numero_sedes", values.get("b_numero_sedes"), digits=True)
+    put_form("b_numero_centros_trabajo", values.get("b_numero_centros_trabajo"), digits=True)
+    put_form("b_numero_total_trabajadores_estudiantes", values.get("b_numero_total_trabajadores_estudiantes"), digits=True)
+    put_form("b_monto_total_cotizacion", values.get("b_monto_total_cotizacion"), digits=True)
+    put_form("estado_cuenta_empleador", values.get("estado_cuenta_empleador"))
+    put_form("sede_principal_direccion", values.get("direccion_empresa"))
+    put_form("sede_principal_departamento", values.get("departamento_empresa"))
+    put_form("sede_principal_municipio_distrito", values.get("municipio_empresa"))
+    put_form("correo_empleador", values.get("correo_empresa"))
+    put_form("responsable_sede_principal_nombre_completo", values.get("responsable_sede_principal_nombre_completo"))
+    put_form("responsable_sede_principal_tipo_documento", values.get("responsable_sede_principal_tipo_documento"))
+    put_form("responsable_sede_principal_numero_documento", values.get("responsable_sede_principal_numero_documento"), digits=True)
+    put_form("sede_principal_nombre", values.get("sede_nombre"))
+    put_form("sede_principal_nombre_centro_trabajo", values.get("sede_centro_trabajo_nombre"))
+    put_form("sede_principal_codigo", values.get("sede_codigo"), digits=True)
+    put_form("sede_principal_direccion", values.get("sede_direccion") or values.get("direccion_empresa"))
+    put_form("sede_principal_departamento", values.get("sede_departamento") or values.get("departamento_empresa"))
+    put_form("sede_principal_municipio_distrito", values.get("sede_municipio") or values.get("municipio_empresa"))
+    put_form("sede_principal_zona", values.get("sede_zona"))
+    put_form("sede_principal_telefono", values.get("sede_telefono"), digits=True)
+    put_form("sede_principal_correo", values.get("sede_correo"))
+    put_form("sede_codigo_actividad", values.get("sede_codigo_actividad"), digits=True)
+    put_form("sede_clase_riesgo", values.get("sede_clase_riesgo"))
+    put_form("trabajador_centro_trabajo", values.get("trabajador_centro_trabajo"), digits=True)
+    put_form("tipo_cotizante", values.get("tipo_cotizante"), digits=True)
+    put_form("subtipo_cotizante", values.get("subtipo_cotizante"), digits=True)
+    put_form("eps", values.get("eps"))
+    put_form("afp", values.get("afp"))
+    put_form("ibc", values.get("ibc"), digits=True)
+    put_form("edad", values.get("edad"), digits=True)
+    put_form("cargo_actividad", values.get("cargo_actividad"))
+    put_form("tipo_contrato", values.get("tipo_contrato"))
+    put_form("fecha_inicio_contrato", values.get("fecha_inicio_contrato"))
+    put_form("fecha_fin_contrato", values.get("fecha_fin_contrato"))
+    put_form("valor_contrato", values.get("valor_total_contrato"), digits=True)
+    put_form("valor_mensual", values.get("valor_mensual_contrato"), digits=True)
+    put_form("numero_contrato", values.get("numero_contrato"), digits=True)
+    xlsx_profile["digitacion_sedes_adicionales"] = _digitacion_parse_sedes_adicionales(values.get("sedes_adicionales"))
+    xlsx_profile["digitacion_trabajadores"] = _digitacion_worker_rows(values)
+
+    xlsx_profile["digitacion_manual_applied"] = {
+        "source": "digitacion_manual",
+        "updated_at": draft.get("updated_at") or "",
+        "fields": sorted(key for key, value in values.items() if normalize_text(value)),
+    }
+    return xlsx_profile
+
+
+def analyze_case(case_id: str) -> Dict[str, Any]:
+>>>>>>> origin/main
     analyze_started = perf_counter()
     payload = load_case(case_id)
     previous_analysis = payload.get("analysis") or {}
     previous_manual_review = previous_analysis.get("manual_review") or {}
+<<<<<<< HEAD
     previous_manual_approval = payload.get("manual_approval") or previous_analysis.get("manual_approval") or {}
+=======
+    previous_digitacion_manual = previous_analysis.get("digitacion_manual") or {}
+>>>>>>> origin/main
     files = payload.get("files", [])
     xlsx_profile: Dict[str, Any] = {}
     docs: List[Dict[str, Any]] = []
@@ -10893,8 +14515,11 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
             fname = str(doc.get("filename") or "")
             override = manual_docs.get(fname)
             if override and str(override.get("verdict") or "") == "no" and override.get("expected_type"):
-                doc["document_type"] = str(override["expected_type"])
-                doc["legacy_code"] = override.get("expected_code") or DOC_TYPE_TO_PRIMARY_CODE.get(str(override["expected_type"]), 99)
+                expected_type = str(override["expected_type"])
+                doc["document_type"] = expected_type
+                # El MDB AFILEGA v5.2 prevalece sobre expected_code guardados por revisiones
+                # anteriores, porque esos códigos podían venir de la copia de otro sistema.
+                doc["legacy_code"] = DOC_TYPE_TO_PRIMARY_CODE.get(expected_type, 99)
                 doc["code_source"] = "manual_review_override"
     _canonicalize_document_types(docs)
 
@@ -10923,6 +14548,7 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
             bool(doc.get("used_ocr")),
             int(doc.get("pages_processed") or 0),
         )
+        _apply_document_validation_status(doc)
     documents_duration_ms = int((perf_counter() - documents_started) * 1000)
 
     clean_started = perf_counter()
@@ -10935,14 +14561,31 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
             clean_output["_source"] = "local_fallback"
         xlsx_profile = _enrich_xlsx_profile_from_clean(xlsx_profile, clean_output, docs)
         xlsx_profile = _finalize_profile_from_docs(xlsx_profile, docs)
+    else:
+        xlsx_profile = _finalize_profile_from_docs(
+            {
+                "source_kind": "document_only",
+                "profile": {},
+                "form_fields": {},
+                "records": [],
+                "worker_sheet_counts": {},
+                "worker_sheet_salary_totals": {},
+            },
+            docs,
+        )
     tipoempresa_detectado = _extract_tipoempresa_from_entrega_docs(docs)
     if tipoempresa_detectado:
         xlsx_profile.setdefault("profile", {}).update(tipoempresa_detectado)
+    xlsx_profile = _apply_digitacion_manual_to_xlsx_profile(xlsx_profile, previous_digitacion_manual)
     _attach_operational_filenames(docs, xlsx_profile)
     clean_duration_ms = int((perf_counter() - clean_started) * 1000)
 
     validation_started = perf_counter()
+<<<<<<< HEAD
     required_docs = _apply_conditional_required_documents(_build_required_documents(xlsx_profile), docs)
+=======
+    required_docs = _build_required_documents(xlsx_profile)
+>>>>>>> origin/main
     received_types = {item["document_type"] for item in docs}
     required_profile = dict(xlsx_profile.get("profile", {}) or {})
     required_form_fields = dict(xlsx_profile.get("form_fields", {}) or {})
@@ -10998,6 +14641,14 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
         for item in validation_summary.get("alerts", [])
         if normalize_haystack(item.get("severity", "")).lower() != "alert" and item["message"] not in blockers
     )
+    if (
+        xlsx_profile.get("source_kind") == "document_only"
+        and not (xlsx_profile.get("records") or [])
+        and not _digitacion_manual_has_926_minimum(previous_digitacion_manual)
+    ):
+        blockers.append(
+            "Paquete PDF sin XLSX ni digitación manual completa: se requiere trabajador, IBC y actividad antes de generar el 926."
+        )
 
     decision_status = "aprobable" if not blockers else "observado"
     next_step = (
@@ -11025,6 +14676,7 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
         "next_step": next_step,
     }
     executive_report = _build_executive_report(payload.get("label", case_id), xlsx_profile, checklist, decision, validation_summary)
+<<<<<<< HEAD
     output_926 = _build_926_output(
         case_id,
         xlsx_profile,
@@ -11033,6 +14685,10 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
         docs=docs,
         intermediarios_override=validation_summary.get("matches", {}).get("entrega_documentos_intermediario", {}).get("todos_intermediarios"),
     )
+=======
+    output_926 = _build_926_output(case_id, xlsx_profile, checklist, decision, docs=docs)
+    digitacion_prefill = _build_digitacion_prefill(payload, xlsx_profile, docs)
+>>>>>>> origin/main
     validation_duration_ms = int((perf_counter() - validation_started) * 1000)
 
     analysis = {
@@ -11047,10 +14703,15 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
         "validacion_resumen": validation_summary,
         "decision": decision,
         "reporte_ejecutivo": executive_report,
+        "digitacion_prefill": digitacion_prefill,
         "draft_926": output_926.get("draft"),
         "output_926": output_926,
         "manual_review": previous_manual_review,
+<<<<<<< HEAD
         "document_workspace": (payload.get("analysis") or {}).get("document_workspace") or previous_analysis.get("document_workspace") or {},
+=======
+        "digitacion_manual": previous_digitacion_manual,
+>>>>>>> origin/main
         "timings": {
             "documents_duration_ms": documents_duration_ms,
             "clean_duration_ms": clean_duration_ms,
@@ -11072,13 +14733,20 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
     return payload
 
 
-def store_case_files(label: str, uploads: List[tuple[str, bytes]], operation: str = "colima") -> Dict[str, Any]:
+def store_case_files(label: str, uploads: List[tuple[str, bytes]], operation: str = "colima", entry_type: str = "empresa") -> Dict[str, Any]:
     operation_key = normalize_operation(operation)
+    entry_type_key = normalize_haystack(entry_type).replace(" ", "_")
+    if entry_type_key not in {"empresa", "contratista"}:
+        entry_type_key = "empresa"
     case_id = f"case-{operation_key}-{uuid.uuid4().hex[:10]}"
     case_dir = get_case_dir(case_id)
     files_dir = case_dir / "files"
     files_dir.mkdir(parents=True, exist_ok=True)
     stored_files: List[Dict[str, Any]] = []
+    supported_inner_extensions = {
+        ".xlsx", ".xlsm", ".xls", ".pdf", ".png", ".jpg", ".jpeg",
+        ".tif", ".tiff", ".bmp", ".webp", ".txt",
+    }
 
     def _store_one(filename: str, content: bytes) -> None:
         safe_name = filename or f"archivo-{uuid.uuid4().hex[:6]}"
@@ -11115,14 +14783,25 @@ def store_case_files(label: str, uploads: List[tuple[str, bytes]], operation: st
             try:
                 with zipfile.ZipFile(io.BytesIO(content)) as archive:
                     members = [item for item in archive.infolist() if not item.is_dir()]
+                    if len(members) > settings.max_zip_members:
+                        raise ValueError(f"ZIP supera el máximo permitido de {settings.max_zip_members} archivos.")
+                    expanded_total = 0
                     for member in members:
                         member_name = member.filename.replace("\\", "/")
                         if member_name.startswith("__MACOSX/"):
                             continue
-                        extracted = archive.read(member)
                         nested_name = member_name.split("/")[-1]
                         if not nested_name:
                             continue
+                        suffix = Path(nested_name.lower()).suffix
+                        if suffix not in supported_inner_extensions:
+                            raise ValueError(f"ZIP contiene un archivo no permitido: {nested_name}.")
+                        if member.file_size > settings.max_upload_file_bytes:
+                            raise ValueError(f"ZIP contiene un archivo que supera el máximo permitido: {nested_name}.")
+                        expanded_total += int(member.file_size or 0)
+                        if expanded_total > settings.max_zip_expanded_bytes:
+                            raise ValueError("ZIP supera el tamaño máximo expandido permitido.")
+                        extracted = archive.read(member)
                         _store_processed(nested_name, extracted)
                 continue
             except zipfile.BadZipFile:
@@ -11132,10 +14811,11 @@ def store_case_files(label: str, uploads: List[tuple[str, bytes]], operation: st
     payload = {
         "id": case_id,
         "label": normalize_text(label) or case_id,
+        "entry_type": entry_type_key,
         "operation": operation_key,
         "operation_label": operation_label(operation_key),
         "validation_profile": operation_key,
-        "status": "uploaded",
+        "status": "pending",
         "created_at": utc_now(),
         "updated_at": utc_now(),
         "files": stored_files,

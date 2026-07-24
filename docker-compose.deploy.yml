@@ -86,6 +86,7 @@ services:
       timeout: 10s
       retries: 6
     volumes:
+      - ./data:/data
       - ./shared_downloads:/host_downloads:ro
       - ./data:/data:ro
       - ${LEGACY_IMG_HOST_MOUNT:-/img10}:/legacy_share

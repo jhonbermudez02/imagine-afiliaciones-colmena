@@ -18,10 +18,20 @@ const novaSendBtn      = document.getElementById('novaSendBtn');
 const novaActivity     = document.getElementById('novaActivity');
 
 let novaOpen=false, novaMinimized=false, novaSearching=false;
-const CHAT_CONTEXT_KEY = 'imagine-chat-context-v1';
-const PROCESS_STATE_KEY = 'imagine-process-state-v1';
+const CHAT_CONTEXT_KEY = 'afilega-fa-ima-la-v2-chat-context-v1';
+const PROCESS_STATE_KEY = 'afilega-fa-ima-la-v2-process-state-v1';
 const NOVA_OPEN_CURRENT_TERMS = new Set(['abralo', 'ábralo', 'abrelo', 'ábrelo', 'ese documento', 'esa fuente', 'ese archivo']);
 const NOVA_OPEN_NEXT_TERMS = new Set(['muestrame el siguiente', 'muéstrame el siguiente', 'el siguiente', 'siguiente', 'abre el siguiente']);
+
+function escapeHtml(value='') {
+    return String(value || '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+    }[char]));
+}
 
 function openNova(){novaOpen=true;novaMinimized=false;novaPanel.classList.add('nova-visible');novaMinimizedTab.classList.add('hidden');novaToggleBtn.classList.add('nova-open');document.body.classList.add('nova-open-layout');setTimeout(()=>novaInput?.focus(),320);}
 function closeNova(){novaOpen=false;novaMinimized=false;novaPanel.classList.remove('nova-visible');novaMinimizedTab.classList.add('hidden');novaToggleBtn.classList.remove('nova-open');document.body.classList.remove('nova-open-layout');}
@@ -225,7 +235,7 @@ function renderNovaResponse(text) {
                 'Respuesta ejecutiva': '✦',
             };
             const icon = icons[title] || '•';
-            html += `<div class="nova-section-title"><span class="nova-section-icon">${icon}</span><span>${title}</span></div>`;
+            html += `<div class="nova-section-title"><span class="nova-section-icon">${escapeHtml(icon)}</span><span>${escapeHtml(title)}</span></div>`;
             continue;
         }
 
@@ -240,22 +250,22 @@ function renderNovaResponse(text) {
                 const val = content.substring(colonIdx + 1).trim();
                 if (val) {
                     // Colorear APROBADA / RECHAZADA
-                    let valHtml = val;
+                    let valHtml = escapeHtml(val);
                     if (val === 'APROBADA') valHtml = `<span class="nova-badge nova-badge-ok">APROBADA</span>`;
                     if (val === 'RECHAZADA') valHtml = `<span class="nova-badge nova-badge-error">RECHAZADA</span>`;
-                    html += `<li><span class="nova-item-key">${key}</span><span class="nova-item-val">${valHtml}</span></li>`;
+                    html += `<li><span class="nova-item-key">${escapeHtml(key)}</span><span class="nova-item-val">${valHtml}</span></li>`;
                 } else {
-                    html += `<li>${content}</li>`;
+                    html += `<li>${escapeHtml(content)}</li>`;
                 }
             } else {
-                html += `<li>${content}</li>`;
+                html += `<li>${escapeHtml(content)}</li>`;
             }
             continue;
         }
 
         // Linea normal
         if (inList) { html += '</ul>'; inList = false; }
-        html += `<p class="nova-text-line">${line}</p>`;
+        html += `<p class="nova-text-line">${escapeHtml(line)}</p>`;
     }
 
     if (inList) html += '</ul>';
@@ -320,7 +330,7 @@ function addNovaMessage(text, role='nova', sources=[]) {
                 btn.type = 'button';
                 btn.className = 'nova-source-btn';
                 const type = source.document_type || 'doc';
-                btn.innerHTML = `<span class="nova-source-type">${type}</span><span class="nova-source-name">${source.titulo || 'Archivo'}</span>`;
+                btn.innerHTML = `<span class="nova-source-type">${escapeHtml(type)}</span><span class="nova-source-name">${escapeHtml(source.titulo || 'Archivo')}</span>`;
                 btn.addEventListener('click', () => {
                     persistNovaChatContext({
                         last_document_title: source.titulo || 'Archivo',

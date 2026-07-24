@@ -3,10 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AFI Colima · Portal ARL</title>
+  <title>AFILEGA_FA_IMA_LA_V2 · Portal ARL</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+<datalist id="epsCatalogOptions"></datalist>
+<datalist id="afpCatalogOptions"></datalist>
+<datalist id="cargoCatalogOptions"></datalist>
+<datalist id="actividadEconomicaOptions"></datalist>
+<datalist id="camaraActividadOptions"></datalist>
 
 <!-- LOGIN SCREEN -->
 <div id="loginScreen" class="login-screen hidden">
@@ -14,7 +19,7 @@
     <div class="login-brand">
       <img src="/imagine-logo.jpeg" alt="Imagine S.A.S." class="login-logo-img" />
       <div class="login-brand-text">
-        <div class="login-title" id="loginTitle">AFI Colima</div>
+        <div class="login-title" id="loginTitle">AFILEGA_FA_IMA_LA_V2</div>
         <div class="login-sub" id="loginSub">Portal ARL · Afiliaciones</div>
       </div>
     </div>
@@ -25,13 +30,6 @@
         <div>
           <div class="profile-name">Perfil Imagine</div>
           <div class="profile-desc">Carga, valida y clasifica expedientes</div>
-        </div>
-      </button>
-      <button class="login-profile-btn" type="button" data-profile="colmena">
-        <div class="profile-icon profile-icon-alt">C</div>
-        <div>
-          <div class="profile-name">Perfil Colmena</div>
-          <div class="profile-desc">Revisa, valida imágenes y genera plano</div>
         </div>
       </button>
     </div>
@@ -51,8 +49,8 @@
     <div class="sidebar-brand">
       <img src="/imagine-logo.jpeg" alt="Imagine S.A.S." class="sidebar-logo-img" />
       <div>
-        <div class="brand-name">IMAGINE S.A.S.</div>
-        <div class="brand-sub" id="brandSub">AFI Colima · Portal ARL</div>
+        <div class="brand-name">IMAGINE S.A.S. FAAL_AFI</div>
+        <div class="brand-sub" id="brandSub" style="display:none"></div>
       </div>
     </div>
 
@@ -76,12 +74,6 @@
 
       <div class="nav-group" id="navSistema">
         <div class="nav-group-label">Sistema</div>
-        <button class="nav-item" data-view="entrenamiento" type="button">
-          <span class="nav-dot"></span>Hallazgos
-        </button>
-        <button class="nav-item" data-view="busqueda" type="button">
-          <span class="nav-dot"></span>Búsqueda
-        </button>
         <button class="nav-item" data-view="admin" type="button">
           <span class="nav-dot"></span>Admin
         </button>
@@ -105,7 +97,7 @@
     <header class="topbar">
       <div class="topbar-left">
         <div class="page-title" id="pageTitle">Bandeja de entrada</div>
-        <div class="page-breadcrumb" id="pageBreadcrumb">Operación · contratos activos</div>
+        <div class="page-breadcrumb" id="pageBreadcrumb">AFILEGA_FA_IMA_LA_V2 · Operación · contratos activos</div>
       </div>
       <select class="mobile-view-select" id="mobileViewSelect" aria-label="Cambiar vista">
         <option value="bandeja">Bandeja</option>
@@ -155,20 +147,123 @@
       <section class="view" id="view-flujo">
         <div class="section-card">
           <div class="section-card-head">
-            <div class="section-title">Cargar nuevo contrato · <span data-operation-label>AFI Colima</span></div>
-            <div class="pill pill-neutral" data-validation-profile-label>Reglas Colima</div>
+            <div class="section-title">Radicar afiliación</div>
+            <div class="pill pill-neutral" data-validation-profile-label>Reglas AFILEGA</div>
+          </div>
+          <div class="digitacion-block">
+            <div class="digitacion-block-title">Radicación del contrato</div>
+            <div class="digitacion-grid">
+              <div class="field-row">
+                <label class="field-label" for="flowNumeroRadicacion">Consecutivo Radicación *</label>
+                <input class="field-input radicacion-field" id="flowNumeroRadicacion" data-rad-key="numero_radicacion" type="text" placeholder="Asignado por Imagine" readonly aria-readonly="true" />
+              </div>
+              <div class="field-row">
+                <label class="field-label" for="flowTipoAfiliacion">Clase afiliación *</label>
+                <select class="field-select radicacion-field" id="flowTipoAfiliacion" data-rad-key="tipo_afiliacion">
+                  <option value="">Selecciona...</option>
+                  <option value="Primera vez">Primera vez</option>
+                  <option value="Traslado">Traslado</option>
+                  <option value="Independiente - Contratista">Independiente - Contratista</option>
+                </select>
+              </div>
+              <div class="field-row">
+                <label class="field-label" for="flowFechaRadicacion">Fecha radicación Alfa *</label>
+                <input class="field-input radicacion-field" id="flowFechaRadicacion" data-rad-key="fecha_radicacion" type="date" />
+              </div>
+              <div class="field-row">
+                <label class="field-label" for="flowFechaInicioVigencia">Fecha inicio vigencia *</label>
+                <input class="field-input radicacion-field" id="flowFechaInicioVigencia" data-rad-key="fecha_inicio_vigencia" type="date" />
+              </div>
+              <div class="field-row">
+                <label class="field-label" for="flowFechaRecibidoImagine">Fecha recibido Imagine *</label>
+                <input class="field-input radicacion-field" id="flowFechaRecibidoImagine" data-rad-key="fecha_recibido_imagine" type="date" />
+              </div>
+              <div class="field-row">
+                <label class="field-label" for="flowArlTraslado">ARL traslado</label>
+                <select class="field-select radicacion-field" id="flowArlTraslado" data-rad-key="empresa_arl_anterior">
+                  <option value="">Selecciona...</option>
+                  <option value="NO SUMINISTRADO">0 · NO SUMINISTRADO</option>
+                  <option value="DESCONOCIDO">0 · DESCONOCIDO</option>
+                  <option value="COLPATRIA">1 · COLPATRIA</option>
+                  <option value="COLFONDOS">10 · COLFONDOS</option>
+                  <option value="INVERTIR">11 · INVERTIR</option>
+                  <option value="ING">12 · ING</option>
+                  <option value="OLD MUTUAL">13 · OLD MUTUAL</option>
+                  <option value="PROTECCION">14 · PROTECCION</option>
+                  <option value="CALDAS">16 · CALDAS</option>
+                  <option value="PENSIONAR">19 · PENSIONAR</option>
+                  <option value="COLPENSIONES">2 · COLPENSIONES</option>
+                  <option value="FONPRENOR">20 · FONPRENOR</option>
+                  <option value="CAJANAL">23 · CAJANAL</option>
+                  <option value="PENSIONADOS">24 · PENSIONADOS</option>
+                  <option value="BONSALUD">25 · BONSALUD</option>
+                  <option value="PORVENIR">3 · PORVENIR</option>
+                  <option value="SKANDIA">4 · SKANDIA</option>
+                  <option value="HORIZONTE">5 · HORIZONTE</option>
+                  <option value="MUNICIPIO">50 · MUNICIPIO</option>
+                  <option value="GANADERA">6 · GANADERA</option>
+                  <option value="CONSORCIO FIDUFOSYGA">73 · CONSORCIO FIDUFOSYGA</option>
+                  <option value="CAJA DE PREVISION SOCIAL UNIV.DCT">75 · CAJA DE PREVISION SOCIAL UNIV.DCT</option>
+                  <option value="SERV. DE SALUD DE LA UNIV. DEL CAUCA">77 · SERV. DE SALUD DE LA UNIV. DEL CAUCA</option>
+                  <option value="DAVIVIR">8 · DAVIVIR</option>
+                  <option value="SKANDIA">9 · SKANDIA</option>
+                  <option value="CAJA DE PREVISION SOCIAL STAFE DE BOGOTA">95 · CAJA DE PREVISION SOCIAL STAFE DE BOGOTA</option>
+                  <option value="CAPRECUNDI">98 · CAPRECUNDI</option>
+                  <option value="SIN AFP">99 · SIN AFP</option>
+                </select>
+              </div>
+              <div class="field-row">
+                <label class="field-label" for="flowEmpleadorTipoDocumento">Tipo documento *</label>
+                <select class="field-select radicacion-field" id="flowEmpleadorTipoDocumento" data-rad-key="empleador_tipo_documento">
+                  <option value="NIT">NIT</option>
+                  <option value="CC">CC</option>
+                  <option value="CE">CE</option>
+                  <option value="TI">TI</option>
+                  <option value="PE">PE</option>
+                  <option value="PT">PT</option>
+                </select>
+              </div>
+              <div class="field-row">
+                <label class="field-label" for="flowNit">No. de identificación *</label>
+                <input class="field-input radicacion-field" id="flowNit" data-rad-key="nit" type="text" inputmode="numeric" />
+              </div>
+              <div class="field-row">
+                <label class="field-label" for="flowRazonSocial">Razón social *</label>
+                <input class="field-input radicacion-field" id="flowRazonSocial" data-rad-key="razon_social" type="text" autocomplete="organization" />
+              </div>
+              <div class="field-row">
+                <label class="field-label" for="flowSucursal">Sucursal ARL *</label>
+                <select class="field-select radicacion-field" id="flowSucursal" data-rad-key="sucursal">
+                  <option value="">Selecciona...</option>
+                  <option value="Barranquilla">Barranquilla</option>
+                  <option value="Cali">Cali</option>
+                  <option value="Dirección General">Dirección General</option>
+                  <option value="Medellin">Medellin</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="entry-type-row" id="entryTypeRow" aria-label="Tipo de entrada de afiliación">
+            <button class="entry-type-btn active" data-entry-type="empresa" type="button">
+              <span class="entry-type-title">Empresa</span>
+              <span class="entry-type-sub">Contratante, sedes y centros</span>
+            </button>
+            <button class="entry-type-btn" data-entry-type="contratista" type="button">
+              <span class="entry-type-title">Contratista</span>
+              <span class="entry-type-sub">Trabajador independiente</span>
+            </button>
           </div>
           <div class="upload-zone" id="uploadZone">
             <div class="upload-icon">↑</div>
-            <div class="upload-text">Arrastra el XLSX y los PDFs aquí</div>
-            <div class="upload-sub">o haz clic para seleccionar archivos</div>
-            <input type="file" id="packageFilesInput" multiple accept=".xlsx,.xls,.xlsm,.pdf,.zip" style="display:none" />
+            <div class="upload-text">Arrastra los documentos aquí</div>
+            <div class="upload-sub">PDF, imágenes, ZIP o XLSX si el paquete lo trae</div>
+            <input type="file" id="packageFilesInput" multiple accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.txt,.zip,.xlsx,.xls,.xlsm" style="display:none" />
           </div>
           <div class="upload-selected" id="uploadSelected" style="display:none">
             <div class="upload-files-list" id="uploadFilesList"></div>
             <div class="upload-actions">
               <button class="btn-secondary" id="clearFilesBtn" type="button">Limpiar selección</button>
-              <button class="btn-primary" id="runWorkflowBtn" type="button">Ejecutar prevalidación</button>
+              <button class="btn-primary" id="runWorkflowBtn" type="button">Radicar y validar documentos</button>
             </div>
           </div>
         </div>
@@ -184,9 +279,762 @@
 
         <div class="section-card" id="workflowResultCard" style="display:none">
           <div class="section-card-head">
-            <div class="section-title">Resultado de prevalidación</div>
+            <div class="section-title">Resultado de validación documental</div>
           </div>
           <div id="workflowResultContent"></div>
+        </div>
+      </section>
+
+      <!-- DIGITACIÓN -->
+      <section class="view" id="view-digitacion">
+        <div class="section-card">
+          <div class="section-card-head digitacion-head">
+            <div>
+              <div class="section-title">Digitación del formato de afiliación</div>
+              <div class="section-sub">Captura manual de datos del formulario AFILEGA</div>
+              <div class="digitacion-context" id="digitacionContext">Sin contrato seleccionado</div>
+            </div>
+            <div class="digitacion-head-actions">
+              <span class="status-pill" id="digitacionSaveStatus">Borrador local</span>
+              <button class="btn-secondary" id="digitacionClearBtn" type="button">Limpiar</button>
+              <button class="btn-secondary" id="digitacionValidateBtn" type="button">Validar reglas</button>
+              <button class="btn-primary" id="digitacionSaveBtn" type="button">Guardar borrador</button>
+              <button class="btn-primary" id="digitacionRunBtn" type="button">Guardar + generar 926</button>
+            </div>
+          </div>
+
+          <div class="digitacion-tabs" id="digitacionTabs">
+            <button class="tab active" data-digitacion-tab="afiliacion" type="button">Afiliación</button>
+            <button class="tab" data-digitacion-tab="sedes" type="button">Sede</button>
+            <button class="tab" data-digitacion-tab="novedades" type="button">Trabajadores</button>
+          </div>
+
+          <div class="digitacion-validation-panel hidden" id="digitacionValidationPanel"></div>
+
+          <div class="digitacion-workbench">
+            <div class="digitacion-editor">
+              <form id="digitacionForm" class="digitacion-form">
+                <div style="display:none">
+                  <input class="digitacion-field" id="digTipoTramite" data-dig-key="tipo_tramite" type="hidden" value="afiliacion" />
+                  <input class="digitacion-field" id="digFechaCobertura" data-dig-key="fecha_inicio_cobertura" type="hidden" />
+                  <input class="digitacion-field" id="digNumeroRadicacion" data-dig-key="numero_radicacion" type="hidden" />
+                  <input class="digitacion-field" id="digFechaRadicacion" data-dig-key="fecha_radicacion" type="hidden" />
+                  <input class="digitacion-field" id="digFechaRecibidoImagine" data-dig-key="fecha_recibido_imagine" type="hidden" />
+                  <input class="digitacion-field" id="digSucursal" data-dig-key="sucursal" type="hidden" />
+                </div>
+
+                <div class="digitacion-panel active" data-digitacion-panel="afiliacion">
+              <div class="digitacion-block">
+                <div class="digitacion-block-title">Contratante / responsable de afiliación</div>
+                <div class="digitacion-grid">
+                  <div class="field-row">
+                    <label class="field-label" for="digTipoAfiliacion">Clase afiliación</label>
+                    <select class="field-select digitacion-field digitacion-readonly-field" id="digTipoAfiliacion" data-dig-key="tipo_afiliacion" disabled aria-readonly="true">
+                      <option value="">Selecciona...</option>
+                      <option value="Primera vez">Primera vez</option>
+                      <option value="Traslado">Traslado</option>
+                      <option value="Independiente - Contratista">Independiente - Contratista</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digEmpleadorTipoDocumento">Tipo Id *</label>
+                    <select class="field-select digitacion-field digitacion-readonly-field" id="digEmpleadorTipoDocumento" data-dig-key="empleador_tipo_documento" disabled aria-readonly="true">
+                      <option value="">Selecciona...</option>
+                      <option value="CC">CC</option>
+                      <option value="NIT">NIT</option>
+                      <option value="SC">SC</option>
+                      <option value="PT">PT</option>
+                      <option value="PE">PE</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digNit">Nro NIT *</label>
+                    <input class="field-input digitacion-field digitacion-readonly-field" id="digNit" data-dig-key="nit" type="text" inputmode="numeric" maxlength="20" readonly aria-readonly="true" />
+                  </div>
+                  <div class="field-row digitacion-wide">
+                    <label class="field-label" for="digRazonSocial">Razón social *</label>
+                    <input class="field-input digitacion-field" id="digRazonSocial" data-dig-key="razon_social" type="text" maxlength="200" autocomplete="organization" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digNitDv">Dígito verificación</label>
+                    <input class="field-input digitacion-field" id="digNitDv" data-dig-key="nit_dv" type="text" inputmode="numeric" maxlength="1" />
+                  </div>
+                  <div class="field-row digitacion-activity-pair">
+                    <div class="field-row">
+                      <label class="field-label" for="digActividadEconomica">Código actividad económica</label>
+                      <input class="field-input digitacion-field" id="digActividadEconomica" data-dig-key="codigo_actividad_economica" type="text" inputmode="numeric" list="actividadEconomicaOptions" autocomplete="off" />
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="digActividadPrincipalEmpresa">Actividad principal</label>
+                      <input class="field-input digitacion-field" id="digActividadPrincipalEmpresa" data-dig-key="actividad_principal_empresa" type="text" />
+                    </div>
+                  </div>
+                  <div class="field-row digitacion-risk-compact">
+                    <label class="field-label" for="digClaseRiesgoEmpresa">Riesgo</label>
+                    <select class="field-select digitacion-field" id="digClaseRiesgoEmpresa" data-dig-key="clase_riesgo_empresa">
+                      <option value="">Selecciona...</option>
+                      <option value="1">I</option>
+                      <option value="2">II</option>
+                      <option value="3">III</option>
+                      <option value="4">IV</option>
+                      <option value="5">V</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digDireccionEmpresa">Dirección sede principal</label>
+                    <input class="field-input digitacion-field" id="digDireccionEmpresa" data-dig-key="direccion_empresa" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digDepartamentoEmpresa">Departamento</label>
+                    <select class="field-select digitacion-field js-department-select" id="digDepartamentoEmpresa" data-dig-key="departamento_empresa" data-municipality-target="digCiudadEmpresa">
+                      <option value="">Selecciona...</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digCiudadEmpresa">Municipio / distrito</label>
+                    <select class="field-select digitacion-field js-municipality-select" id="digCiudadEmpresa" data-dig-key="municipio_empresa" data-department-source="digDepartamentoEmpresa" disabled>
+                      <option value="">Selecciona departamento...</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digCorreoEmpresa">Correo electrónico</label>
+                    <input class="field-input digitacion-field" id="digCorreoEmpresa" data-dig-key="correo_empresa" type="email" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digTelefonoEmpresa">Teléfono *</label>
+                    <input class="field-input digitacion-field" id="digTelefonoEmpresa" data-dig-key="telefono_empresa" type="tel" inputmode="numeric" maxlength="10" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digTipoPersona">Tipo persona</label>
+                    <select class="field-select digitacion-field" id="digTipoPersona" data-dig-key="tipo_persona">
+                      <option value="">Selecciona...</option>
+                      <option value="Jurídica">Jurídica</option>
+                      <option value="Natural">Natural</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digEmpresaTipoAportante">Tipo aportante</label>
+                    <select class="field-select digitacion-field" id="digEmpresaTipoAportante" data-dig-key="empresa_tipo_aportante">
+                      <option value="">Selecciona...</option>
+                      <option value="1">1 · EMPLEADOR</option>
+                      <option value="2">2 · INDEPENDIENTE</option>
+                      <option value="3">3 · ENTIDADES O UNIVERSIDADES PUBLICAS CON REGIMEN ESPECIAL EN SALUD</option>
+                      <option value="4">4 · AGREMIACIONES O ASOCIACIONES</option>
+                      <option value="5">5 · COOPERATIVAS Y PRECOOPERATIVAS DE TRABAJO ASOCIADO</option>
+                      <option value="6">6 · MISIONES DIPLOMATICAS, CONSULARES O DE ORGANISMOS MULTILATERALES NO SOMETIDOS A LA LEGISLACION COLOMBIANA</option>
+                      <option value="7">7 · ORGANIZACIONES ADMINISTRADORAS DEL PROGRAMA DE HOGARES DEL BIENESTAR FAMILIAR</option>
+                      <option value="8">8 · PAGADOR DE APORTES DE LOS CONCEJALES MUNICIPALES O DISTRITALES</option>
+                      <option value="999">999 · DATO POR VERIFICAR</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digEmpresaClaseAportante">Clase aportante</label>
+                    <input class="field-input digitacion-field" id="digEmpresaClaseAportante" data-dig-key="empresa_clase_aportante" type="text" inputmode="numeric" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digEmpresaVinculador">Vinculador laboral</label>
+                    <select class="field-select digitacion-field" id="digEmpresaVinculador" data-dig-key="empresa_vinculador_laboral">
+                      <option value="">Selecciona...</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="digitacion-block">
+                <div class="digitacion-block-title">Representante legal</div>
+                <div class="digitacion-grid">
+                  <div class="field-row">
+                    <label class="field-label" for="digRepLegalNombre">Nombre completo</label>
+                    <input class="field-input digitacion-field" id="digRepLegalNombre" data-dig-key="rep_legal_nombre_completo" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digRepLegalTipoDoc">Tipo documento</label>
+                    <select class="field-select digitacion-field" id="digRepLegalTipoDoc" data-dig-key="rep_legal_tipo_documento">
+                      <option value="">Selecciona...</option>
+                      <option value="CC">CC</option>
+                      <option value="CE">CE</option>
+                      <option value="TI">TI</option>
+                      <option value="PE">PE</option>
+                      <option value="PT">PT</option>
+                      <option value="CD">CD</option>
+                      <option value="RC">RC</option>
+                      <option value="SC">SC</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digRepLegalDocumento">Número documento</label>
+                    <input class="field-input digitacion-field" id="digRepLegalDocumento" data-dig-key="rep_legal_numero_documento" type="text" inputmode="numeric" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digRepLegalCorreo">Correo representante</label>
+                    <input class="field-input digitacion-field" id="digRepLegalCorreo" data-dig-key="rep_legal_correo" type="email" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digRepLegalCargo">Cargo</label>
+                    <input class="field-input digitacion-field" id="digRepLegalCargo" data-dig-key="rep_legal_cargo" type="text" />
+                  </div>
+                </div>
+              </div>
+
+              <div class="digitacion-block">
+                <div class="digitacion-block-title">Cámara de Comercio</div>
+                <div class="digitacion-grid">
+                  <div class="field-row">
+                    <label class="field-label" for="digCamaraFechaConstitucion">Fecha constitución</label>
+                    <input class="field-input digitacion-field" id="digCamaraFechaConstitucion" data-dig-key="camara_fecha_constitucion" type="date" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digCamaraRegimen">Régimen</label>
+                    <select class="field-select digitacion-field" id="digCamaraRegimen" data-dig-key="camara_regimen">
+                      <option value="">Selecciona...</option>
+                      <option value="Simple">Simple</option>
+                      <option value="Común">Común</option>
+                      <option value="Especial">Especial</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digCamaraCodigoActividad">Código actividad</label>
+                    <input class="field-input digitacion-field" id="digCamaraCodigoActividad" data-dig-key="camara_codigo_actividad" type="text" inputmode="numeric" list="camaraActividadOptions" autocomplete="off" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digCamaraActividadPrincipal">Actividad principal</label>
+                    <input class="field-input digitacion-field" id="digCamaraActividadPrincipal" data-dig-key="camara_actividad_principal" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digCamaraOlcsaPyme">OLCSA / PYME</label>
+                    <select class="field-select digitacion-field" id="digCamaraOlcsaPyme" data-dig-key="camara_olcsa_pyme">
+                      <option value="">Selecciona...</option>
+                      <option value="OLCSA">OLCSA</option>
+                      <option value="PYME">PYME</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digCamaraNaturaleza">Naturaleza</label>
+                    <select class="field-select digitacion-field" id="digCamaraNaturaleza" data-dig-key="camara_naturaleza">
+                      <option value="">Selecciona...</option>
+                      <option value="Privada">Privada</option>
+                      <option value="Pública">Pública</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digCamaraClaseSociedad">Clase sociedad</label>
+                    <select class="field-select digitacion-field" id="digCamaraClaseSociedad" data-dig-key="camara_clase_sociedad">
+                      <option value="">Selecciona...</option>
+                      <option value="SA">SA</option>
+                      <option value="SAS">SAS</option>
+                      <option value="LTDA">LTDA</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digCamaraTamano">Tamaño</label>
+                    <select class="field-select digitacion-field" id="digCamaraTamano" data-dig-key="camara_tamano">
+                      <option value="">Selecciona...</option>
+                      <option value="Pequeña">Pequeña</option>
+                      <option value="Mediana">Mediana</option>
+                      <option value="Grande">Grande</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digCamaraGrupo">Grupo empresarial</label>
+                    <input class="field-input digitacion-field" id="digCamaraGrupo" data-dig-key="camara_grupo_empresarial" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digCamaraTipoLocalizacion">Tipo localización</label>
+                    <input class="field-input digitacion-field" id="digCamaraTipoLocalizacion" data-dig-key="camara_tipo_localizacion" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digCamaraZonaLocalizacion">Zona localización</label>
+                    <select class="field-select digitacion-field" id="digCamaraZonaLocalizacion" data-dig-key="camara_zona_localizacion">
+                      <option value="">Selecciona...</option>
+                      <option value="U">U · Urbana</option>
+                      <option value="R">R · Rural</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="digitacion-block">
+                <div class="digitacion-block-title">Datos contacto pagos</div>
+                <div class="digitacion-grid">
+                  <div class="field-row">
+                    <label class="field-label" for="digContactoPagosNombre">Nombre</label>
+                    <input class="field-input digitacion-field" id="digContactoPagosNombre" data-dig-key="contacto_pagos_nombre" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digContactoPagosCargo">Cargo</label>
+                    <input class="field-input digitacion-field" id="digContactoPagosCargo" data-dig-key="contacto_pagos_cargo" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digContactoPagosCorreo">Correo electrónico</label>
+                    <input class="field-input digitacion-field" id="digContactoPagosCorreo" data-dig-key="contacto_pagos_correo" type="email" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digContactoPagosDireccion">Dirección</label>
+                    <input class="field-input digitacion-field" id="digContactoPagosDireccion" data-dig-key="contacto_pagos_direccion" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digContactoPagosDepartamento">Departamento</label>
+                    <select class="field-select digitacion-field js-department-select" id="digContactoPagosDepartamento" data-dig-key="contacto_pagos_departamento" data-municipality-target="digContactoPagosMunicipio">
+                      <option value="">Selecciona...</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digContactoPagosMunicipio">Ciudad</label>
+                    <select class="field-select digitacion-field js-municipality-select" id="digContactoPagosMunicipio" data-dig-key="contacto_pagos_municipio" data-department-source="digContactoPagosDepartamento" disabled>
+                      <option value="">Selecciona departamento...</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digContactoPagosTelefono">Teléfono *</label>
+                    <input class="field-input digitacion-field" id="digContactoPagosTelefono" data-dig-key="contacto_pagos_telefono" type="tel" inputmode="numeric" maxlength="10" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digContactoPagosCelular">Celular *</label>
+                    <input class="field-input digitacion-field" id="digContactoPagosCelular" data-dig-key="contacto_pagos_celular" type="tel" inputmode="numeric" maxlength="10" />
+                  </div>
+                </div>
+              </div>
+
+              <div class="digitacion-block">
+                <div class="digitacion-block-title">Datos contacto SST</div>
+                <div class="digitacion-grid">
+                  <div class="field-row">
+                    <label class="field-label" for="digContactoSstNombre">Nombre</label>
+                    <input class="field-input digitacion-field" id="digContactoSstNombre" data-dig-key="contacto_sst_nombre" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digContactoSstCargo">Cargo</label>
+                    <input class="field-input digitacion-field" id="digContactoSstCargo" data-dig-key="contacto_sst_cargo" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digContactoSstCorreo">Correo electrónico</label>
+                    <input class="field-input digitacion-field" id="digContactoSstCorreo" data-dig-key="contacto_sst_correo" type="email" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digContactoSstDireccion">Dirección</label>
+                    <input class="field-input digitacion-field" id="digContactoSstDireccion" data-dig-key="contacto_sst_direccion" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digContactoSstDepartamento">Departamento</label>
+                    <select class="field-select digitacion-field js-department-select" id="digContactoSstDepartamento" data-dig-key="contacto_sst_departamento" data-municipality-target="digContactoSstMunicipio">
+                      <option value="">Selecciona...</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digContactoSstMunicipio">Ciudad</label>
+                    <select class="field-select digitacion-field js-municipality-select" id="digContactoSstMunicipio" data-dig-key="contacto_sst_municipio" data-department-source="digContactoSstDepartamento" disabled>
+                      <option value="">Selecciona departamento...</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digContactoSstTelefono">Teléfono *</label>
+                    <input class="field-input digitacion-field" id="digContactoSstTelefono" data-dig-key="contacto_sst_telefono" type="tel" inputmode="numeric" maxlength="10" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digContactoSstCelular">Celular *</label>
+                    <input class="field-input digitacion-field" id="digContactoSstCelular" data-dig-key="contacto_sst_celular" type="tel" inputmode="numeric" maxlength="10" />
+                  </div>
+                </div>
+              </div>
+
+                </div>
+
+                <div class="digitacion-panel" data-digitacion-panel="sedes">
+              <div class="digitacion-block">
+                <div class="digitacion-block-title">Sede</div>
+                <div class="digitacion-grid">
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeNombre">Nombre sede o centro</label>
+                    <input class="field-input digitacion-field" id="digSedeNombre" data-dig-key="sede_nombre" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeSucursal">Sucursal</label>
+                    <select class="field-select digitacion-field" id="digSedeSucursal" data-dig-key="sede_sucursal">
+                      <option value="">Selecciona...</option>
+                      <option value="Barranquilla">Barranquilla</option>
+                      <option value="Cali">Cali</option>
+                      <option value="Dirección General">Dirección General</option>
+                      <option value="Medellin">Medellin</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="digitacion-block">
+                <div class="digitacion-block-title">Datos del centro de trabajo</div>
+                <div class="digitacion-grid">
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeCodigo">Código centro de trabajo</label>
+                    <input class="field-input digitacion-field" id="digSedeCodigo" data-dig-key="sede_codigo" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeCentroTrabajoNombre">Nombre centro de trabajo</label>
+                    <input class="field-input digitacion-field" id="digSedeCentroTrabajoNombre" data-dig-key="sede_centro_trabajo_nombre" type="text" maxlength="60" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeDireccion">Dirección centro de trabajo</label>
+                    <input class="field-input digitacion-field" id="digSedeDireccion" data-dig-key="sede_direccion" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeDepartamento">Departamento</label>
+                    <select class="field-select digitacion-field js-department-select" id="digSedeDepartamento" data-dig-key="sede_departamento" data-municipality-target="digSedeMunicipio">
+                      <option value="">Selecciona...</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeMunicipio">Municipio</label>
+                    <select class="field-select digitacion-field js-municipality-select" id="digSedeMunicipio" data-dig-key="sede_municipio" data-department-source="digSedeDepartamento" disabled>
+                      <option value="">Selecciona departamento...</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeZona">Zona</label>
+                    <select class="field-select digitacion-field" id="digSedeZona" data-dig-key="sede_zona">
+                      <option value="">Selecciona...</option>
+                      <option value="urbana">Urbana</option>
+                      <option value="rural">Rural</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeTelefono">Teléfono *</label>
+                    <input class="field-input digitacion-field" id="digSedeTelefono" data-dig-key="sede_telefono" type="tel" inputmode="numeric" maxlength="10" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeCelular">Celular *</label>
+                    <input class="field-input digitacion-field" id="digSedeCelular" data-dig-key="sede_celular" type="tel" inputmode="numeric" maxlength="10" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeFax">Fax</label>
+                    <input class="field-input digitacion-field" id="digSedeFax" data-dig-key="sede_fax" type="tel" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeCorreo">Correo</label>
+                    <input class="field-input digitacion-field" id="digSedeCorreo" data-dig-key="sede_correo" type="email" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeActividad">Código actividad económica</label>
+                    <input class="field-input digitacion-field" id="digSedeActividad" data-dig-key="sede_codigo_actividad" type="text" inputmode="numeric" list="actividadEconomicaOptions" autocomplete="off" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeRiesgo">Clase de riesgo centro</label>
+                    <select class="field-select digitacion-field" id="digSedeRiesgo" data-dig-key="sede_clase_riesgo">
+                      <option value="">Selecciona...</option>
+                      <option value="1">1</option>
+                      <option value="2">2</option>
+                      <option value="3">3</option>
+                      <option value="4">4</option>
+                      <option value="5">5</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeNumeroTrabajadores">Nro trabajadores</label>
+                    <input class="field-input digitacion-field" id="digSedeNumeroTrabajadores" data-dig-key="sede_numero_trabajadores" type="text" inputmode="numeric" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeTransporte">Transporte *</label>
+                    <select class="field-select digitacion-field" id="digSedeTransporte" data-dig-key="sede_transporte">
+                      <option value="">Selecciona...</option>
+                      <option value="S">S</option>
+                      <option value="N">N</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeGrado">Grado riesgo</label>
+                    <select class="field-select digitacion-field" id="digSedeGrado" data-dig-key="sede_grado">
+                      <option value="">Selecciona...</option>
+                      <option value="1">1</option>
+                      <option value="2">2</option>
+                      <option value="3">3</option>
+                      <option value="4">4</option>
+                      <option value="5">5</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeTarifa">Tarifa</label>
+                    <input class="field-input digitacion-field" id="digSedeTarifa" data-dig-key="sede_tarifa" type="number" min="0" step="0.001" readonly />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeTipoLocalizacion">Tipo localización</label>
+                    <input class="field-input digitacion-field" id="digSedeTipoLocalizacion" data-dig-key="sede_tipo_localizacion" type="text" inputmode="numeric" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeContacto">Contacto centro</label>
+                    <input class="field-input digitacion-field" id="digSedeContacto" data-dig-key="sede_contacto" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSedeCargoContacto">Cargo contacto</label>
+                    <input class="field-input digitacion-field" id="digSedeCargoContacto" data-dig-key="sede_cargo_contacto" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digResponsableSedeNombre">Responsable sede</label>
+                    <input class="field-input digitacion-field" id="digResponsableSedeNombre" data-dig-key="responsable_sede_principal_nombre_completo" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digResponsableSedeTipoDoc">Tipo doc responsable</label>
+                    <select class="field-select digitacion-field" id="digResponsableSedeTipoDoc" data-dig-key="responsable_sede_principal_tipo_documento">
+                      <option value="">Selecciona...</option>
+                      <option value="CC">CC</option>
+                      <option value="CE">CE</option>
+                      <option value="TI">TI</option>
+                      <option value="PE">PE</option>
+                      <option value="PT">PT</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digResponsableSedeDocumento">Doc responsable</label>
+                    <input class="field-input digitacion-field" id="digResponsableSedeDocumento" data-dig-key="responsable_sede_principal_numero_documento" type="text" inputmode="numeric" />
+                  </div>
+                </div>
+              </div>
+              <div class="digitacion-block">
+                <div class="digitacion-block-title digitacion-block-title-row">
+                  <span>Centros de trabajo adicionales</span>
+                  <button class="btn-secondary" id="addCentroTrabajoBtn" type="button">Agregar centro</button>
+                </div>
+                <div class="digitacion-centro-editor hidden" id="digitacionCentroEditor">
+                  <div class="digitacion-grid">
+                    <div class="field-row">
+                      <label class="field-label" for="centroCodigo">Código centro</label>
+                      <input class="field-input centro-extra-field" id="centroCodigo" data-centro-field="codigo" type="text" inputmode="numeric" />
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroNombre">Nombre centro</label>
+                      <input class="field-input centro-extra-field" id="centroNombre" data-centro-field="nombre" type="text" />
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroSucursal">Sucursal</label>
+                      <select class="field-select centro-extra-field" id="centroSucursal" data-centro-field="sucursal">
+                        <option value="">Selecciona...</option>
+                        <option value="Barranquilla">Barranquilla</option>
+                        <option value="Cali">Cali</option>
+                        <option value="Dirección General">Dirección General</option>
+                        <option value="Medellin">Medellin</option>
+                      </select>
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroDireccion">Dirección</label>
+                      <input class="field-input centro-extra-field" id="centroDireccion" data-centro-field="direccion" type="text" />
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroDepartamento">Departamento</label>
+                      <select class="field-select centro-extra-field js-centro-department-select" id="centroDepartamento" data-centro-field="departamento">
+                        <option value="">Selecciona...</option>
+                      </select>
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroMunicipio">Municipio</label>
+                      <select class="field-select centro-extra-field js-centro-municipality-select" id="centroMunicipio" data-centro-field="municipio" disabled>
+                        <option value="">Selecciona departamento...</option>
+                      </select>
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroZona">Zona</label>
+                      <select class="field-select centro-extra-field" id="centroZona" data-centro-field="zona">
+                        <option value="">Selecciona...</option>
+                        <option value="urbana">Urbana</option>
+                        <option value="rural">Rural</option>
+                      </select>
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroTelefono">Teléfono</label>
+                      <input class="field-input centro-extra-field" id="centroTelefono" data-centro-field="telefono" type="tel" inputmode="numeric" maxlength="10" />
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroCelular">Celular</label>
+                      <input class="field-input centro-extra-field" id="centroCelular" data-centro-field="celular" type="tel" inputmode="numeric" maxlength="10" />
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroFax">Fax</label>
+                      <input class="field-input centro-extra-field" id="centroFax" data-centro-field="fax" type="tel" inputmode="numeric" />
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroCorreo">Correo</label>
+                      <input class="field-input centro-extra-field" id="centroCorreo" data-centro-field="correo" type="text" inputmode="email" />
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroActividad">Código actividad económica</label>
+                      <input class="field-input centro-extra-field" id="centroActividad" data-centro-field="codigo_actividad" type="text" inputmode="numeric" list="actividadEconomicaOptions" autocomplete="off" />
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroClaseRiesgo">Clase riesgo</label>
+                      <select class="field-select centro-extra-field" id="centroClaseRiesgo" data-centro-field="clase">
+                        <option value="">Selecciona...</option>
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                      </select>
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroTrabajadores">Nro trabajadores</label>
+                      <input class="field-input centro-extra-field" id="centroTrabajadores" data-centro-field="trabajadores" type="text" inputmode="numeric" />
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroTransporte">Transporte</label>
+                      <select class="field-select centro-extra-field" id="centroTransporte" data-centro-field="transporte">
+                        <option value="">Selecciona...</option>
+                        <option value="S">S</option>
+                        <option value="N">N</option>
+                      </select>
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroGradoRiesgo">Grado riesgo</label>
+                      <select class="field-select centro-extra-field" id="centroGradoRiesgo" data-centro-field="grado">
+                        <option value="">Selecciona...</option>
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                      </select>
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroTarifa">Tarifa</label>
+                      <input class="field-input centro-extra-field" id="centroTarifa" data-centro-field="tarifa" type="number" min="0" step="0.001" readonly />
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroTipoLocalizacion">Tipo localización</label>
+                      <input class="field-input centro-extra-field" id="centroTipoLocalizacion" data-centro-field="tipo_localizacion" type="text" inputmode="numeric" />
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroContacto">Contacto centro</label>
+                      <input class="field-input centro-extra-field" id="centroContacto" data-centro-field="contacto" type="text" />
+                    </div>
+                    <div class="field-row">
+                      <label class="field-label" for="centroCargoContacto">Cargo contacto</label>
+                      <input class="field-input centro-extra-field" id="centroCargoContacto" data-centro-field="cargo_contacto" type="text" />
+                    </div>
+                  </div>
+                </div>
+                <textarea class="field-textarea digitacion-field hidden" id="digSedesAdicionales" data-dig-key="sedes_adicionales" rows="1"></textarea>
+                <div class="digitacion-centros-list" id="digitacionCentrosList"></div>
+              </div>
+                </div>
+
+                <div class="digitacion-panel" data-digitacion-panel="novedades">
+              <div class="digitacion-block">
+                <div class="digitacion-block-title">Información trabajadores</div>
+                <div class="digitacion-grid">
+                  <div class="field-row">
+                    <label class="field-label" for="digTrabajadorCentro">Centro de trabajo</label>
+                    <select class="field-select digitacion-field" id="digTrabajadorCentro" data-dig-key="trabajador_centro_trabajo">
+                      <option value="">Selecciona...</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digTipoDocAfiliado">Tipoid</label>
+                    <select class="field-select digitacion-field" id="digTipoDocAfiliado" data-dig-key="tipo_documento_afiliado">
+                      <option value="">Selecciona...</option>
+                      <option value="CC">CC</option>
+                      <option value="TI">TI</option>
+                      <option value="PE">PE</option>
+                      <option value="PT">PT</option>
+                      <option value="CE">CE</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digDocAfiliado">Numero_id</label>
+                    <input class="field-input digitacion-field" id="digDocAfiliado" data-dig-key="documento_afiliado" type="text" inputmode="numeric" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digPrimerApellido">Primer_apellido</label>
+                    <input class="field-input digitacion-field" id="digPrimerApellido" data-dig-key="primer_apellido" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSegundoApellido">Segundo_apellido</label>
+                    <input class="field-input digitacion-field" id="digSegundoApellido" data-dig-key="segundo_apellido" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digPrimerNombre">primer_nombre</label>
+                    <input class="field-input digitacion-field" id="digPrimerNombre" data-dig-key="primer_nombre" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digSegundoNombre">segundo_nombre</label>
+                    <input class="field-input digitacion-field" id="digSegundoNombre" data-dig-key="segundo_nombre" type="text" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digFechaNacimiento">fecha_nacimiento</label>
+                    <input class="field-input digitacion-field" id="digFechaNacimiento" data-dig-key="fecha_nacimiento" inputmode="numeric" maxlength="8" placeholder="DDMMAAAA" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digEdadTrabajador">edad</label>
+                    <input class="field-input digitacion-field" id="digEdadTrabajador" data-dig-key="edad" type="text" inputmode="numeric" readonly />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digGenero">sexo</label>
+                    <select class="field-select digitacion-field" id="digGenero" data-dig-key="genero">
+                      <option value="">Selecciona...</option>
+                      <option value="M">M</option>
+                      <option value="F">F</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digTipoCotizante">afi_tipo</label>
+                    <select class="field-select digitacion-field" id="digTipoCotizante" data-dig-key="tipo_cotizante">
+                      <option value="">Selecciona...</option>
+                    </select>
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digIbc">salario</label>
+                    <input class="field-input digitacion-field" id="digIbc" data-dig-key="ibc" type="text" inputmode="numeric" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digCargo">cargo</label>
+                    <input class="field-input digitacion-field" id="digCargo" data-dig-key="cargo_actividad" type="text" list="cargoCatalogOptions" autocomplete="off" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digEps">eps</label>
+                    <input class="field-input digitacion-field" id="digEps" data-dig-key="eps" type="text" list="epsCatalogOptions" autocomplete="off" />
+                  </div>
+                  <div class="field-row">
+                    <label class="field-label" for="digAfp">afp</label>
+                    <input class="field-input digitacion-field" id="digAfp" data-dig-key="afp" type="text" list="afpCatalogOptions" autocomplete="off" />
+                  </div>
+                </div>
+                <textarea class="digitacion-field" id="digTrabajadoresAdicionales" data-dig-key="trabajadores_adicionales" hidden></textarea>
+                <div class="digitacion-centros-actions">
+                  <button class="btn-secondary" id="addTrabajadorBtn" type="button">Agregar trabajador</button>
+                  <input id="trabajadoresMasivoInput" type="file" accept=".xlsx,.xlsm,.xls" hidden />
+                  <button class="btn-secondary" id="importTrabajadoresBtn" type="button">Cargue masivo Excel</button>
+                </div>
+                <div class="digitacion-centros-empty" id="trabajadoresImportStatus" hidden></div>
+                <div class="digitacion-centros-list" id="digitacionTrabajadoresList"></div>
+              </div>
+                </div>
+              </form>
+            </div>
+
+            <aside class="digitacion-evidence" id="digitacionEvidencePane" aria-live="polite">
+              <div class="digitacion-evidence-head">
+                <div>
+                  <div class="digitacion-evidence-title" id="digitacionEvidenceTitle">Soporte del campo</div>
+                  <div class="digitacion-evidence-sub" id="digitacionEvidenceSub">Enfoca un campo para ver el documento asociado</div>
+                </div>
+                <button class="btn-secondary digitacion-open-doc" id="digitacionOpenDocBtn" type="button" disabled>Abrir</button>
+              </div>
+              <div class="digitacion-image-selector">
+                <label class="field-label" for="digitacionDocSelect">Imagen / página del paquete</label>
+                <select class="field-select" id="digitacionDocSelect">
+                  <option value="">Automático por campo</option>
+                </select>
+              </div>
+              <div class="digitacion-document-stage" id="digitacionDocumentStage">
+                <div class="digitacion-empty-evidence">
+                  <strong>Sin campo seleccionado</strong>
+                  <span>Al moverte por la digitación, el visor cambia al soporte más probable y resalta el texto OCR usado como evidencia.</span>
+                </div>
+              </div>
+              <div class="digitacion-ocr-card">
+                <div class="digitacion-ocr-head">
+                  <span>Lectura OCR relacionada</span>
+                  <span id="digitacionEvidenceConfidence">n/d</span>
+                </div>
+                <div class="digitacion-ocr-text" id="digitacionOcrText">No hay evidencia seleccionada.</div>
+              </div>
+              <div class="digitacion-doc-list" id="digitacionDocList"></div>
+            </aside>
+          </div>
         </div>
       </section>
 
@@ -237,8 +1085,8 @@
 
       <!-- VISOR DOCUMENTAL -->
       <section class="view" id="view-visor">
-        <div class="two-col-layout">
-          <div class="col-left" style="max-width:280px">
+        <div class="two-col-layout visor-document-layout">
+          <div class="col-left visor-document-list">
             <div class="section-card">
               <div class="section-card-head">
                 <div class="section-title">Documentos</div>
@@ -276,11 +1124,11 @@
         </div>
       </section>
 
-      <!-- PRODUCCIÓN (Colmena) -->
+      <!-- ENTREGA DE PLANO -->
       <section class="view" id="view-produccion">
         <div class="section-card">
           <div class="section-card-head">
-            <div class="section-title">Contratos aprobados · <span data-operation-label>AFI Colima</span></div>
+            <div class="section-title">Contratos aprobados · <span data-operation-label>AFILEGA_FA_IMA_LA_V2</span></div>
             <div style="display:flex;gap:8px">
               <button class="btn-secondary" id="clearColmenaBtn" type="button">Limpiar selección</button>
               <button class="btn-primary" id="downloadColmenaBtn" type="button">Descargar lote plano</button>

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import zipfile
 from collections import Counter
 from dataclasses import dataclass
@@ -243,25 +244,26 @@ def run(inputs: InputSet, out_dir: Path) -> dict[str, Any]:
 
 
 def main() -> None:
+    default_input_dir = Path(os.getenv("AFILEGA_LEGACY_INPUT_DIR", str(Path(__file__).resolve().parents[2] / "shared_downloads" / "legacy")))
     parser = argparse.ArgumentParser(description="Bootstrap de nuevo sistema de afiliaciones desde insumos legacy.")
     parser.add_argument(
         "--out-dir",
         default=str(Path(__file__).resolve().parents[2] / "docs"),
         help="Carpeta de salida para resumen y catalogo.",
     )
-    parser.add_argument("--afiliados-csv", default="/Users/escobar/Downloads/afiliados.csv")
-    parser.add_argument("--devuelto-csv", default="/Users/escobar/Downloads/devuelto.csv")
-    parser.add_argument("--dewvuelto-csv", default="/Users/escobar/Downloads/dewvuelto jotform.csv")
-    parser.add_argument("--informe-xlsx", default="/Users/escobar/Downloads/informe_tramites (1).xlsx")
-    parser.add_argument("--resultados-xlsx", default="/Users/escobar/Downloads/resultados EXEC ruta.xlsx")
-    parser.add_argument("--resultados1-xlsx", default="/Users/escobar/Downloads/resultados EXEC ruta-1.xlsx")
-    parser.add_argument("--plano-php", default="/Users/escobar/Downloads/planoAfi1.php")
-    parser.add_argument("--plano-11678", default="/Users/escobar/Downloads/planoIndp_11678.txt")
-    parser.add_argument("--plano-11679", default="/Users/escobar/Downloads/planoIndp_11679.txt")
-    parser.add_argument("--afiliados-jotform-csv", default="/Users/escobar/Downloads/afiliados jotform.csv")
-    parser.add_argument("--plano-nov-php", default="/Users/escobar/Downloads/planoAfiNov.php")
-    parser.add_argument("--ruta-inclusion-zip", default="/Users/escobar/Downloads/ruta_inclusion.zip")
-    parser.add_argument("--models-zip", default="/Users/escobar/Downloads/models.zip")
+    parser.add_argument("--afiliados-csv", default=str(default_input_dir / "afiliados.csv"))
+    parser.add_argument("--devuelto-csv", default=str(default_input_dir / "devuelto.csv"))
+    parser.add_argument("--dewvuelto-csv", default=str(default_input_dir / "dewvuelto jotform.csv"))
+    parser.add_argument("--informe-xlsx", default=str(default_input_dir / "informe_tramites.xlsx"))
+    parser.add_argument("--resultados-xlsx", default=str(default_input_dir / "resultados EXEC ruta.xlsx"))
+    parser.add_argument("--resultados1-xlsx", default=str(default_input_dir / "resultados EXEC ruta-1.xlsx"))
+    parser.add_argument("--plano-php", default=str(default_input_dir / "planoAfi1.php"))
+    parser.add_argument("--plano-11678", default=str(default_input_dir / "planoIndp_11678.txt"))
+    parser.add_argument("--plano-11679", default=str(default_input_dir / "planoIndp_11679.txt"))
+    parser.add_argument("--afiliados-jotform-csv", default=str(default_input_dir / "afiliados jotform.csv"))
+    parser.add_argument("--plano-nov-php", default=str(default_input_dir / "planoAfiNov.php"))
+    parser.add_argument("--ruta-inclusion-zip", default=str(default_input_dir / "ruta_inclusion.zip"))
+    parser.add_argument("--models-zip", default=str(default_input_dir / "models.zip"))
     args = parser.parse_args()
 
     inputs = InputSet(
