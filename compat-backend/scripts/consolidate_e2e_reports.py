@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -107,7 +106,7 @@ def summarize_parity(data: dict[str, Any] | None) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Consolida reportes E2E en JSON y Markdown.")
-    parser.add_argument("--docs-dir", default=os.getenv("AFILEGA_E2E_DOCS_DIR", str(Path(__file__).resolve().parents[2] / "docs")))
+    parser.add_argument("--docs-dir", default="/Users/escobar/Downloads/sst/migracion_py_react/docs")
     parser.add_argument("--out-json", default="")
     parser.add_argument("--out-md", default="")
     args = parser.parse_args()

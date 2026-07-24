@@ -1,37 +1,4 @@
 {
-  "afilega-catalogo-documental-operativo.md": {
-    "topic": "documentos",
-    "document_type": "catalogo_documental",
-    "audience": "operaciones",
-    "owner": "afilega"
-  },
-  "afilega-formatos-oficiales-campos.md": {
-    "topic": "documentos",
-    "document_type": "formatos_oficiales",
-    "audience": "operaciones",
-    "owner": "afilega",
-    "source_type": "local_extract"
-  },
-  "afilega-casos-reales-empresa-contratista-2026-05-10.md": {
-    "topic": "documentos",
-    "document_type": "aprendizaje_operativo",
-    "audience": "operaciones",
-    "owner": "afilega",
-    "source_type": "case_ocr",
-    "case_topic": "casos_reales",
-    "case_ids": "case-colima-849c7f2999,case-colima-6104b466ae",
-    "entry_types": "empresa,contratista"
-  },
-  "afilega-aprendizaje-sintetico-variaciones-2026-05-10.md": {
-    "topic": "documentos",
-    "document_type": "aprendizaje_operativo",
-    "audience": "operaciones",
-    "owner": "afilega",
-    "source_type": "synthetic_case_variations",
-    "case_topic": "variaciones_sinteticas",
-    "case_ids": "case-afilega-syn-empresa-completo-001,case-afilega-syn-empresa-desorden-002,case-afilega-syn-empresa-sin-camara-003,case-afilega-syn-empresa-ocr-ruido-004,case-afilega-syn-contratista-completo-005,case-afilega-syn-contratista-sin-cedula-006,case-afilega-syn-contratista-eps-afp-frase-007,case-afilega-syn-contratista-duplicados-008",
-    "entry_types": "empresa,contratista"
-  },
   "afiliacion-independientes.md": {
     "topic": "independientes",
     "document_type": "guia_operativa",
@@ -433,36 +400,5 @@
     "topic": "normativa",
     "document_type": "decreto",
     "audience": "operaciones"
-  },
-  "afilega-mdb-fuente-oficial-validaciones.md": {
-    "topic": "validaciones",
-    "document_type": "fuente_oficial_mdb",
-    "audience": "operaciones",
-    "owner": "afilega",
-    "source_type": "access_mdb",
-    "source_file": "/Users/escobar/Downloads/Afiliaciones.mdb",
-    "version": "5.2"
-  },
-  "afilega-rpa-completo-digitacion-926-2026-05-11.md": {
-    "topic": "workflow",
-    "document_type": "aprendizaje_operativo",
-    "audience": "operaciones",
-    "owner": "afilega",
-    "source_type": "rpa_run",
-    "case_ids": "case-colima-20e578232d",
-    "entry_types": "empresa",
-    "workflow_status": "completed",
-    "output": "926_legacy"
-  },
-  "afilega-paquete-real-afi-alfa-empresa-2026-05-11.md": {
-    "topic": "documentos",
-    "document_type": "aprendizaje_operativo",
-    "audience": "operaciones",
-    "owner": "afilega",
-    "source_type": "case_ocr",
-    "source_file": "/Users/escobar/Downloads/AFI_ALFA/EMPRESA.pdf",
-    "case_ids": "case-colima-d0b13bd682",
-    "entry_types": "empresa",
-    "learning_focus": "ocr_parser_rag_digitacion_mdb"
   }
 }

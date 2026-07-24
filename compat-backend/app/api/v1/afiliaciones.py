@@ -92,7 +92,7 @@ RULES_ENGINE = AfiliacionesRulesEngine()
 RUTA_ADJ_SERVICE = RutaInclusionAdjuntosService()
 DEFAULT_ORACLE_FLATFILE = os.getenv(
     "AFILIACIONES_ORACLE_FLATFILE",
-    "/data/raw/BkCargue_reference.txt",
+    "/Users/escobar/Downloads/AfiliacionesARL/BkCargue20240917_10_33_55.txt",
 )
 SAFE_SQL_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 RUTA_IDTRAMITE_PYMES_RE = re.compile(r"^200\d{5}$")
