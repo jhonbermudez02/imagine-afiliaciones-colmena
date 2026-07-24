@@ -2246,6 +2246,94 @@ def _sync_engine_from_db(lote: str, base: str = "temporal", fecha_proceso: str =
     }
 
 
+@router.post("/legacy/ind-aa/procesar-lote")
+def legacy_indaa_procesar_lote(payload: dict[str, Any]) -> dict[str, Any]:
+    """Replica IndAA() (VBA): por cada fila de Wh del lote (Order by Sr) indexa la
+    imagen -planillasafiliadosarp si Tp='P', anexosafiliadosarp en otro caso-, luego
+    borra TR del lote y marca la fila de control en LC como 'Indexado'. Reusa los
+    handlers General-IndAA/-2/-delete/-3 ya existentes (mismas tablas/SQL que el
+    legacy real), solo que aca se orquesta el loop completo de un lote en un solo
+    llamado en vez de una petición HTTP por imagen como hacia el VBA original."""
+    lote = as_text(payload.get("lote")).strip()
+    if not lote:
+        raise HTTPException(status_code=400, detail="Campo requerido: lote")
+    base = as_text(payload.get("base") or "ybr").strip() or "ybr"
+    fecha_proceso = _only_digits(payload.get("fecha_proceso"))[:8] or datetime.now().strftime("%Y%m%d")
+    usuario = as_text(payload.get("usuario")).strip()
+
+    # Asegura que el estado del engine (Wh) refleje lo que ya quedo escrito en DB para
+    # este lote (el mismo mecanismo que usan prebuild-check/reporte-ejecutivo/flatfile
+    # build con from_db=True).
+    _sync_engine_from_db(lote=lote, base=base, fecha_proceso=fecha_proceso)
+
+    # run_case_workflow puede correr dos veces para la misma aprobación (/approve
+    # sincrono + /run-workflow encolado justo despues, ambos re-ejecutan el flujo
+    # completo con el mismo lote). A diferencia del resto de los pasos (import-proc-
+    # servicios borra-e-inserta, archive-plano sobreescribe el archivo), un INSERT
+    # plano aca duplicaria filas en cada corrida extra. Se limpia primero lo ya
+    # indexado de este lote para que el resultado final sea el mismo sin importar
+    # cuantas veces se llame.
+    execute_by_alias("temporal", "DELETE FROM planillasafiliadosarp WHERE lote = :lote", {"lote": lote})
+    execute_by_alias("temporal", "DELETE FROM anexosafiliadosarp WHERE lote = :lote", {"lote": lote})
+
+    tipoid_map = {"0": "NI", "1": "CC", "2": "TI", "3": "CE", "4": "P"}
+    wh_rows = sorted(_rows_in_lote("wh", lote=lote), key=lambda r: _to_int_safe(r.get("sr"), default=0))
+
+    planillas_indexed = 0
+    anexos_indexed = 0
+    errors: list[str] = []
+    # "nroanexo" en el VBA original es el contador GLOBAL del loop (Cnt, incrementado en
+    # cada fila -P o no-), no un contador aparte solo de anexos.
+    for cnt, row in enumerate(wh_rows, start=1):
+        pi_raw = as_text(row.get("pi"))
+        # Mismo recorte que el VBA original: Mid(Replace(Pi, "\", "/"), 14) -quita el
+        # prefijo fijo "//10.17.0.125" del UNC y deja "/<ndisco>/<fecha>/Afa/<lote>/<archivo>".
+        path = pi_raw.replace("\\", "/")[13:] if pi_raw else ""
+        common = {
+            "gabineteindex": as_text(row.get("ci")),
+            "planilla": as_text(row.get("f01")),
+            "nit": as_text(row.get("f48")),
+            "FechaProceso": fecha_proceso,
+            "lote": lote,
+            "gabinetefuente": as_text(row.get("cf")),
+            "path": path,
+            "NomDoc": as_text(row.get("clase")),
+        }
+        if as_text(row.get("tp")).upper() == "P":
+            tipoid = tipoid_map.get(as_text(row.get("f50")).strip(), "NI")
+            resp = _dispatch_db_m01({**common, "sw1": "General-IndAA", "tipoid": tipoid})
+            if resp == "1":
+                planillas_indexed += 1
+            else:
+                errors.append(f"sr={row.get('sr')}: fallo indexando registro tipo P")
+        else:
+            resp = _dispatch_db_m01({**common, "sw1": "General-IndAA-2", "nroanexo": str(cnt)})
+            if resp == "1":
+                anexos_indexed += 1
+            else:
+                errors.append(f"sr={row.get('sr')}: fallo indexando registro tipo A")
+
+    tr_resp = _dispatch_db_m01({"sw1": "General-IndAA-delete", "lote": lote})
+    # lc.ui/lc.ue son varchar(8) (username corto legacy); el operador real es un correo
+    # ("jhon@dominio.com") que no cabe -sin truncar, Postgres lanza StringDataRightTruncation,
+    # General-IndAA-3 la traga silenciosamente y el fallback a la simulacion JSON reporta
+    # exito falso, dejando el estado real de lc sin actualizar sin ningun error visible.
+    lc_resp = _dispatch_db_m01(
+        {"sw1": "General-IndAA-3", "fileid": lote, "FechaProceso": fecha_proceso, "UiUe": usuario[:8]}
+    )
+
+    return {
+        "ok": not errors and tr_resp == "1" and lc_resp == "1",
+        "lote": lote,
+        "wh_rows": len(wh_rows),
+        "planillas_indexed": planillas_indexed,
+        "anexos_indexed": anexos_indexed,
+        "tr_deleted": tr_resp == "1",
+        "lc_updated": lc_resp == "1",
+        "errors": errors,
+    }
+
+
 def _diagnose_lote_usuario(base: str, lote: str) -> dict[str, Any]:
     """
     Diagnóstico de fuente para Wh!Lt (lote usuario) en paridad legacy.
@@ -2408,6 +2496,7 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                         "ruta": as_text(_it.get("ruta")),
                         "clase": as_text(_it.get("clase")).strip() or "Imagen",
                         "tipo": as_text(_it.get("tipo")).strip().lower(),
+                        "legacy_code": as_text(_it.get("legacy_code")).strip() or "99",
                     }
                 )
 
@@ -2447,8 +2536,13 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         _pi_lote_folder = as_text(lote).strip().zfill(8)
     _pi_seq = PI_ARCHIVE_SEQ_START
+    # Indice "pi,codigo" por cada imagen archivada de este lote -uno por linea-, para el
+    # .txt que se guarda junto a las imagenes en PI_ARCHIVE_MOUNT/<fecha>/Afa/<lote>/<lote>.txt
+    # (reemplaza ahi el contenido del plano 926, que no va en esa ruta). Se arma aca porque
+    # es el unico lugar que ya conoce el "pi" final de cada documento.
+    _pi_manifest: list[dict[str, Any]] = []
 
-    def _archive_pi_image(local_path: str) -> str:
+    def _archive_pi_image(local_path: str, legacy_code: Any = None) -> str:
         nonlocal _pi_seq
         local_path = as_text(local_path).strip()
         if not local_path:
@@ -2462,7 +2556,10 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
         src = Path(local_path)
         if src.exists():
             shutil.copy2(src, dest)
-        return "\\\\10.17.0.125\\" + "\\".join(rel_parts)
+        pi_value = "\\\\10.17.0.125\\" + "\\".join(rel_parts)
+        if legacy_code is not None:
+            _pi_manifest.append({"pi": pi_value, "legacy_code": as_text(legacy_code)})
+        return pi_value
 
     conditions = ["1=1"]
     params: dict[str, Any] = {"limit": limit}
@@ -3683,7 +3780,7 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
             # y los campos de contenido en 0/"").
             _anexo_paths = sede_anexo_paths.get(str(sede_sr_proc)) or []
             if _anexo_paths:
-                wh[-1]["pi"] = _archive_pi_image(_anexo_paths[0])
+                wh[-1]["pi"] = _archive_pi_image(_anexo_paths[0], legacy_code=1)
                 _sede_base_row = wh[-1]
                 for _ruta in _anexo_paths[1:]:
                     running_sr += 1
@@ -3691,7 +3788,7 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                     _img_row.update(
                         {
                             "sr": running_sr,
-                            "pi": _archive_pi_image(_ruta),
+                            "pi": _archive_pi_image(_ruta, legacy_code=1),
                             "clase": "Imagen",
                             "tp": "A",
                             "f48": 0, "f51": "", "f15": 0, "f12": "", "f14": 0, "f20": 0,
@@ -4023,7 +4120,7 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
             {
                 "sr": sr_counter,
                 "lt": lote,
-                "pi": _archive_pi_image(as_text(_doc_item.get("ruta"))),
+                "pi": _archive_pi_image(as_text(_doc_item.get("ruta")), legacy_code=_doc_item.get("legacy_code")),
                 # Vaciado igual que las filas A (Imagen):
                 "f48": 0, "f51": "", "f15": 0, "f12": "", "f14": 0, "f20": 0,
                 "f06": "", "f04": "", "f05": 0, "f18": "", "f55": "", "f10": "",
@@ -4087,7 +4184,7 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
             # pi de la fila P = ruta del PDF del formulario de afiliacion (el formulario
             # no genera fila propia: la P ES su registro).
             if formulario_path:
-                _wrow["pi"] = _archive_pi_image(formulario_path)
+                _wrow["pi"] = _archive_pi_image(formulario_path, legacy_code=0)
         elif _wtp == "S":
             _wrow["f49"] = 0
             _wrow["f24"] = 0
@@ -4207,6 +4304,7 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
             "wdcomisiones": len(wdcom),
         },
         "filters": {"estado": estado, "idtramite": idtramite, "limit": limit},
+        "pi_manifest": _pi_manifest,
     }
 
 
@@ -6780,6 +6878,35 @@ def legacy_flatfile_history_download(item_id: str) -> Response:
         media_type="text/plain; charset=latin-1",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/legacy/flatfile/archive-plano")
+def legacy_flatfile_archive_plano(payload: dict[str, Any]) -> dict[str, Any]:
+    # Guarda un .txt generico en la MISMA carpeta host donde quedan archivados los
+    # documentos/imagenes del lote (PI_ARCHIVE_MOUNT/<YYYYMMDD>/Afa/<lote 8 digitos>/,
+    # ver _archive_pi_image mas arriba), con el nombre del lote (ej. "00000027.txt").
+    # A pesar del nombre de la ruta ("archive-plano"), el contenido que va aca NO es
+    # el plano 926: es el indice de imagenes ("ruta_pi,codigo_documento" por linea,
+    # uno por cada documento archivado del lote) -asi lo llama backend/app/cases.py.
+    # El nombre del endpoint quedo de una version anterior en la que si se guardaba
+    # el plano en esta ruta; se conserva por compatibilidad con el llamador existente.
+    lote = as_text(payload.get("lote")).strip()
+    content = as_text(payload.get("content"))
+    if not lote:
+        raise HTTPException(status_code=400, detail="Campo requerido: lote")
+    if not content:
+        raise HTTPException(status_code=400, detail="Campo requerido: content")
+    lote_digits = _only_digits(lote)
+    lote_folder = f"{int(lote_digits):08d}" if lote_digits else lote.zfill(8)
+    date_str = datetime.now().strftime("%Y%m%d")
+    dest_dir = Path(PI_ARCHIVE_MOUNT, date_str, "Afa", lote_folder)
+    dest = dest_dir / f"{lote_folder}.txt"
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail=f"Error guardando plano en archivo: {type(exc).__name__}: {exc}")
+    return {"ok": True, "path": str(dest), "lote_folder": lote_folder, "date": date_str}
 
 
 @router.post("/legacy/flatfile/compare-oracle")

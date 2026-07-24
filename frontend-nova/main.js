@@ -1688,8 +1688,18 @@ async function loadClassifForCase(caseId) {
     const listEl = document.getElementById('classifDocList');
     if (listEl) listEl.innerHTML = '<div class="loading-msg">Cargando documentos...</div>';
     try {
-        const r = await fetchWithRetry(caseApiUrl(caseId));
-        const payload = await r.json();
+        let r = await fetchWithRetry(caseApiUrl(caseId));
+        let payload = await r.json();
+        // Si el caso nunca se analizo (recien cargado), el OCR/clasificacion de
+        // documentos todavia no corrio -se dispara aqui, durante la revision, para
+        // que "Aprobar contrato" no tenga que hacerlo por primera vez (y quede caro).
+        const hasDocs = Array.isArray(payload?.files) && payload.files.some(f => !/\.(xlsx|xlsm|xls)$/i.test(f.filename || ''));
+        const alreadyAnalyzed = !!(payload?.analysis && Array.isArray(payload.analysis.documents) && payload.analysis.documents.length > 0);
+        if (hasDocs && !alreadyAnalyzed) {
+            if (listEl) listEl.innerHTML = '<div class="loading-msg">Analizando documentos (OCR)...</div>';
+            r = await fetchWithRetry(caseApiUrl(caseId, '/analyze'), { method: 'POST' });
+            payload = await r.json();
+        }
         activeCaseId = caseId;
         activeCasePayload = payload;
 

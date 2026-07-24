@@ -4,6 +4,7 @@ import base64
 import hashlib
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -12,6 +13,7 @@ import time
 import unicodedata
 import uuid
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
@@ -8827,6 +8829,24 @@ def _build_926_draft(profile: Dict[str, Any], checklist: Dict[str, Any], decisio
 
 
 
+def _format_comision_porcentaje(value: Any) -> str:
+    """Convierte un porcentaje humano ("50.26", "50,26", "50", "100", con o sin
+    separador decimal) al formato legacy de brwdcomisiones/bkwdcomisiones.porcentaje:
+    solo dígitos, sin punto/coma, con exactamente 2 dígitos de parte decimal
+    -"50.26" -> "5026", "50" -> "5000" (sin parte decimal se agregan dos ceros a
+    la derecha), "100" -> "10000"-. Fiel a como PlanoA.txt reconstruye
+    Comi!porcentaje por longitud de cadena al armar el registro tipo "4" del
+    plano (Mid/Format según Len(porcentaje) = 4 o 5): ese parseo asume que el
+    valor YA viene escalado x100 y sin separador, nunca como "50" plano."""
+    raw = normalize_text(value).strip().replace(",", ".").replace("%", "").strip()
+    if not raw:
+        return "0"
+    integer_part, _, decimal_part = raw.partition(".")
+    integer_part = only_digits(integer_part) or "0"
+    decimal_part = (only_digits(decimal_part) + "00")[:2]
+    return integer_part + decimal_part
+
+
 def _push_comisiones_to_legacy(
     lote: str,
     docs: List[Dict[str, Any]],
@@ -8846,10 +8866,10 @@ def _push_comisiones_to_legacy(
         for interm in override_rows:
             linea += 1
             comision_rows.append({
-                "lote": lote, "linea": str(linea), "sr": "1",
+                "lote": lote, "linea": str(linea), "sr": str(linea),
                 "vendedor": interm.get("vendedor_documento") or interm.get("codigo_intermediario"),
                 "codigo_vendedor": interm.get("codigo_vendedor", "2"), "venta": "1",
-                "porcentaje": interm.get("porcentaje_venta", "100"),
+                "porcentaje": _format_comision_porcentaje(interm.get("porcentaje_venta") or "100"),
             })
     comision_docs = [d for d in docs if str(d.get("document_type") or "") == "comision"]
     entrega_docs = [d for d in docs if str(d.get("document_type") or "") == "entrega_documentos"]
@@ -8866,10 +8886,10 @@ def _push_comisiones_to_legacy(
                     codigo_plano = {"1": "2", "3": "3", "4": "4"}.get(codigo, "2")
                     linea += 1
                     comision_rows.append({
-                        "lote": lote, "linea": str(linea), "sr": "1",
+                        "lote": lote, "linea": str(linea), "sr": str(linea),
                         "vendedor": only_digits(data.get("vendedor_documento") or codigo),
                         "codigo_vendedor": codigo_plano, "venta": "1",
-                        "porcentaje": only_digits(data.get("porcentaje_venta") or "100"),
+                        "porcentaje": _format_comision_porcentaje(data.get("porcentaje_venta") or "100"),
                     })
             else:
                 for interm in intermediarios:
@@ -8878,10 +8898,10 @@ def _push_comisiones_to_legacy(
                         continue
                     linea += 1
                     comision_rows.append({
-                        "lote": lote, "linea": str(linea), "sr": "1",
+                        "lote": lote, "linea": str(linea), "sr": str(linea),
                         "vendedor": interm.get("vendedor_documento") or interm.get("codigo_intermediario"),
                         "codigo_vendedor": interm.get("codigo_vendedor", "2"), "venta": "1",
-                        "porcentaje": interm.get("porcentaje_venta", "100"),
+                        "porcentaje": _format_comision_porcentaje(interm.get("porcentaje_venta") or "100"),
                     })
     if not comision_rows:
         return False
@@ -9918,10 +9938,19 @@ def _workflow_step(
 def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
     workflow_started = perf_counter()
     analyze_started = perf_counter()
-    _clean_output_holder: Dict[str, Any] = {}
-    payload = analyze_case(case_id, preserve_manual_approval=True, clean_output_out=_clean_output_holder)
-    analyze_duration_ms = int((perf_counter() - analyze_started) * 1000)
+    # "Aprobar contrato" NO debe re-hacer OCR/clasificacion/RAG si el caso YA se analizo
+    # (ej. al abrir "Clasificacion", o con el boton separado "Analisis completo",
+    # id="btnFullAnalyze") -eso es lo que hacia esto lento. Pero este mismo
+    # run_case_workflow tambien es lo que dispara el flujo automatico justo despues de
+    # SUBIR un contrato nuevo (boton "Ejecutar prevalidacion"), donde todavia no existe
+    # ningun analisis previo -ahi si hace falta correrlo, una sola vez. Por eso: se reusa
+    # el analisis ya guardado si existe, y solo se recalcula si nunca se hizo.
+    payload = load_case(case_id)
     analysis = payload.get("analysis") or {}
+    if not analysis.get("documents"):
+        payload = analyze_case(case_id, preserve_manual_approval=True)
+        analysis = payload.get("analysis") or {}
+    analyze_duration_ms = int((perf_counter() - analyze_started) * 1000)
     # /run-workflow (cola async, disparada por el frontend justo despues de /approve para
     # generar el 926) no recibe operator -re-ejecuta el flujo sin el, lo que borraba el "us"
     # ya guardado por /approve. Si no viene operator explicito, se recupera del
@@ -10091,10 +10120,8 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
         )
     )
 
-    # analyze_case() (llamado arriba) ya calculó esto una vez -reusar en vez de repetir
-    # la subida/parseo del xlsx contra legacy-nova, que es costoso y redundante.
-    clean_output: Dict[str, Any] = dict(_clean_output_holder)
-    if not clean_output and xlsx_entry and xlsx_bytes:
+    clean_output: Dict[str, Any] = {}
+    if xlsx_entry and xlsx_bytes:
         clean_output = _generate_clean_via_legacy_nova(xlsx_entry["filename"], xlsx_bytes)
         if not bool(clean_output.get("ok")):
             workbook = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
@@ -10218,6 +10245,9 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
                 # El compat usa "tipo" para construir la comision como fila tp="V" (con los
                 # datos del rep legal) en su posicion del orden; el resto va como tp="A".
                 "tipo": str(_d.get("document_type") or ""),
+                # Codigo legacy entero (0=formulario, 1=anexo_sedes, 3=comision, 99=imagen, etc.)
+                # para el indice "pi,codigo" que se guarda junto a las imagenes archivadas.
+                "legacy_code": str(_d.get("legacy_code") if _d.get("legacy_code") is not None else 99),
             }
             for _d in _otros_docs
         ]
@@ -10397,6 +10427,16 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
             },
             timeout=120.0,
         )
+        # Indice "pi,codigo" (uno por linea) de cada imagen archivada de este lote -lo
+        # calcula import-proc-servicios, que es quien conoce el "pi" final de cada
+        # documento (ver _archive_pi_image en compat)-. Se usa mas abajo para el .txt
+        # que se guarda junto a las imagenes; NO es el contenido del plano 926.
+        _pi_manifest_rows = import_proc_out.get("pi_manifest") if isinstance(import_proc_out, dict) else None
+        pi_manifest_content = "\n".join(
+            f"{normalize_text(row.get('pi'))},{normalize_text(row.get('legacy_code'))}"
+            for row in (_pi_manifest_rows or [])
+            if isinstance(row, dict) and normalize_text(row.get("pi"))
+        )
         timeline.append(
             _workflow_step(
                 "sync_engine",
@@ -10564,13 +10604,30 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
             "draft": analysis.get("draft_926"),
             "legacy": {"available": True, "ok": True, **generated_926},
         }
+        # El .txt que va en la MISMA carpeta host donde quedan archivados los
+        # documentos/imagenes del lote (PI_ARCHIVE_MOUNT/<fecha>/Afa/<lote>/ en
+        # compat-backend, ej. /img10/20260723/Afa/00000030/), con el nombre del lote
+        # (ej. "00000030.txt"), NO es el plano 926 -es el indice de imagenes: una
+        # linea "ruta_pi,codigo_documento" por cada documento archivado (ej.
+        # "\\10.17.0.125\imagenes3\img10\20260724\Afa\00662315\12881223.pdf,0").
+        # El propio plano 926 no se archiva en esta ruta.
+        _plano_archive: Dict[str, Any] = {}
+        try:
+            _plano_archive = _legacy_post(
+                "legacy/flatfile/archive-plano",
+                {"lote": legacy_lote_usuario, "content": pi_manifest_content},
+                timeout=30.0,
+            )
+        except Exception as exc:
+            logger.error("No pude archivar el índice de imágenes en disco para el caso %s: %s", case_id, exc)
+            _plano_archive = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         timeline.append(
             _workflow_step(
                 "generacion_926",
                 "Generación 926",
                 "ok",
                 f"Archivo 926 generado para lote {lote}.",
-                {"filename": generated_926.get("filename")},
+                {"filename": generated_926.get("filename"), "archived": _plano_archive},
                 duration_ms=int((perf_counter() - gen926_started) * 1000),
             )
         )
@@ -10593,6 +10650,46 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
         payload["updated_at"] = utc_now()
         save_case(payload)
         return payload
+
+    # Indexación de imágenes (equivalente a IndAA() del VBA legacy): registra cada
+    # imagen del lote en planillasafiliadosarp/anexosafiliadosarp, borra TR del lote
+    # y marca la fila de control en LC como "Indexado". No detiene el flujo si falla
+    # -es un side-effect de indexación, no debe bloquear el reporte/cierre del caso.
+    try:
+        indaa_started = perf_counter()
+        indaa_out = _legacy_post(
+            "legacy/ind-aa/procesar-lote",
+            {
+                "lote": legacy_lote_usuario,
+                "base": "ybr",
+                "fecha_proceso": legacy_fecha_proceso,
+                "usuario": normalize_text(operator),
+            },
+            timeout=60.0,
+        )
+        timeline.append(
+            _workflow_step(
+                "indexacion_imagenes",
+                "Indexación de imágenes (IndAA)",
+                "ok" if indaa_out.get("ok") else "warning",
+                f"Indexadas {indaa_out.get('planillas_indexed', 0)} planilla(s) y {indaa_out.get('anexos_indexed', 0)} anexo(s) para lote {lote}."
+                if indaa_out.get("ok")
+                else f"Indexación de imágenes con observaciones: {indaa_out.get('errors')}",
+                {"indexacion": indaa_out},
+                duration_ms=int((perf_counter() - indaa_started) * 1000),
+            )
+        )
+    except Exception as exc:
+        logger.error("No pude indexar las imágenes (IndAA) para el caso %s: %s", case_id, exc)
+        timeline.append(
+            _workflow_step(
+                "indexacion_imagenes",
+                "Indexación de imágenes (IndAA)",
+                "failed",
+                str(exc),
+                duration_ms=int((perf_counter() - indaa_started) * 1000),
+            )
+        )
 
     try:
         report_final_started = perf_counter()
@@ -10663,11 +10760,7 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
     return attach_legacy_delivery_plan(case_id, payload)
 
 
-def analyze_case(
-    case_id: str,
-    preserve_manual_approval: bool = False,
-    clean_output_out: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[str, Any]:
     analyze_started = perf_counter()
     payload = load_case(case_id)
     previous_analysis = payload.get("analysis") or {}
@@ -10693,6 +10786,7 @@ def analyze_case(
         if isinstance(d, dict) and d.get("filename")
     }
 
+    ocr_file_entries: List[Dict[str, Any]] = []
     for file_entry in files:
         path = Path(file_entry["stored_path"])
         suffix = path.suffix.lower()
@@ -10700,16 +10794,32 @@ def analyze_case(
             xlsx_entry = file_entry
             xlsx_profile = _read_xlsx(path)
             continue
+        ocr_file_entries.append(file_entry)
 
+    def _process_document(file_entry: Dict[str, Any]) -> Dict[str, Any]:
+        path = Path(file_entry["stored_path"])
+        suffix = path.suffix.lower()
         cached_doc = previous_docs_by_filename.get(path.name)
         cached_size = (cached_doc or {}).get("_ocr_cache_size_bytes")
         current_size = file_entry.get("size_bytes")
-        if (
+        cache_hit = bool(
             cached_doc
             and current_size is not None
             and cached_size == current_size
             and "ocr_text" in cached_doc
+        )
+        # Si el archivo no cambio (mismo nombre+tamano) Y el analisis anterior ya
+        # tiene clasificacion/campos/RAG calculados (no solo el texto OCR), se reusa
+        # el documento COMPLETO tal cual: evita repetir clasificacion + consultas RAG
+        # a Qdrant en cada "Aprobar contrato" cuando nada cambio desde la ultima vez
+        # que se analizo el caso completo (ej. al abrir "Clasificacion").
+        if cache_hit and all(
+            key in cached_doc for key in ("document_type", "fields", "key_fields", "classification_confidence")
         ):
+            doc = dict(cached_doc)
+            doc["_ocr_cache_size_bytes"] = current_size
+            return doc
+        if cache_hit:
             result = {
                 "text": cached_doc.get("ocr_text", ""),
                 "used_ocr": bool(cached_doc.get("used_ocr")),
@@ -10742,27 +10852,35 @@ def analyze_case(
             path.name,
         )
         ocr_quality_score = _score_ocr_quality(result["text"], bool(result["used_ocr"]), int(result["pages_processed"] or 0))
-        docs.append(
-            {
-                "filename": path.name,
-                "document_type": doc_meta["document_type"],
-                "legacy_code": doc_meta["legacy_code"],
-                "legacy_label": LEGACY_CODE_TO_TYPE.get(doc_meta["legacy_code"], ""),
-                "code_source": doc_meta["code_source"],
-                "used_ocr": result["used_ocr"],
-                "pages_processed": result["pages_processed"],
-                "ocr_text": result["text"],
-                "text_preview": result["text"][:600],
-                "fields": fields,
-                "key_fields": key_fields,
-                "field_confidence": field_confidence,
-                "signals_detected": signals_detected,
-                "classification_confidence": classification_confidence,
-                "ocr_quality_score": ocr_quality_score,
-                "_ocr_cache_size_bytes": file_entry.get("size_bytes"),
-            }
-        )
-        _apply_auto_entrega_comision_metadata(docs[-1], file_entry)
+        doc = {
+            "filename": path.name,
+            "document_type": doc_meta["document_type"],
+            "legacy_code": doc_meta["legacy_code"],
+            "legacy_label": LEGACY_CODE_TO_TYPE.get(doc_meta["legacy_code"], ""),
+            "code_source": doc_meta["code_source"],
+            "used_ocr": result["used_ocr"],
+            "pages_processed": result["pages_processed"],
+            "ocr_text": result["text"],
+            "text_preview": result["text"][:600],
+            "fields": fields,
+            "key_fields": key_fields,
+            "field_confidence": field_confidence,
+            "signals_detected": signals_detected,
+            "classification_confidence": classification_confidence,
+            "ocr_quality_score": ocr_quality_score,
+            "_ocr_cache_size_bytes": file_entry.get("size_bytes"),
+        }
+        _apply_auto_entrega_comision_metadata(doc, file_entry)
+        return doc
+
+    # El OCR/lectura de PDF es lo mas caro de este paso (subprocesos de poppler/tesseract,
+    # cada uno libera el GIL mientras espera) y cada documento es independiente entre si:
+    # se procesan en paralelo (con cache de OCR por archivo ya resuelto arriba) en vez de
+    # uno por uno, para aprovechar los cores disponibles en vez de dejarlos ociosos.
+    if ocr_file_entries:
+        max_workers = min(8, max(1, os.cpu_count() or 4), len(ocr_file_entries))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            docs.extend(executor.map(_process_document, ocr_file_entries))
 
     _apply_document_classification_overrides(docs)
     _number_anexo_sedes(docs)
@@ -10815,10 +10933,6 @@ def analyze_case(
             workbook = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
             clean_output = _generate_clean_from_workbook(workbook, xlsx_entry["filename"])
             clean_output["_source"] = "local_fallback"
-        if clean_output_out is not None:
-            clean_output_out.update(clean_output)
-            clean_output_out["_xlsx_entry"] = xlsx_entry
-            clean_output_out["_xlsx_bytes"] = xlsx_bytes
         xlsx_profile = _enrich_xlsx_profile_from_clean(xlsx_profile, clean_output, docs)
         xlsx_profile = _finalize_profile_from_docs(xlsx_profile, docs)
     tipoempresa_detectado = _extract_tipoempresa_from_entrega_docs(docs)

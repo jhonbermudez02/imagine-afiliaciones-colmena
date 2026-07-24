@@ -82,6 +82,7 @@ services:
       retries: 6
     volumes:
       - ./shared_downloads:/host_downloads:ro
+      - ./data:/data:ro
       - ${LEGACY_IMG_HOST_MOUNT:-/img11}:/legacy_share
     networks:
       - imagine_net
