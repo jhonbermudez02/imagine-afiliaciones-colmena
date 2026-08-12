@@ -14,7 +14,12 @@ class Settings(BaseSettings):
     reranker_top_k: int = 6
     ocr_engine: str = "tesseract"
     ocr_languages: str = "spa+eng"
-    ocr_timeout_seconds: int = 45
+    # Con contencion de CPU en la maquina (varios procesos tesseract en paralelo +
+    # el resto del escritorio compitiendo por nucleos), un timeout de 45s por
+    # intento hacia que la ruta rapida sola (2 variantes x hasta 2 idiomas) pudiera
+    # tardar hasta 180s antes de siquiera llegar a la ruta exhaustiva/al tope de
+    # tiempo por pagina. 15s ya es holgado para un OCR de una sola pagina normal.
+    ocr_timeout_seconds: int = 15
     knowledge_dir: str = "/data/knowledge"
     qdrant_collection: str = "nova_knowledge"
     qdrant_state_path: str = "/data/qdrant/active_collection.txt"

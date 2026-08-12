@@ -47,6 +47,7 @@ services:
     volumes:
       - imagine_compat_postgres_data:/var/lib/postgresql/data
       - ./compat-db/init:/docker-entrypoint-initdb.d:ro
+      - ./files_migration/schemassql/pqr_colmena:/pqr_seed:ro
     networks:
       - imagine_net
 
@@ -66,6 +67,7 @@ services:
       DB_ALIAS_TEMPORAL_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/temporal
       DB_ALIAS_WIMG004_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/img004
       DB_ALIAS_YBR_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/br
+      DB_ALIAS_PQR_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/pqr_colmena
       AFILIACIONES_ENGINE_STATE_PATH: /tmp/afiliaciones_engine_state.json
       AI_RAG_BACKEND: postgres
       AI_RAG_DB_ALIAS: temporal

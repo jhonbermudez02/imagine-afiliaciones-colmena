@@ -4,6 +4,7 @@ import base64
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import shutil
@@ -32,6 +33,8 @@ from .legacy_bridge import generate_legacy_flatfile_926, generate_legacy_flatfil
 from .qdrant_guard import collection_matches_current_embeddings, ensure_current_vector_collection
 from .xlsx_rules import _format_date_value, _parse_date_value, _resolve_smmlv_value, run_xlsx_primary_validations, run_xlsx_secondary_validations
 
+logger = logging.getLogger(__name__)
+
 LEGACY_CODE_TO_TYPE = {
     0: "formulario_afiliacion",
     1: "anexo_sedes",
@@ -49,6 +52,7 @@ LEGACY_CODE_TO_TYPE = {
     15: "paz_y_salvo",
     16: "eps_afp",
     17: "inspector",
+    18: "retroactivas",
     19: "identificacion_peligros",
     20: "examen_preocupacional",
     21: "autorizacion_terceros",
@@ -86,6 +90,7 @@ DOC_TYPE_LABELS = {
     "autorizacion": "Autorización",
     "sat": "SAT",
     "inspector": "Inspector",
+    "retroactivas": "Retroactivas",
 }
 
 # Valor de la columna "clase" en brempresasarp por tipo de documento (nombres legacy,
@@ -106,6 +111,7 @@ DB_CLASE_BY_DOC_TYPE = {
     "sat": "SAT",
     "rut": "Dian",
     "inspector": "Inspector",
+    "retroactivas": "Retroactivas",
     "pdf": "Imagen",
     "imagen": "Imagen",
 }
@@ -113,6 +119,8 @@ DB_CLASE_BY_DOC_TYPE = {
 DOCUMENT_DISPLAY_PRIORITY = [
     "formulario_afiliacion",
     "anexo_sedes",
+    # Comisión va inmediatamente después de las sedes.
+    "comision",
     "camara_comercio",
     "rut",
     "cedula",
@@ -120,9 +128,11 @@ DOCUMENT_DISPLAY_PRIORITY = [
     "inspector",
     "autorizacion",
     "entrega_documentos",
-    "comision",
     "carta",
     "beneficiario_final",
+    # "retroactivas" NO va aquí a propósito: debe quedar de último, después incluso de
+    # los documentos sin clasificar, y solo antes del XLSX del formulario. Se le asigna
+    # un rango propio en _document_display_sort_key.
 ]
 DOCUMENT_DISPLAY_PRIORITY_MAP = {
     document_type: index for index, document_type in enumerate(DOCUMENT_DISPLAY_PRIORITY)
@@ -1300,6 +1310,52 @@ def _validate_comisiones_asesores_en_tabla(comisiones: List[Dict[str, Any]], fil
     return invalid
 
 
+def _pct_text(value: Any) -> str:
+    """Texto de un porcentaje sin perder el 0 numérico.
+
+    normalize_text() hace str(value or "") y por eso convierte int 0 / float 0.0 en
+    "" —el mismo motivo por el que un 0 terminaba tratado como 100—, así que los
+    numéricos se convierten aparte.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return ""
+    if isinstance(value, (int, float, Decimal)):
+        return str(value)
+    return normalize_text(value).strip()
+
+
+def _porcentaje_venta_or_default(value: Any, default: str = "100") -> str:
+    """Porcentaje de venta respetando el 0 explícito.
+
+    Un 0 es un valor válido (venta directa: el intermediario no participa); solo
+    None o vacío caen al default.
+    """
+    text = _pct_text(value)
+    return text if text else default
+
+
+def _es_porcentaje_cero(value: Any) -> bool:
+    """True si el porcentaje de venta es 0 (acepta "0", "0.0", "0,00", 0, 0.0)."""
+    text = _pct_text(value).replace("%", "").replace(" ", "").replace(",", ".")
+    if not text:
+        return False
+    try:
+        return abs(float(text)) < 0.0001
+    except ValueError:
+        return False
+
+
+def _venta_por_porcentaje(porcentaje: Any) -> str:
+    """brwdcomisiones.venta -> registro tipo 4 del plano (posición 22, longitud 1).
+
+    Con participación 0 la venta es DIRECTA y el plano debe llevar 2; con cualquier
+    participación > 0 hay intermediario y se mantiene el 1 de siempre.
+    """
+    return "2" if _es_porcentaje_cero(porcentaje) else "1"
+
+
 def _normalize_intermediario_row(row: Dict[str, Any]) -> Dict[str, str]:
     codigo_raw = only_digits(str(row.get("codigo_intermediario") or row.get("codigo") or "")).lstrip("0") or ""
     codigo_vendedor = str(row.get("codigo_vendedor") or "").strip()
@@ -1312,7 +1368,9 @@ def _normalize_intermediario_row(row: Dict[str, Any]) -> Dict[str, str]:
         "codigo_vendedor": codigo_vendedor,
         "vendedor_documento": vendedor_documento,
         "nombre_intermediario": normalize_text(asesor_tabla.get("nombre") or row.get("nombre_intermediario") or row.get("nombre") or ""),
-        "porcentaje_venta": str(row.get("porcentaje_venta") or row.get("porcentaje") or "100").strip() or "100",
+        "porcentaje_venta": _porcentaje_venta_or_default(
+            row.get("porcentaje_venta") if row.get("porcentaje_venta") is not None else row.get("porcentaje")
+        ),
     }
 
 
@@ -2003,11 +2061,30 @@ def _sync_document_workspace(payload: Dict[str, Any]) -> Dict[str, Any]:
     workspace = _ensure_document_workspace(payload)
     available = [str(item.get("filename") or "").strip() for item in (payload.get("files") or []) if str(item.get("filename") or "").strip()]
     order = [item for item in (workspace.get("order") or []) if item in available]
+    # Sin orden manual explícito del operador, el orden guardado no es un dato propio:
+    # se deriva por completo de DOCUMENT_DISPLAY_PRIORITY. Antes se conservaba el orden
+    # previo y los archivos faltantes se agregaban en orden de carga, así que un orden
+    # residual o parcial terminaba dictando la secuencia (la comisión quedaba fuera de su
+    # lugar detrás de las sedes) aunque la prioridad documental dijera otra cosa.
+    if not workspace.get("user_reordered"):
+        order = []
     seen = set(order)
-    for filename in available:
-        if filename not in seen:
-            order.append(filename)
-            seen.add(filename)
+    types_by_file = {
+        str(item.get("filename") or "").strip(): item.get("document_type")
+        for item in ((payload.get("analysis") or {}).get("documents") or [])
+        if isinstance(item, dict)
+    }
+
+    def _pending_sort_key(pair: tuple[int, str]) -> tuple[tuple[int, str], int]:
+        index, filename = pair
+        if Path(filename).suffix.lower() in {".xlsx", ".xlsm", ".xls"}:
+            return (10_000, "xlsx"), index
+        return _document_display_sort_key(types_by_file.get(filename)), index
+
+    pending = [(index, name) for index, name in enumerate(available) if name not in seen]
+    for _, filename in sorted(pending, key=_pending_sort_key):
+        order.append(filename)
+        seen.add(filename)
     workspace["order"] = order
     removed = []
     seen_removed = set()
@@ -2196,7 +2273,8 @@ def refresh_case_validations(case_id: str) -> Dict[str, Any]:
         for item in required_evidence.values()
         if isinstance(item, dict) and item.get("satisfied") and item.get("filename")
     )
-    validation_summary = _build_validation_summary(xlsx_profile, docs, missing_docs)
+    documents_pending_ocr = bool((analysis.get("decision") or {}).get("documents_pending_ocr"))
+    validation_summary = _build_validation_summary(xlsx_profile, docs, missing_docs, documents_pending_ocr=documents_pending_ocr)
     validation_summary = _apply_manual_intermediarios_to_validation_summary(validation_summary, manual_review)
     validation_summary = _apply_validation_exceptions(validation_summary, manual_review)
     blocker_records = [
@@ -2377,12 +2455,17 @@ def _ensure_entrega_comision_duplicate(case_id: str, payload: Dict[str, Any], do
         )
         docs.append(copied_doc)
 
+        # Solo se toca el orden si ya existe uno: cuando está vacío, agregar aquí el
+        # duplicado dejaba un orden de un solo archivo ("__comision.pdf"), y ese orden
+        # parcial pone la comisión de primera en cuanto algo activa manual_order. Sin
+        # orden previo, mandan DOCUMENT_DISPLAY_PRIORITY / _sync_document_workspace.
         order = [item for item in (workspace.get("order") or []) if item != target.name]
-        if source_name in order:
-            order.insert(order.index(source_name) + 1, target.name)
-        else:
-            order.append(target.name)
-        workspace["order"] = order
+        if order:
+            if source_name in order:
+                order.insert(order.index(source_name) + 1, target.name)
+            else:
+                order.append(target.name)
+            workspace["order"] = order
         changed = True
 
     if changed and isinstance(analysis, dict):
@@ -5346,10 +5429,13 @@ def _ocr_text_from_image_with_tesseract(image: Image.Image, config: str = "--psm
     timeout = int(getattr(settings, "ocr_timeout_seconds", 45) or 45)
     with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
         image.convert("RGB").save(tmp.name, format="PNG")
+        # Un solo intento adicional en "eng" (si el idioma configurado no lo
+        # incluye ya). El fallback ciego sin -l (== default de tesseract, tipicamente
+        # solo "eng") casi nunca aporta algo que "spa+eng" no haya intentado, y bajo
+        # contencion de CPU duplicaba el peor caso por combinacion sin necesidad.
         language_attempts = [languages]
         if "eng" not in languages:
             language_attempts.append("eng")
-        language_attempts.append("")
         for lang in language_attempts:
             cmd = ["tesseract", tmp.name, "stdout"]
             if lang:
@@ -5382,13 +5468,25 @@ def _ocr_best_text_from_image(image: Image.Image) -> str:
     variants = _prepare_ocr_variants(image)
     best_text = ""
     best_score = -1
+    started = perf_counter()
+    # Tope duro por pagina: en escaneos viejos/de baja calidad ninguna variante
+    # rapida alcanza el umbral de "buena" y la ruta exhaustiva antes seguia
+    # probando las 7 variantes x 2 configs (14 llamadas a Tesseract, 2 sobre
+    # imagenes ampliadas al doble por _prepare_ocr_variants) sin detenerse -eso
+    # es lo que volvia un caso de 40 adjuntos de minutos a mas de 20-. Se acepta
+    # la mejor candidata encontrada hasta este punto al pasar el tope.
+    time_budget_seconds = 10.0
 
     # Ruta rápida: 2 variantes y una sola configuración para la mayoría de documentos.
     fast_candidates = [
         (variants[1], "--psm 6"),
         (variants[2], "--psm 6"),
     ]
+    tried: set[tuple[int, str]] = set()
     for variant, config in fast_candidates:
+        tried.add((id(variant), config))
+        if perf_counter() - started > time_budget_seconds:
+            return best_text
         try:
             text = _ocr_text_from_image(variant, config=config)
         except Exception:
@@ -5402,10 +5500,16 @@ def _ocr_best_text_from_image(image: Image.Image) -> str:
         if _ocr_candidate_is_good(text, score):
             return text
 
-    # Ruta exhaustiva solo para casos difíciles.
+    # Ruta exhaustiva solo para casos dificiles: ahora se detiene apenas encuentra
+    # una candidata "buena" (antes agotaba siempre las 14 combinaciones aunque la
+    # 3ra ya sirviera) y respeta el tope de tiempo por pagina como ultima salvaguarda.
     configs = ["--psm 6", "--psm 11"]
     for variant in variants:
         for config in configs:
+            if (id(variant), config) in tried:
+                continue
+            if perf_counter() - started > time_budget_seconds:
+                return best_text
             try:
                 text = _ocr_text_from_image(variant, config=config)
             except Exception:
@@ -5416,6 +5520,8 @@ def _ocr_best_text_from_image(image: Image.Image) -> str:
             if score > best_score:
                 best_score = score
                 best_text = text
+            if _ocr_candidate_is_good(text, score):
+                return text
     return best_text
 
 
@@ -5781,6 +5887,16 @@ def _extract_sede_info_from_sheet(sheet_obj: Any, sede_num: int) -> Dict[str, An
         f"{prefix}_zona": sv(14, 9),
         f"{prefix}_telefono": next((only_digits(p) for p in re.split(r"[-/,;\s]+", str(sv(15, 6) or "")) if len(only_digits(p)) in {7,10} and not only_digits(p).startswith("0")), only_digits(str(sv(15, 6) or ""))),
         f"{prefix}_correo": _clean_contact_value(f"{prefix}_correo", sv(16, 6)),
+        # Las cuatro casillas del responsable se exponen tambien por separado, igual que en
+        # la sede principal. nombre_completo se conserva por compatibilidad, pero no sirve
+        # para recuperar las partes: el join descarta las casillas vacias, asi que
+        # "PEREZ / (vacio) / ANA / ISABEL" se vuelve "PEREZ ANA ISABEL" y quien lo vuelva a
+        # partir por posicion lee ANA como segundo apellido. Un apellido de dos palabras
+        # ("DE CASTRO") produce el mismo corrimiento.
+        f"responsable_{prefix}_primer_apellido": sv(12, 13),
+        f"responsable_{prefix}_segundo_apellido": sv(12, 17),
+        f"responsable_{prefix}_primer_nombre": sv(13, 13),
+        f"responsable_{prefix}_segundo_nombre": sv(13, 17),
         f"responsable_{prefix}_nombre_completo": " ".join(filter(None, [sv(12,13), sv(12,17), sv(13,13), sv(13,17)])).strip(),
         f"responsable_{prefix}_tipo_documento": sv(14,13),
         f"responsable_{prefix}_numero_documento": only_digits(sv(14,17)),
@@ -6227,7 +6343,12 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
                 record["_sheet"] = normalized_sheet_name
             records.append(record)
     profile = {
-        "tipo_afiliado": flat_pairs.get("tipo_afiliado") or flat_pairs.get("tipoafiliacion") or "",
+        # "tipo_afiliado" casi nunca viene como celda con esa etiqueta literal (flat_pairs);
+        # el formulario estructurado ("Formulario de afiliación") lo expresa como
+        # form_fields.tipo_tramite (marcador I13/N13: "Afiliación"/"Traslado"). Sin este
+        # fallback, este campo queda vacío aunque el formulario SI lo tenga diligenciado,
+        # y solo se completaba antes via OCR de los documentos adjuntos (_infer_tipo_afiliado_from_docs).
+        "tipo_afiliado": flat_pairs.get("tipo_afiliado") or flat_pairs.get("tipoafiliacion") or normalize_text(form_fields.get("tipo_tramite", "")) or "",
         "documento": flat_pairs.get("documento") or flat_pairs.get("numero_documento") or "",
         "nombre": flat_pairs.get("nombre") or flat_pairs.get("nombre_trabajador") or "",
         "empresa": flat_pairs.get("empresa") or flat_pairs.get("empleador") or flat_pairs.get("razon_social") or "",
@@ -6987,6 +7108,10 @@ def _document_display_sort_key(document_type: Any) -> tuple[int, str]:
         return rank, canonical
     if canonical == "xlsx":
         return 10_000, canonical
+    if canonical == "retroactivas":
+        # Cierra el paquete: va después de los priorizados Y de los no clasificados
+        # (1_000), y solo el XLSX del formulario (10_000) queda detrás.
+        return 5_000, canonical
     return 1_000, canonical
 
 
@@ -7850,7 +7975,12 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
     }
 
 
-def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, Any]], missing_docs: List[str]) -> Dict[str, Any]:
+def _build_validation_summary(
+    xlsx_profile: Dict[str, Any],
+    docs: List[Dict[str, Any]],
+    missing_docs: List[str],
+    documents_pending_ocr: bool = False,
+) -> Dict[str, Any]:
     profile = xlsx_profile.get("profile", {})
     flat_pairs = xlsx_profile.get("flat_pairs", {}) or {}
     form_fields = dict((xlsx_profile or {}).get("form_fields") or {})
@@ -7881,6 +8011,27 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
     xlsx_document = only_digits(representative_document_source)
     xlsx_nit = _normalize_company_nit(employer_document_source, docs)
     validation_required_docs = _apply_conditional_required_documents(_build_required_documents(xlsx_profile), docs)
+
+    if documents_pending_ocr:
+        # El OCR de los soportes se omitio (el XLSX ya tenia bloqueantes propios).
+        # Comparar RUT/cedula/autorizacion/formulario contra "docs" en este punto
+        # solo generaria bloqueantes falsos de "documento no encontrado" (los
+        # documentos simplemente no se procesaron todavia). Se salta directo al
+        # prechequeo (reglas que solo dependen del XLSX).
+        precheck = _build_precheck_summary(xlsx_profile, docs, validation_required_docs, missing_docs)
+        precheck["motivos_de_rechazo"] = [
+            _decorate_validation_reason(item)
+            for item in precheck.get("motivos_de_rechazo", [])
+            if isinstance(item, dict)
+        ]
+        precheck["approved"] = not precheck["motivos_de_rechazo"]
+        return {
+            "ok": False,
+            "items": [],
+            "alerts": [],
+            "matches": {},
+            "precheck": precheck,
+        }
     required_evidence = _infer_required_document_satisfaction(validation_required_docs, docs, {**profile, "documento": xlsx_document, "nit": xlsx_nit})
     natural_person_with_cedula = _is_natural_person_with_cedula({
         "tipo_persona": form_fields.get("tipo_persona") or profile.get("tipo_persona", ""),
@@ -8640,17 +8791,33 @@ def _build_validation_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str,
         porcentaje_legible = bool(todos_intermediarios) or (len(only_digits(porcentaje_venta)) >= 2)
         if not porcentaje_legible:
             continue
-        ok = _is_percentage_100(porcentaje_venta)
+        # Un 0 explícito es válido y no bloquea: es venta directa (va como venta=2 al
+        # plano). Solo el 100% o el 0% son aceptables; cualquier otro valor sigue siendo
+        # blocker.
+        es_venta_directa = _es_porcentaje_cero(porcentaje_venta)
+        ok = es_venta_directa or _is_percentage_100(porcentaje_venta)
+        if es_venta_directa:
+            mensaje = (
+                f"En el soporte entrega de documentos, para intermediario código {codigo_intermediario.zfill(2)} "
+                f"el porcentaje de la venta es 0%: se registra como venta directa."
+            )
+        elif ok:
+            mensaje = (
+                f"En el soporte entrega de documentos, para intermediario código {codigo_intermediario.zfill(2)} "
+                f"el porcentaje de la venta fue leído como '{porcentaje_venta}' y cumple con el 100% requerido."
+            )
+        else:
+            mensaje = (
+                f"En el soporte entrega de documentos, para intermediario código {codigo_intermediario.zfill(2)} "
+                f"el porcentaje de la venta debe venir diligenciado al 100% (o 0% si es venta directa). "
+                f"Valor leído: '{porcentaje_venta or 'vacío'}'."
+            )
         validations.append(
             {
                 "code": "ENTREGA_DOCUMENTOS_PORCENTAJE_INTERMEDIARIO",
                 "status": "OK" if ok else "ALERTA",
                 "severity": "ok" if ok else "blocker",
-                "message": (
-                    f"En el soporte entrega de documentos, para intermediario código {codigo_intermediario.zfill(2)} el porcentaje de la venta fue leído como '{porcentaje_venta}' y cumple con el 100% requerido."
-                    if ok
-                    else f"En el soporte entrega de documentos, para intermediario código {codigo_intermediario.zfill(2)} el porcentaje de la venta debe venir diligenciado al 100%. Valor leído: '{porcentaje_venta or 'vacío'}'."
-                ),
+                "message": mensaje,
             }
         )
         todos_intermediarios_full = _extract_todos_intermediarios(doc)
@@ -8865,11 +9032,13 @@ def _push_comisiones_to_legacy(
     if override_rows:
         for interm in override_rows:
             linea += 1
+            pct = _porcentaje_venta_or_default(interm.get("porcentaje_venta"))
             comision_rows.append({
                 "lote": lote, "linea": str(linea), "sr": str(linea),
                 "vendedor": interm.get("vendedor_documento") or interm.get("codigo_intermediario"),
-                "codigo_vendedor": interm.get("codigo_vendedor", "2"), "venta": "1",
-                "porcentaje": _format_comision_porcentaje(interm.get("porcentaje_venta") or "100"),
+                "codigo_vendedor": interm.get("codigo_vendedor", "2"),
+                "venta": _venta_por_porcentaje(pct),
+                "porcentaje": _format_comision_porcentaje(pct),
             })
     comision_docs = [d for d in docs if str(d.get("document_type") or "") == "comision"]
     entrega_docs = [d for d in docs if str(d.get("document_type") or "") == "entrega_documentos"]
@@ -8885,11 +9054,13 @@ def _push_comisiones_to_legacy(
                 if codigo in {"1", "3"}:
                     codigo_plano = {"1": "2", "3": "3", "4": "4"}.get(codigo, "2")
                     linea += 1
+                    pct = _porcentaje_venta_or_default(data.get("porcentaje_venta"))
                     comision_rows.append({
                         "lote": lote, "linea": str(linea), "sr": str(linea),
                         "vendedor": only_digits(data.get("vendedor_documento") or codigo),
-                        "codigo_vendedor": codigo_plano, "venta": "1",
-                        "porcentaje": _format_comision_porcentaje(data.get("porcentaje_venta") or "100"),
+                        "codigo_vendedor": codigo_plano,
+                        "venta": _venta_por_porcentaje(pct),
+                        "porcentaje": _format_comision_porcentaje(pct),
                     })
             else:
                 for interm in intermediarios:
@@ -8897,11 +9068,13 @@ def _push_comisiones_to_legacy(
                     if codigo_intermediario not in {"1", "3"}:
                         continue
                     linea += 1
+                    pct = _porcentaje_venta_or_default(interm.get("porcentaje_venta"))
                     comision_rows.append({
                         "lote": lote, "linea": str(linea), "sr": str(linea),
                         "vendedor": interm.get("vendedor_documento") or interm.get("codigo_intermediario"),
-                        "codigo_vendedor": interm.get("codigo_vendedor", "2"), "venta": "1",
-                        "porcentaje": _format_comision_porcentaje(interm.get("porcentaje_venta") or "100"),
+                        "codigo_vendedor": interm.get("codigo_vendedor", "2"),
+                        "venta": _venta_por_porcentaje(pct),
+                        "porcentaje": _format_comision_porcentaje(pct),
                     })
     if not comision_rows:
         return False
@@ -8911,10 +9084,25 @@ def _push_comisiones_to_legacy(
             json={"lote": lote, "base": base, "tables": {"brwdcomisiones": comision_rows}},
             timeout=30.0,
         )
-        return response.status_code == 200
+        ok = response.status_code == 200
     except Exception as exc:
         logger.warning("No pude insertar comisiones en legacy DB: %s", exc)
         return False
+    if ok and base == "ybr":
+        # Espejo a img004 (bkwdcomisiones): el resto del pipeline (_load_proc_servicios_to_engine)
+        # escribe ybr.br* y wimg004.bk* juntos en la misma llamada, pero esta funcion corre
+        # aparte (datos de comision del PDF "Entrega de documentos", no de proc_servicios) y
+        # solo tocaba brwdcomisiones - dejaba bkwdcomisiones con lo que hubiera quedado de una
+        # sincronizacion anterior (o vacio), desincronizado del dato real ya guardado en br.
+        try:
+            httpx.post(
+                f"{base_url}/legacy/db/import-real-lote",
+                json={"lote": lote, "base": "wimg004", "tables": {"bkwdcomisiones": comision_rows}},
+                timeout=30.0,
+            )
+        except Exception as exc:
+            logger.warning("No pude espejar comisiones en img004: %s", exc)
+    return ok
 
 
 def _build_926_output(
@@ -9053,7 +9241,14 @@ def _extract_comisiones_participacion_keyword(doc: Dict[str, Any]) -> List[Dict[
 
 
 def _validate_participacion_por_tipo(intermediarios: List[Dict[str, str]]) -> List[str]:
-    """Valida que la suma de participación por tipo de código sea 100%."""
+    """Valida que la suma de participación por tipo de código sea 100%.
+
+    Un 0 es válido y NO bloquea: significa venta directa (el intermediario está
+    registrado pero no participa de la comisión), y en el plano se traduce a
+    venta=2. Por eso las filas en 0 se excluyen de la suma en vez de arrastrarla
+    por debajo de 100; si un tipo queda solo con ceros, no hay nada que validar.
+    Una mezcla real mal diligenciada (60 + 0) se sigue reportando.
+    """
     errores = []
     from collections import defaultdict
     por_tipo: dict = defaultdict(list)
@@ -9066,6 +9261,8 @@ def _validate_participacion_por_tipo(intermediarios: List[Dict[str, str]]) -> Li
         )).lstrip("0") or ""
         pct = str(interm.get("porcentaje_venta") or interm.get("porcentaje") or "0")
         if not codigo:
+            continue
+        if _es_porcentaje_cero(pct):
             continue
         try:
             por_tipo[codigo].append(float(pct.replace(",", ".").replace("%", "").strip()))
@@ -9306,6 +9503,135 @@ def _insert_sql(table: str, row: Dict[str, Any]) -> str:
     cols = [_sql_identifier(k) for k in row.keys()]
     vals = [_sql_literal(row.get(k)) for k in row.keys()]
     return f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(vals)});"
+
+
+def _build_geo_alerts(import_out: Any) -> List[Dict[str, Any]]:
+    """Alertas de homologación de ciudad/departamento a partir de la respuesta del import.
+
+    Dos situaciones distintas, con gravedad distinta:
+      - geo_no_resueltos: la ciudad NO está en el catálogo de img004. No se guarda código
+        DANE; queda el texto crudo del formulario. Es el caso grave.
+      - geo_ambiguos: la ciudad existe pero repetida en varios departamentos y no había
+        con qué desambiguar. Se guardó un municipio plausible, pero puede no ser el real.
+
+    Son alertas, no bloqueantes: el import ya escribió en la base cuando se detectan.
+    """
+    if not isinstance(import_out, dict):
+        return []
+    alerts: List[Dict[str, Any]] = []
+
+    def _detalle(item: Dict[str, Any]) -> str:
+        partes = [
+            normalize_text(item.get("contexto")),
+            f"ciudad '{normalize_text(item.get('ciudad')) or 'vacía'}'",
+        ]
+        dep = normalize_text(item.get("departamento_recibido"))
+        if dep:
+            partes.append(f"departamento '{dep}'")
+        lugar = normalize_text(item.get("lugar_afiliacion"))
+        if lugar:
+            partes.append(f"lugar '{lugar}'")
+        return " · ".join(p for p in partes if p)
+
+    no_resueltos = [x for x in (import_out.get("geo_no_resueltos") or []) if isinstance(x, dict)]
+    if no_resueltos:
+        alerts.append(
+            {
+                "code": "GEO_CIUDAD_SIN_COINCIDENCIA",
+                "status": "ALERTA",
+                "severity": "alert",
+                "message": (
+                    f"{len(no_resueltos)} registro(s) con ciudad que no coincide con ninguna del catálogo oficial: "
+                    "se guardaron SIN código de municipio ni departamento. Corregir el nombre en el Excel "
+                    "(debe coincidir con el catálogo) y reprocesar: "
+                    + "; ".join(_detalle(x) for x in no_resueltos[:15])
+                    + ("; …" if len(no_resueltos) > 15 else "")
+                    + "."
+                ),
+            }
+        )
+
+    ambiguos = [x for x in (import_out.get("geo_ambiguos") or []) if isinstance(x, dict)]
+    if ambiguos:
+        alerts.append(
+            {
+                "code": "GEO_CIUDAD_AMBIGUA",
+                "status": "ALERTA",
+                "severity": "alert",
+                "message": (
+                    f"{len(ambiguos)} registro(s) con un municipio que existe en varios departamentos y no se pudo "
+                    "determinar cuál: se guardó el de menor código DANE, que puede no ser el correcto. "
+                    "Diligenciar el departamento en el Excel para resolverlo: "
+                    + "; ".join(
+                        f"{_detalle(x)} → se guardó {normalize_text(x.get('elegido'))} "
+                        f"(opciones: {', '.join(normalize_text(o) for o in (x.get('opciones') or []))})"
+                        for x in ambiguos[:15]
+                    )
+                    + ("; …" if len(ambiguos) > 15 else "")
+                    + "."
+                ),
+            }
+        )
+    return alerts
+
+
+def _contrato_para_afi_rad(payload: Dict[str, Any]) -> str:
+    """Número de contrato para las transiciones de afi_rad.
+
+    Usa el resolutor canónico (_resolve_case_contract_number), NO _case_lote_and_contract:
+    este último solo mira flat_pairs/profile, y hay XLSX donde el contrato únicamente
+    aparece en xlsx_profile.form_fields.numero_radicacion. Además payload["numero_contrato"]
+    lo puebla _normalize_case_payload dentro de save_case, o sea DESPUÉS de que analyze_case
+    arma el análisis: leerlo antes de guardar devuelve vacío y la transición a 'Radicada' se
+    saltaba en silencio.
+    """
+    return only_digits(
+        _resolve_case_contract_number(payload)
+        or _case_lote_and_contract(payload).get("contrato", "")
+    )
+
+
+def _afi_rad_set_estado(contrato: str, accion: str, fecha: str = "") -> Dict[str, Any]:
+    """Mueve wimg004.afi_rad al estado indicado para un contrato.
+
+    Nunca inserta: las filas de afi_rad las crea el modulo externo de radicacion. Que
+    el UPDATE no encuentre fila no es un fallo del caso (en desarrollo afi_rad viene
+    vacia), asi que esta funcion no propaga excepciones: reporta y sigue. El estado de
+    afi_rad es un efecto lateral sobre un sistema vecino, no puede tumbar el flujo.
+    """
+    contrato_digits = only_digits(contrato)
+    if not contrato_digits:
+        return {"ok": False, "skipped": True, "reason": "sin contrato"}
+    try:
+        return _legacy_post(
+            "legacy/afi-rad/estado",
+            {"contrato": contrato_digits, "accion": accion, "fecha": fecha},
+            timeout=30.0,
+        )
+    except Exception as exc:
+        logger.warning("No pude actualizar afi_rad a '%s' para contrato %s: %s", accion, contrato_digits, exc)
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "accion": accion}
+
+
+def _pqr_cerrar_trazabilidad(contrato: str, usuario_gestion: str = "") -> Dict[str, Any]:
+    """Cierra la gestion pendiente de PQR (base pqr_colmena) al aprobar el contrato.
+
+    Igual que _afi_rad_set_estado, es un efecto lateral sobre un sistema vecino: que no
+    haya gestion pendiente para el contrato -o que la base pqr ni siquiera este
+    configurada en el ambiente- no puede tumbar la aprobacion. Se reporta y sigue.
+    """
+    contrato_digits = only_digits(contrato)
+    if not contrato_digits:
+        return {"ok": False, "skipped": True, "reason": "sin contrato"}
+    try:
+        return _legacy_post(
+            "legacy/pqr/trazabilidad/cierre",
+            {"contrato": contrato_digits, "usuario_gestion": usuario_gestion or "nova"},
+            timeout=30.0,
+        )
+    except Exception as exc:
+        logger.warning("No pude cerrar la trazabilidad PQR del contrato %s: %s", contrato_digits, exc)
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
 def _case_lote_and_contract(payload: Dict[str, Any]) -> Dict[str, str]:
@@ -9662,15 +9988,14 @@ def _form_field_delivery_lines(xlsx_profile: Dict[str, Any]) -> List[str]:
     lugar_afiliacion = normalize_text((form_cell_values.get("lugar_afiliacion") or {}).get("value") or "")
     numero_radicacion = only_digits((form_cell_values.get("numero_radicacion") or {}).get("value") or form_fields.get("numero_radicacion") or "")
 
-    # ARL anterior (solo traslado): "14-11 Compañía Suramericana..." -> el SEGUNDO
-    # número (11) es el código real a buscar en arpriesgos (img004); el primero es
-    # solo un prefijo/clase que no corresponde a ningún catálogo.
+    # ARL anterior (solo traslado): "14-23 Positiva Compañía..." -> el "14-23" es la
+    # posición del combo del formulario legacy, NO el código real de arpriesgos (ese
+    # catálogo no tiene continuidad 1..99, ej. Positiva es código 10, no 23). Se manda
+    # el NOMBRE que sigue al número; compat-backend lo resuelve contra arpriesgos por
+    # nombre (tolerante a variaciones), igual que EPS/AFP.
     arl_raw = normalize_text(form_fields.get("b_arl_de_la_cual_se_traslada") or "")
-    arl_match = re.search(r"(\d{1,2})\s*-\s*(\d{1,2})", arl_raw)
-    if arl_match:
-        arl_code = str(int(arl_match.group(2)))
-    else:
-        arl_code = only_digits(arl_raw)
+    arl_match = re.search(r"^\d{1,2}\s*-\s*\d{1,2}\s*(.+)$", arl_raw)
+    arl_code = arl_match.group(1).strip() if arl_match else arl_raw.strip()
 
     profile_num_trab = only_digits(str(profile.get("numero_trabajadores") or ""))
 
@@ -10437,13 +10762,33 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
             for row in (_pi_manifest_rows or [])
             if isinstance(row, dict) and normalize_text(row.get("pi"))
         )
+        # Homologación geográfica: el import resuelve ciudad/departamento contra los
+        # catálogos de img004. Lo que no casa queda SIN código DANE en brempresasarp/
+        # brafiliadosarp (se guarda el texto crudo del formulario), y lo ambiguo se
+        # resuelve eligiendo un municipio entre varios homónimos. Ninguna de las dos
+        # cosas hace fallar el import, así que sin esto pasaban invisibles.
+        _geo_alerts = _build_geo_alerts(import_proc_out)
+        if _geo_alerts:
+            _vr = analysis.setdefault("validacion_resumen", {})
+            _vr_alerts = _vr.setdefault("alerts", [])
+            for _al in _geo_alerts:
+                if not any(
+                    isinstance(x, dict) and x.get("code") == _al["code"] and x.get("message") == _al["message"]
+                    for x in _vr_alerts
+                ):
+                    _vr_alerts.append(_al)
         timeline.append(
             _workflow_step(
                 "sync_engine",
                 "Sincronización al engine legacy",
-                "ok",
-                f"El engine legacy quedó sincronizado para lote {lote}.",
-                {"import": import_proc_out},
+                "warn" if _geo_alerts else "ok",
+                (
+                    f"El engine legacy quedó sincronizado para lote {lote}, "
+                    f"con {len(_geo_alerts)} alerta(s) de homologación geográfica."
+                    if _geo_alerts
+                    else f"El engine legacy quedó sincronizado para lote {lote}."
+                ),
+                {"import": import_proc_out, "geo_alertas": _geo_alerts},
                 duration_ms=int((perf_counter() - sync_started) * 1000),
             )
         )
@@ -10755,6 +11100,27 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
     }
     payload["analysis"]["output_926"] = output_926
     payload["analysis"]["workflow_run"] = workflow
+
+    # afi_rad -> 'Indexado', ANTES de la entrega. El paso a 'Plano' que hace
+    # _execute_legacy_delivery exige afi_rad_estado='Indexado', asi que el orden
+    # Radicada -> Indexado -> Plano tiene que resolverse dentro de esta misma corrida:
+    # si se dejara para despues, el UPDATE de 'Plano' no encontraria fila.
+    contrato_indexa = _contrato_para_afi_rad(payload)
+    if contrato_indexa:
+        payload["analysis"]["afi_rad_indexado"] = _afi_rad_set_estado(
+            contrato_indexa, "indexado", datetime.now().strftime("%Y%m%d")
+        )
+
+        # Cierre de la gestion pendiente en PQR (pqr_colmena). Va despues de 'Indexado'
+        # porque ambos escriben afi_rad_fecharecibido: 'Indexado' lo hace por contrato y
+        # este por afi_rad_na, y el orden deja como valor final el de este cierre.
+        usuario_gestion = normalize_text(
+            (payload.get("manual_approval") or {}).get("operator") or operator or "nova_case_workflow"
+        )[:15]
+        payload["analysis"]["pqr_trazabilidad"] = _pqr_cerrar_trazabilidad(
+            contrato_indexa, usuario_gestion
+        )
+
     payload["updated_at"] = utc_now()
     save_case(payload)
     return attach_legacy_delivery_plan(case_id, payload)
@@ -10797,6 +11163,7 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
         ocr_file_entries.append(file_entry)
 
     def _process_document(file_entry: Dict[str, Any]) -> Dict[str, Any]:
+        _doc_started = perf_counter()
         path = Path(file_entry["stored_path"])
         suffix = path.suffix.lower()
         cached_doc = previous_docs_by_filename.get(path.name)
@@ -10818,6 +11185,7 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
         ):
             doc = dict(cached_doc)
             doc["_ocr_cache_size_bytes"] = current_size
+            logger.info("analyze_case doc=%s cache_hit_full duration_ms=%d", path.name, int((perf_counter() - _doc_started) * 1000))
             return doc
         if cache_hit:
             result = {
@@ -10832,6 +11200,7 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
         else:
             text = normalize_text(path.read_text(encoding="utf-8", errors="ignore")) if path.exists() else ""
             result = {"text": text, "used_ocr": False, "pages_processed": 1 if text else 0}
+        _ocr_duration_ms = int((perf_counter() - _doc_started) * 1000)
 
         doc_meta = _classify_document(path.name, result["text"])
         if _is_auto_entrega_comision_file(file_entry, path.name):
@@ -10871,16 +11240,52 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
             "_ocr_cache_size_bytes": file_entry.get("size_bytes"),
         }
         _apply_auto_entrega_comision_metadata(doc, file_entry)
+        logger.info(
+            "analyze_case doc=%s pages=%s used_ocr=%s ocr_ms=%d total_ms=%d",
+            path.name,
+            result.get("pages_processed"),
+            result.get("used_ocr"),
+            _ocr_duration_ms,
+            int((perf_counter() - _doc_started) * 1000),
+        )
         return doc
+
+    # Fase 1: validar el XLSX ANTES de gastar tiempo en OCR. El OCR de los demas
+    # soportes (PDF/imagenes via poppler/tesseract) es la parte mas cara de este
+    # paso; si el XLSX ya trae errores de datos (catalogos EPS/AFP, campos
+    # obligatorios, sumas de sedes, etc.) no tiene sentido procesar todo lo demas
+    # para terminar rechazando el caso solo por el XLSX. Se enriquece el perfil sin
+    # documentos (docs=[], aun no hay OCR) para poder correr las mismas reglas que
+    # se usan mas abajo (run_xlsx_primary/secondary_validations).
+    skip_ocr_for_xlsx_errors = False
+    if xlsx_entry:
+        xlsx_bytes = Path(xlsx_entry["stored_path"]).read_bytes()
+        clean_output = _generate_clean_via_legacy_nova(xlsx_entry["filename"], xlsx_bytes)
+        if not bool(clean_output.get("ok")) and xlsx_bytes:
+            workbook = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
+            clean_output = _generate_clean_from_workbook(workbook, xlsx_entry["filename"])
+            clean_output["_source"] = "local_fallback"
+        xlsx_profile = _enrich_xlsx_profile_from_clean(xlsx_profile, clean_output, [])
+        xlsx_primary_precheck = run_xlsx_primary_validations(xlsx_profile)
+        xlsx_secondary_precheck = run_xlsx_secondary_validations(xlsx_profile)
+        skip_ocr_for_xlsx_errors = bool(
+            xlsx_primary_precheck.get("blockers") or xlsx_secondary_precheck.get("blockers")
+        )
 
     # El OCR/lectura de PDF es lo mas caro de este paso (subprocesos de poppler/tesseract,
     # cada uno libera el GIL mientras espera) y cada documento es independiente entre si:
     # se procesan en paralelo (con cache de OCR por archivo ya resuelto arriba) en vez de
     # uno por uno, para aprovechar los cores disponibles en vez de dejarlos ociosos.
-    if ocr_file_entries:
+    if ocr_file_entries and not skip_ocr_for_xlsx_errors:
         max_workers = min(8, max(1, os.cpu_count() or 4), len(ocr_file_entries))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             docs.extend(executor.map(_process_document, ocr_file_entries))
+    elif skip_ocr_for_xlsx_errors and ocr_file_entries:
+        logger.info(
+            "analyze_case case=%s xlsx_precheck_blockers - se omite OCR de %d soporte(s)",
+            case_id,
+            len(ocr_file_entries),
+        )
 
     _apply_document_classification_overrides(docs)
     _number_anexo_sedes(docs)
@@ -10927,13 +11332,13 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
 
     clean_started = perf_counter()
     if xlsx_entry:
-        xlsx_bytes = Path(xlsx_entry["stored_path"]).read_bytes()
-        clean_output = _generate_clean_via_legacy_nova(xlsx_entry["filename"], xlsx_bytes)
-        if not bool(clean_output.get("ok")) and xlsx_bytes:
-            workbook = load_workbook(io.BytesIO(xlsx_bytes), data_only=True)
-            clean_output = _generate_clean_from_workbook(workbook, xlsx_entry["filename"])
-            clean_output["_source"] = "local_fallback"
-        xlsx_profile = _enrich_xlsx_profile_from_clean(xlsx_profile, clean_output, docs)
+        # clean_output ya se genero en la fase 1 (prechequeo del XLSX, antes del OCR).
+        # Si hubo documentos reales (no se omitio el OCR), se vuelve a enriquecer con
+        # ellos para aprovechar los fallbacks de NIT/razon social contra RUT/camara/
+        # cedula ya procesados; si se omitio el OCR, el perfil ya quedo enriquecido
+        # (con docs=[]) desde la fase 1 y no hay nada nuevo que aportar.
+        if docs:
+            xlsx_profile = _enrich_xlsx_profile_from_clean(xlsx_profile, clean_output, docs)
         xlsx_profile = _finalize_profile_from_docs(xlsx_profile, docs)
     tipoempresa_detectado = _extract_tipoempresa_from_entrega_docs(docs)
     if tipoempresa_detectado:
@@ -10974,7 +11379,14 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
     )
     mismatches: List[str] = []
 
-    validation_summary = _build_validation_summary(xlsx_profile, docs, missing_docs)
+    if skip_ocr_for_xlsx_errors:
+        # No se proceso OCR de los soportes: no se puede afirmar que falten
+        # documentos, solo que aun no se validaron. Evitar el bloqueante ruidoso
+        # "faltan soportes" mientras el XLSX no se corrija primero.
+        missing_docs = []
+        matched_docs = []
+
+    validation_summary = _build_validation_summary(xlsx_profile, docs, missing_docs, documents_pending_ocr=skip_ocr_for_xlsx_errors)
     validation_summary = _apply_manual_intermediarios_to_validation_summary(validation_summary, previous_manual_review)
     validation_summary = _apply_validation_exceptions(validation_summary, previous_manual_review)
     blocker_records = [
@@ -11003,7 +11415,11 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
     next_step = (
         "Validar contrato final y radicar afiliacion."
         if decision_status == "aprobable"
-        else "Solicitar faltantes o corregir inconsistencias antes de radicar."
+        else (
+            "Corregir los errores del Excel antes de continuar; los documentos aún no se validaron."
+            if skip_ocr_for_xlsx_errors
+            else "Solicitar faltantes o corregir inconsistencias antes de radicar."
+        )
     )
 
     checklist = {
@@ -11014,15 +11430,25 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
         "matched_documents": matched_docs,
         "mismatches": mismatches,
         "received_summary": _summarize_received_documents(docs),
+        "documents_pending_ocr": skip_ocr_for_xlsx_errors,
     }
     decision = {
         "flow": "afiliacion_documental",
         "recommended_status": decision_status,
-        "summary": "Contrato listo para radicacion." if decision_status == "aprobable" else "Contrato con faltantes o inconsistencias.",
+        "summary": (
+            "Contrato listo para radicacion."
+            if decision_status == "aprobable"
+            else (
+                "El Excel tiene errores de datos; corrígelos para continuar con la validación de documentos."
+                if skip_ocr_for_xlsx_errors
+                else "Contrato con faltantes o inconsistencias."
+            )
+        ),
         "blockers": blockers,
         "blocker_records": blocker_records,
         "alerts": non_blocking_alerts,
         "next_step": next_step,
+        "documents_pending_ocr": skip_ocr_for_xlsx_errors,
     }
     executive_report = _build_executive_report(payload.get("label", case_id), xlsx_profile, checklist, decision, validation_summary)
     output_926 = _build_926_output(
@@ -11056,6 +11482,7 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
             "clean_duration_ms": clean_duration_ms,
             "validation_duration_ms": validation_duration_ms,
             "analysis_total_ms": int((perf_counter() - analyze_started) * 1000),
+            "ocr_skipped_due_to_xlsx_errors": skip_ocr_for_xlsx_errors,
         },
     }
     payload["status"] = "completed" if decision_status == "aprobable" else "analyzed"
@@ -11067,6 +11494,22 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
         analysis["manual_approval"] = previous_manual_approval
     else:
         _clear_manual_approval(payload, "Reproceso de validaciones del caso.")
+
+    # afi_rad -> 'Radicada'. Se hace aqui y no en la subida porque el numero de contrato
+    # sale del XLSX y solo se conoce despues de analizarlo. Una sola vez por caso: este
+    # analisis se re-ejecuta en cada "refrescar validaciones", y como el UPDATE de
+    # 'Radicada' no lleva guarda de estado previo, repetirlo devolveria a 'Radicada' un
+    # contrato que ya avanzo a 'Indexado'/'Plano'.
+    if not payload.get("afi_rad_radicada_at"):
+        contrato_radica = _contrato_para_afi_rad(payload)
+        if contrato_radica:
+            resultado_radica = _afi_rad_set_estado(
+                contrato_radica, "radicada", datetime.now().strftime("%d/%m/%Y")
+            )
+            analysis["afi_rad_radicada"] = resultado_radica
+            if resultado_radica.get("ok"):
+                payload["afi_rad_radicada_at"] = utc_now()
+
     save_case(payload)
     rebuild_document_registry()
     return payload

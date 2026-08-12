@@ -1406,6 +1406,35 @@ class LegacyCompatEngine:
         return digits.zfill(width)
 
     @staticmethod
+    def _fecha_nacimiento_926(value: Any) -> str:
+        """Fecha de nacimiento del registro tipo 3 (inicio 88, longitud 8) en YYYYMMDD.
+
+        En BD, brafiliadosarp/bkafiliadosarp.f35 se guarda como DDMMYYYY y ademas con el
+        cero inicial del dia omitido (ver _ddmmyyyy_f35 en afiliaciones.py: "5/1/2026" se
+        persiste como "5012026", 7 digitos). Antes esto salia al plano tal cual via
+        _vb_num, o sea en DDMMYYYY. El plano debe llevar YYYYMMDD.
+
+        Se detecta el orden en vez de asumirlo, porque no todo lo que llega a f35 pasa por
+        _ddmmyyyy_f35 (hay filas sembradas/importadas ya en YYYYMMDD) y reordenar una fecha
+        que ya estaba bien la corrompe.
+        """
+        digits = "".join(ch for ch in as_text(value) if ch.isdigit())
+        if not digits:
+            return "0" * 8
+        digits = digits[-8:].zfill(8)
+
+        def _plausible(y: str, m: str, d: str) -> bool:
+            return 1900 <= int(y) <= 2100 and 1 <= int(m) <= 12 and 1 <= int(d) <= 31
+
+        # DDMMYYYY: el anio va al final. Es el formato real de la columna.
+        if _plausible(digits[4:8], digits[2:4], digits[0:2]):
+            return digits[4:8] + digits[2:4] + digits[0:2]
+        # YYYYMMDD: ya viene en el formato pedido, se deja igual.
+        if _plausible(digits[0:4], digits[4:6], digits[6:8]):
+            return digits
+        return "0" * 8
+
+    @staticmethod
     def _vb_code(value: Any, width: int) -> str:
         raw = as_text(value).strip()
         digits = "".join(ch for ch in raw if ch.isdigit())
@@ -1603,7 +1632,11 @@ class LegacyCompatEngine:
                     + ("0" if len(as_text(com.get("vendedor"))) == 9 else "1")
                     + " " * 4
                     + self._vb_num(com.get("vendedor"), 15)
-                    + self._vb_num(com.get("venta"), 1)
+                    # Venta vendedor (inicio 22, longitud 1): constante "2". No depende
+                    # del porcentaje ni de ningun otro dato de la comision; antes se
+                    # tomaba de com["venta"], que valia "2" solo cuando el porcentaje
+                    # era 0 y "1" en los demas casos.
+                    + "2"
                     + por
                     + " " * 359
                 )
@@ -1832,7 +1865,8 @@ class LegacyCompatEngine:
                             + self._vb_text(wd.get("f32"), 15)
                             + self._vb_text(nom1, 20)
                             + self._vb_text(nom2, 20)
-                            + self._vb_num(wd.get("f35"), 8)
+                            # Inicio 88, longitud 8: fecha de nacimiento en YYYYMMDD.
+                            + self._fecha_nacimiento_926(wd.get("f35"))
                             + self._vb_text(wd.get("f34"), 1)
                             + self._vb_code(wd.get("f30"), 6)
                             + self._vb_text(wd.get("f37"), 40)
@@ -1889,7 +1923,8 @@ class LegacyCompatEngine:
                             + self._vb_text(ws.get("segundo_apellido"), 15)
                             + self._vb_text(ws.get("primer_nombre"), 20)
                             + self._vb_text(ws.get("segundo_nombre"), 20)
-                            + self._vb_num(ws.get("fecha_nacimiento"), 8)
+                            # Inicio 88, longitud 8: fecha de nacimiento en YYYYMMDD.
+                            + self._fecha_nacimiento_926(ws.get("fecha_nacimiento"))
                             + self._vb_text(ws.get("sexo"), 1)
                             + self._vb_text(ws.get("codigo_ct"), 6)
                             + self._vb_text(ws.get("cargo"), 40)
@@ -1946,7 +1981,8 @@ class LegacyCompatEngine:
                             + self._vb_text(wi.get("segundo_apellido"), 15)
                             + self._vb_text(wi.get("primer_nombre"), 20)
                             + self._vb_text(wi.get("segundo_nombre"), 20)
-                            + self._vb_num(wi.get("fecha_nacimiento"), 8)
+                            # Inicio 88, longitud 8: fecha de nacimiento en YYYYMMDD.
+                            + self._fecha_nacimiento_926(wi.get("fecha_nacimiento"))
                             + self._vb_text(wi.get("sexo"), 1)
                             + self._vb_text(wi.get("codigo_ct"), 6)
                             + self._vb_text("INDEPENDIENTE", 40)

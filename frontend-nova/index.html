@@ -103,6 +103,11 @@
 
     <!-- TOPBAR -->
     <header class="topbar">
+      <button class="sidebar-toggle" id="sidebarToggle" type="button"
+              title="Ocultar menú lateral" aria-label="Ocultar menú lateral"
+              aria-controls="sidebar" aria-expanded="true">
+        <span class="sidebar-toggle-icon" aria-hidden="true"></span>
+      </button>
       <div class="topbar-left">
         <div class="page-title" id="pageTitle">Bandeja de entrada</div>
         <div class="page-breadcrumb" id="pageBreadcrumb">Operación · contratos activos</div>
@@ -384,14 +389,3 @@
 </div>
 
 <script type="module" src="/main.js"></script>
-
-<!-- Widget flotante de recursos -->
-<div id="resourceWidget" style="position:fixed;bottom:16px;right:16px;z-index:888;background:var(--c-bg-2);border:0.5px solid var(--c-border);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--c-text-2);display:flex;gap:12px;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,0.08);cursor:default;opacity:0.85;transition:opacity 0.2s" title="Recursos del sistema">
-  <span style="display:flex;align-items:center;gap:4px">
-    <span style="width:6px;height:6px;border-radius:50%;background:var(--c-ok)" id="rwDot"></span>
-    <span id="rwStatus">Sistema</span>
-  </span>
-  <span>RAM <strong id="rwRam">—</strong></span>
-  <span>RSS <strong id="rwRss">—</strong></span>
-  <span id="rwQueue" style="display:none">Cola <strong id="rwQueueVal">—</strong></span>
-</div>

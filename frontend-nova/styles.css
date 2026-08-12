@@ -140,7 +140,51 @@ html, body { height: 100%; font-family: var(--font); font-size: 14px; color: var
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  transition: width 0.18s ease, min-width 0.18s ease, opacity 0.18s ease;
 }
+
+/* Sidebar colapsado. Se anima el ancho a 0 en vez de usar display:none para que la
+   transición funcione; overflow:hidden evita que el contenido se desborde sobre el
+   contenido principal mientras encoge, y visibility corta el foco por teclado. */
+.app-shell.sidebar-collapsed .sidebar {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  border-right-color: transparent;
+}
+
+.sidebar-toggle {
+  flex-shrink: 0;
+  width: 30px; height: 30px;
+  margin-right: 10px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+  color: var(--c-text-2);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.sidebar-toggle:hover { background: var(--c-surface-2); color: var(--c-text); }
+.sidebar-toggle:focus-visible { outline: 2px solid var(--c-brand); outline-offset: 1px; }
+
+/* Icono hamburguesa dibujado con la barra central + pseudo-elementos. */
+.sidebar-toggle-icon,
+.sidebar-toggle-icon::before,
+.sidebar-toggle-icon::after {
+  display: block;
+  width: 14px; height: 1.5px;
+  background: currentColor;
+  border-radius: 1px;
+  transition: transform 0.18s ease;
+}
+.sidebar-toggle-icon { position: relative; }
+.sidebar-toggle-icon::before,
+.sidebar-toggle-icon::after { content: ""; position: absolute; left: 0; }
+.sidebar-toggle-icon::before { transform: translateY(-4.5px); }
+.sidebar-toggle-icon::after  { transform: translateY(4.5px); }
 .sidebar-brand {
   display: flex; align-items: center; gap: 10px;
   padding: 16px 16px 14px;
@@ -1892,6 +1936,16 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
 }
 .classif-sort-btn:hover { background: var(--c-info-bg); color: var(--c-blue); }
 .classif-sort-btn.active { background: var(--c-blue); color: #fff; border-color: var(--c-blue); }
+/* Volver a información: es la salida principal de la lista de documentos, así que va
+   sólido y con más peso que las acciones secundarias (.classif-sort-btn). */
+.classif-back-btn {
+  font-size: 11px; padding: 4px 11px; border-radius: 4px;
+  border: 1px solid var(--c-blue); background: var(--c-blue);
+  color: #fff; font-weight: 700; cursor: pointer;
+  transition: all 0.12s;
+}
+.classif-back-btn:hover { filter: brightness(1.08); }
+.classif-back-btn:active { transform: translateY(1px); }
 .classif-readonly-pill {
   padding: 4px 8px;
   border-radius: var(--radius);
@@ -2049,6 +2103,9 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
 @media (max-width: 600px) {
   :root { --sidebar-w: 0px; }
   .sidebar { display: none; }
+  /* El sidebar ya está oculto en móvil y la navegación va por #mobileViewSelect:
+     el botón de colapso no tendría nada que hacer. */
+  .sidebar-toggle { display: none; }
   .topbar {
     height: auto;
     min-height: var(--topbar-h);

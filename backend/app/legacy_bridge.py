@@ -55,7 +55,7 @@ def generate_legacy_flatfile_926(lote: str = "") -> Dict[str, Any]:
         return {"available": True, "ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
-def generate_legacy_flatfile_926_http(lote: str, base: str = "temporal", strict_validate: bool = False) -> Dict[str, Any]:
+def generate_legacy_flatfile_926_http(lote: str, base: str = "ybr", strict_validate: bool = False) -> Dict[str, Any]:
     configured_url = str(settings.legacy_backend_url or "").strip().rstrip("/")
     if not configured_url:
         return {"available": False, "ok": False, "error": "legacy_backend_url no configurado."}

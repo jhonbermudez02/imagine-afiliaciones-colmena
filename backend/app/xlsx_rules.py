@@ -6,7 +6,7 @@ import unicodedata
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import httpx
 
@@ -421,6 +421,12 @@ def _append_sede_cell_validation(
 
 def _center_cell_info(row_values: Dict[str, Any], field: str) -> Dict[str, Any]:
     return dict((row_values or {}).get(field) or {})
+
+
+def _center_cell_text(row_values: Dict[str, Any], field: str) -> str:
+    """Valor de texto de una celda de centro de trabajo (las filas guardan
+    {value/label/cell} por campo, no el valor plano)."""
+    return normalize_text(_center_cell_info(row_values, field).get("value"))
 
 
 def _append_center_cell_validation(
@@ -931,6 +937,140 @@ def _normalize_catalog_name(value: Any) -> str:
         alpha_variant = normalized.replace("0", "O")
         normalized = CATALOG_EQUIVALENTS.get(alpha_variant, alpha_variant)
     return normalized
+
+
+_GEO_DEPT_STOPWORDS = {"DE", "DEL", "LA", "EL", "LOS", "LAS", "Y"}
+
+
+def _geo_norm(value: Any) -> str:
+    """Normalización geográfica. Réplica de _norm_geo de compat (_resolve_geo)."""
+    txt = str(value or "").strip()
+    if not txt:
+        return ""
+    try:
+        txt = txt.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        pass
+    txt = unicodedata.normalize("NFKD", txt.upper())
+    txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+    txt = re.sub(r"[^A-Z0-9 ]", " ", txt)
+    return re.sub(r"\s+", " ", txt).strip()
+
+
+def _fetch_geo_catalog() -> Dict[str, Any]:
+    """Catálogo geográfico de img004 indexado por nombre normalizado."""
+    base_url = str(settings.legacy_backend_url or "").strip().rstrip("/")
+    if not base_url:
+        return {}
+    try:
+        response = httpx.get(f"{base_url}/legacy/db/catalog-geo", timeout=15.0)
+        response.raise_for_status()
+        data = response.json()
+    except Exception:
+        return {}
+    cities: Dict[str, List[Dict[str, str]]] = {}
+    for item in data.get("ciudades") or []:
+        if not isinstance(item, dict):
+            continue
+        key = _geo_norm(item.get("ciudad"))
+        if key:
+            cities.setdefault(key, []).append(item)
+    depts: Dict[str, str] = {}
+    depts_by_code: Dict[str, str] = {}
+    for item in data.get("departamentos") or []:
+        if not isinstance(item, dict):
+            continue
+        key = _geo_norm(item.get("nombre"))
+        coddep = str(item.get("coddep") or item.get("codigo") or "").strip()
+        if key and coddep:
+            depts[key] = coddep
+        codigo = str(item.get("codigo") or "").strip()
+        if codigo and coddep:
+            depts_by_code[codigo] = coddep
+    if not cities:
+        return {}
+    return {"cities": cities, "depts": depts, "depts_by_code": depts_by_code}
+
+
+def _geo_dept_code(hint: Any, catalog: Dict[str, Any]) -> str:
+    """Código de departamento. Réplica de _dept_code_from_hint de compat: por tokens,
+    ignorando conectores, prefiriendo la coincidencia más específica."""
+    h = _geo_norm(hint)
+    if not h:
+        return ""
+    digits = "".join(ch for ch in h if ch.isdigit())
+    if len(digits) == 2 and digits in catalog.get("depts_by_code", {}):
+        return catalog["depts_by_code"][digits]
+    depts = catalog.get("depts") or {}
+    if h in depts:
+        return depts[h]
+    hint_tokens = [t for t in h.split() if t not in _GEO_DEPT_STOPWORDS]
+    if not hint_tokens:
+        return ""
+    pos = {tok: idx for idx, tok in enumerate(reversed(hint_tokens))}
+    candidates = []
+    for name, code in depts.items():
+        name_tokens = [t for t in name.split() if t not in _GEO_DEPT_STOPWORDS]
+        if not name_tokens or not set(name_tokens).issubset(hint_tokens):
+            continue
+        first_pos = min(len(hint_tokens) - 1 - pos[t] for t in name_tokens)
+        candidates.append((-len(name_tokens), first_pos, code))
+    if not candidates:
+        return ""
+    candidates.sort()
+    return candidates[0][2]
+
+
+def _geo_resolve(city: Any, dept_hint: Any, catalog: Dict[str, Any]) -> Tuple[str, List[Dict[str, str]]]:
+    """Resuelve un municipio igual que compat. Devuelve (estado, candidatos):
+    "ok" (uno solo o desambiguado), "ambigua" (homónimos sin departamento que resuelva)
+    o "sin_coincidencia" (no está en el catálogo)."""
+    cities = catalog.get("cities") or {}
+    key = _geo_norm(city)
+    if not key:
+        return ("ok", [])
+    candidates = cities.get(key) or []
+    if not candidates:
+        # Fallback por prefijo: 'BOGOTA' <-> 'BOGOTA D C'.
+        for nkey, items in cities.items():
+            if nkey.startswith(key + " ") or key.startswith(nkey + " "):
+                candidates.extend(items)
+    if not candidates:
+        return ("sin_coincidencia", [])
+    if len(candidates) == 1:
+        return ("ok", candidates)
+    dept_code = _geo_dept_code(dept_hint, catalog)
+    if dept_code and any(c.get("coddep") == dept_code for c in candidates):
+        return ("ok", candidates)
+    return ("ambigua", candidates)
+
+
+def _exact_catalog_norm(value: Any) -> str:
+    """Canonicaliza un nombre para comparación EXACTA contra el catálogo de img004.
+
+    Réplica de _catalog_norm de compat (_riesgos_lookup): mayúsculas, sin tildes, el
+    punto se elimina y el resto de la puntuación pasa a espacio, espacios colapsados.
+
+    Solo canonicaliza la MISMA cadena: no quita sufijos ni tokens. A diferencia de
+    _normalize_catalog_name -que elimina "EPS"/"AFP"/"SA"/"LTDA" y compacta espacios,
+    haciendo que "NUEVA EPS" y "NUEVA" se vieran iguales-, aquí "NUEVA EPS" solo casa
+    si el catálogo dice literalmente "NUEVA EPS".
+    """
+    txt = unicodedata.normalize("NFKD", str(value or ""))
+    txt = "".join(ch for ch in txt if not unicodedata.combining(ch)).upper()
+    txt = "".join(ch if (ch.isalnum() or ch == " ") else ("" if ch == "." else " ") for ch in txt)
+    return " ".join(txt.split())
+
+
+def _load_exact_name_catalog(items: List[Dict[str, Any]]) -> set[str]:
+    names: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        normalized = _exact_catalog_norm(item.get("nombre"))
+        if normalized:
+            names.add(normalized)
+    return names
 
 
 def _load_name_catalog(items: List[Dict[str, Any]]) -> set[str]:
@@ -2024,67 +2164,171 @@ def run_xlsx_secondary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, An
 
     eps_items = _fetch_catalog_items("eps")
     afp_items = _fetch_catalog_items("afp")
-    eps_catalog = _load_name_catalog(eps_items) | _load_pila_name_catalog("EPS")
-    afp_catalog = _load_name_catalog(afp_items) | _load_pila_name_catalog("AFP")
+    # Coincidencia EXACTA contra el catálogo real de img004, con la MISMA normalización
+    # que usa la homologación de compat (_riesgos_lookup). Así lo que valida aquí es
+    # exactamente lo que va a persistir en f40/f41: si el nombre no está tal cual en el
+    # catálogo, allá queda en 99 y aquí se reporta.
+    #
+    # Se dejaron de usar a propósito: los alias PILA, la tabla CATALOG_EQUIVALENTS, el
+    # recorte de sufijos (EPS/AFP/SA/LTDA) de _normalize_catalog_name y el rescate por
+    # tokens de dominio de _check_entity_valid. Todos aceptaban nombres que NO están en
+    # el catálogo -"FONDO NACIONAL DE SALUD" y "ALIANZA MEDICA NACIONAL" pasaban la
+    # validación y terminaban en 99-, que es justo lo que el bloqueante decía detectar.
+    eps_catalog = _load_exact_name_catalog(eps_items)
+    afp_catalog = _load_exact_name_catalog(afp_items)
+    # Catálogo geográfico oficial (img004.ciudades/departamentos), el MISMO que usa la
+    # homologación en compat. Se valida aquí, antes de escribir: un municipio que no casa
+    # queda sin código DANE en brempresasarp/brafiliadosarp, y uno ambiguo se guarda con
+    # el municipio equivocado. Si el catálogo no responde, geo_catalog queda vacío y la
+    # validación se omite (no se bloquea un contrato por una caída de compat).
+    geo_catalog = _fetch_geo_catalog()
+    geo_sin_coincidencia: List[Tuple[str, str, str, str]] = []
+    geo_ambiguas: List[Tuple[str, str, str, str, str]] = []
+
     invalid_eps = []
     invalid_afp = []
-    try:
-        valid_tokens = _build_valid_tokens(eps_items, afp_items)
-        eps_token_sets = [_get_entity_tokens(i.get("nombre","")) for i in eps_items if isinstance(i,dict) and i.get("nombre") and i["nombre"] not in ("SIN DEFINIR",)]
-        afp_token_sets = [_get_entity_tokens(i.get("nombre","")) for i in afp_items if isinstance(i,dict) and i.get("nombre") and i["nombre"] not in ("NO SUMINISTRADO","DESCONOCIDO")]
-        for item in json.loads(PILA_CATALOG_PATH.read_text(encoding="utf-8")):
-            if not isinstance(item, dict):
-                continue
-            values = _pila_alias_values(item)
-            token_sets = [_get_entity_tokens(str(value)) for value in values if value]
-            if str(item.get("subsistema") or "").upper() == "EPS":
-                eps_token_sets.extend(token_sets)
-            elif str(item.get("subsistema") or "").upper() == "AFP":
-                afp_token_sets.extend(token_sets)
-    except Exception:
-        valid_tokens = set()
-        eps_token_sets = []
-        afp_token_sets = []
     for record in records[:1000]:
         documento = only_digits(_worker_document_raw(record))
+        if geo_catalog:
+            ciudad_trab = normalize_text(record.get("municipio_distrito", ""))
+            depto_trab = normalize_text(record.get("departamento", ""))
+            if ciudad_trab:
+                estado_geo, cands = _geo_resolve(ciudad_trab, depto_trab, geo_catalog)
+                ref = f"trabajador {documento or 's/d'}"
+                if estado_geo == "sin_coincidencia":
+                    geo_sin_coincidencia.append(
+                        (ref, ciudad_trab, depto_trab, normalize_text(record.get("_sheet", "")))
+                    )
+                elif estado_geo == "ambigua":
+                    geo_ambiguas.append(
+                        (
+                            ref,
+                            ciudad_trab,
+                            depto_trab,
+                            normalize_text(record.get("_sheet", "")),
+                            ", ".join(f"{c.get('codigo')} ({c.get('coddep')})" for c in cands),
+                        )
+                    )
         eps_value = normalize_text(record.get("eps", ""))
         afp_value = normalize_text(record.get("pension") or record.get("afp") or "")
         sheet = normalize_text(record.get("_sheet", ""))
         row = normalize_text(record.get("_row", ""))
-        eps_norm = _normalize_catalog_name(eps_value) if eps_value else ""
-        afp_norm = _normalize_catalog_name(afp_value) if afp_value else ""
-        # Verificar EPS via tokens del dominio
+        eps_norm = _exact_catalog_norm(eps_value) if eps_value else ""
+        afp_norm = _exact_catalog_norm(afp_value) if afp_value else ""
+        # Coincidencia exacta contra el catálogo que corresponde. Si el valor no está
+        # ahí pero SÍ está en el catálogo contrario, es un swap de columnas EPS/Pensión
+        # y se marca aparte para que el mensaje diga qué corregir.
         if eps_value:
-            eps_match = eps_norm in eps_catalog or _check_entity_valid(eps_value, eps_token_sets, valid_tokens)
-            if not eps_match:
-                invalid_eps.append((documento, eps_value, sheet, row))
-        # Verificar AFP via tokens del dominio
+            if eps_norm not in eps_catalog:
+                motivo = "en catálogo AFP (columnas cruzadas)" if eps_norm in afp_catalog else "no está en el catálogo"
+                invalid_eps.append((documento, eps_value, sheet, row, motivo))
         if afp_value:
-            afp_match = afp_norm in afp_catalog or _check_entity_valid(afp_value, afp_token_sets, valid_tokens)
-            if not afp_match:
-                invalid_afp.append((documento, afp_value, sheet, row))
+            if afp_norm not in afp_catalog:
+                motivo = "en catálogo EPS (columnas cruzadas)" if afp_norm in eps_catalog else "no está en el catálogo"
+                invalid_afp.append((documento, afp_value, sheet, row, motivo))
+    if geo_catalog:
+        # Sede principal del formulario y sedes del anexo: mismo criterio que trabajadores.
+        _geo_extra: List[Tuple[str, str, str, str]] = [
+            (
+                "sede principal",
+                normalize_text(form_fields.get("sede_principal_municipio_distrito", "")),
+                normalize_text(form_fields.get("sede_principal_departamento", "")),
+                "Formulario",
+            )
+        ]
+        # sede_center_rows: {nombre_hoja: [fila, ...]}. Cada fila trae los campos del
+        # centro de trabajo como {valor/…} o como valor plano según el parser, por eso se
+        # normaliza con _center_cell_text.
+        _sede_center_rows = dict((xlsx_profile or {}).get("sede_center_rows") or {})
+        for _hoja_sede, _filas in _sede_center_rows.items():
+            for _idx, _sede in enumerate(list(_filas or []), start=1):
+                _ciudad_sede = _center_cell_text(_sede, "municipio_sede")
+                if not _ciudad_sede:
+                    continue
+                _geo_extra.append(
+                    (
+                        f"sede {_center_cell_text(_sede, 'codigo_centro_trabajo') or _idx}",
+                        _ciudad_sede,
+                        _center_cell_text(_sede, "departamento_sede"),
+                        normalize_text(_hoja_sede) or "Anexo sedes",
+                    )
+                )
+        for _ref, _ciudad, _depto, _hoja in _geo_extra:
+            if not _ciudad:
+                continue
+            _estado, _cands = _geo_resolve(_ciudad, _depto, geo_catalog)
+            if _estado == "sin_coincidencia":
+                geo_sin_coincidencia.append((_ref, _ciudad, _depto, _hoja))
+            elif _estado == "ambigua":
+                geo_ambiguas.append(
+                    (
+                        _ref,
+                        _ciudad,
+                        _depto,
+                        _hoja,
+                        ", ".join(f"{c.get('codigo')} ({c.get('coddep')})" for c in _cands),
+                    )
+                )
+
+    def _geo_detalle(ref: str, ciudad: str, depto: str, hoja: str) -> str:
+        partes = [ref, f"municipio '{ciudad}'"]
+        partes.append(f"departamento '{depto}'" if depto else "sin departamento diligenciado")
+        if hoja:
+            partes.append(hoja)
+        return " | ".join(partes)
+
+    if geo_sin_coincidencia:
+        blockers.append(
+            {
+                "code": "XLSX_GEO_MUNICIPIO_INVALIDO",
+                "severity": "blocker",
+                "message": "Se detectaron municipios que no coinciden con ninguno del catálogo geográfico oficial. "
+                "El nombre del Excel debe coincidir con el del catálogo: "
+                + "; ".join(_geo_detalle(*item) for item in geo_sin_coincidencia[:20])
+                + ("; …" if len(geo_sin_coincidencia) > 20 else "")
+                + ".",
+            }
+        )
+    if geo_ambiguas:
+        blockers.append(
+            {
+                "code": "XLSX_GEO_MUNICIPIO_AMBIGUO",
+                "severity": "blocker",
+                "message": "Se detectaron municipios que existen en varios departamentos y no se puede determinar cuál "
+                "corresponde. Diligenciar el departamento para resolverlo: "
+                + "; ".join(
+                    f"{_geo_detalle(ref, ciudad, depto, hoja)} | opciones: {opciones}"
+                    for ref, ciudad, depto, hoja, opciones in geo_ambiguas[:20]
+                )
+                + ("; …" if len(geo_ambiguas) > 20 else "")
+                + ".",
+            }
+        )
+
     if invalid_eps:
-        alerts.append(
+        blockers.append(
             {
                 "code": "XLSX_SECONDARY_EPS_INVALID",
-                "severity": "warning",
-                "message": "Se detectaron trabajadores con EPS que no cruza contra el catálogo PILA/EPS de referencia; revisar nombre, sin devolución automática: "
+                "severity": "blocker",
+                "message": "Se detectaron trabajadores cuya EPS no está EXACTAMENTE igual en el catálogo real. "
+                "El nombre del Excel debe coincidir carácter por carácter con el del catálogo: "
                 + "; ".join(
-                    " | ".join(part for part in [doc or "n/d", eps, sheet, f"fila {row}" if row else ""] if part)
-                    for doc, eps, sheet, row in invalid_eps
+                    " | ".join(part for part in [doc or "n/d", eps, sheet, f"fila {row}" if row else "", motivo] if part)
+                    for doc, eps, sheet, row, motivo in invalid_eps
                 )
                 + ".",
             }
         )
     if invalid_afp:
-        alerts.append(
+        blockers.append(
             {
                 "code": "XLSX_SECONDARY_AFP_INVALID",
-                "severity": "warning",
-                "message": "Se detectaron trabajadores con AFP que no cruza contra el catálogo PILA/AFP de referencia; revisar nombre, sin devolución automática: "
+                "severity": "blocker",
+                "message": "Se detectaron trabajadores cuya AFP no está EXACTAMENTE igual en el catálogo real. "
+                "El nombre del Excel debe coincidir carácter por carácter con el del catálogo: "
                 + "; ".join(
-                    " | ".join(part for part in [doc or "n/d", afp, sheet, f"fila {row}" if row else ""] if part)
-                    for doc, afp, sheet, row in invalid_afp
+                    " | ".join(part for part in [doc or "n/d", afp, sheet, f"fila {row}" if row else "", motivo] if part)
+                    for doc, afp, sheet, row, motivo in invalid_afp
                 )
                 + ".",
             }

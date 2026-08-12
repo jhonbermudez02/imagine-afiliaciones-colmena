@@ -188,6 +188,16 @@ CREATE TABLE IF NOT EXISTS public.proc_servicios_obtenersedetramite (
     documentoresponsable text,
     nombreresponsable text,
     correoresponsable text,
+    -- Componentes del nombre del responsable, separados. El documento de la sede ya trae
+    -- los cuatro campos por etiqueta y el consumidor (f06/f69/carcont2/f70 de
+    -- brempresasarp) los quiere separados; guardarlos solo concatenados en
+    -- nombreresponsable obligaba a re-partirlos por posición con _split_name, que pierde
+    -- el dato cuando un apellido o nombre tiene dos palabras ("DE LA CRUZ") o cuando
+    -- falta el segundo apellido (el primer nombre se corría a la casilla del apellido).
+    respsedeprimerapellido text,
+    respsedesegundoapellido text,
+    respsedeprimernombre text,
+    respsedesegundonombre text,
     fecha_insert timestamp with time zone DEFAULT now()
 );
 
@@ -249,7 +259,8 @@ CREATE TABLE IF NOT EXISTS public.proc_servicios_obtenertrabajadortramite (
     ct_responsable_doc text,
     ct_responsable_correo text,
     ct_cantidadtrabajadores text,
-    departamento text
+    departamento text,
+    actividad_especial text
 );
 
 CREATE TABLE IF NOT EXISTS public.proc_servicios_obtenertramites (

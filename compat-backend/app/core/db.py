@@ -11,6 +11,9 @@ DEFAULT_LEGACY_ALIASES = [
     "temporal",
     "wimg004",
     "ybr",
+    # pqr -> base "pqr_colmena": trazabilidad de PQR (afa_trazabilidad) y el formulario
+    # dinamico asociado (campos / tipo_solicitud_campo / valores).
+    "pqr",
     "SR03EPSDB",
 ]
 

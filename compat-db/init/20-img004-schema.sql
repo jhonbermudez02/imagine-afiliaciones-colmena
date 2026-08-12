@@ -829,6 +829,30 @@ CREATE TABLE public.planillasafiliadosarp (
 ALTER TABLE public.planillasafiliadosarp OWNER TO escobar;
 
 --
+-- Name: anexosafiliadosarp; Type: TABLE; Schema: public; Owner: escobar
+-- Copia de solo lectura (igual que planillasafiliadosarp de arriba): IndAA() escribe
+-- aqui ademas de en temporal para que quede el registro definitivo en img004.
+--
+
+CREATE TABLE public.anexosafiliadosarp (
+    nroanexo integer NOT NULL,
+    gabineteindex smallint NOT NULL,
+    planilla numeric NOT NULL,
+    fechaproceso integer,
+    descripcion varchar(24),
+    lote integer,
+    gabinetefuente smallint,
+    nit varchar(20),
+    path varchar(80),
+    nomdoc varchar,
+    fechainsert timestamp with time zone DEFAULT now(),
+    indexbeneficiario boolean DEFAULT false
+);
+
+
+ALTER TABLE public.anexosafiliadosarp OWNER TO escobar;
+
+--
 -- Name: tr; Type: TABLE; Schema: public; Owner: escobar
 -- Requerida por el reproceso real (AfiliacionesReproceso.php borra wimg004.tr por nl).
 --
@@ -843,6 +867,62 @@ CREATE TABLE public.tr (
 
 
 ALTER TABLE public.tr OWNER TO escobar;
+
+
+--
+-- Name: estadistico; Type: TABLE; Schema: public; Owner: escobar
+-- Destino final del estadistico del lote. Mismo schema que temporal.estadistico.
+--
+-- El legacy lo escribia en temporal y al entregar lo copiaba aca y borraba el de
+-- temporal (Afiliaciones.php:1794 + 1867-1875 + 1934). Esa tabla nunca se llego a
+-- crear en img004, asi que la copia no tenia destino y el estadistico se quedaba
+-- en temporal. Ahora _execute_legacy_delivery escribe directo aca -igual que br*/bk*
+-- con direct_to_archive- y limpia temporal, para que el archivo sea el unico lugar
+-- donde queda la informacion del lote.
+--
+
+CREATE TABLE public.estadistico (
+    lote integer NOT NULL,
+    fecha integer,
+    familia varchar(3),
+    planillas integer,
+    anexos integer,
+    detalles integer,
+    usuario varchar(15),
+    fecha_seleccion timestamp without time zone,
+    fecha_entrega timestamp without time zone,
+    fecha_guardado timestamp without time zone,
+    fecha_recobro timestamp without time zone,
+    rango varchar(2),
+    sede numeric,
+    centrot numeric
+);
+
+
+ALTER TABLE public.estadistico OWNER TO escobar;
+
+
+--
+-- Name: epsriesgos/afpriesgos; Type: CONSTRAINT FIX; Schema: public; Owner: escobar
+--
+-- El `codigo` de los catalogos de EPS/AFP NO es unico: la misma entidad puede estar
+-- varias veces con nombres distintos. Desde que la homologacion exige coincidencia
+-- EXACTA de nombre (_riesgos_lookup en compat-backend), repetir el codigo es la forma
+-- de registrar las variantes ("NUEVA EPS" y "NUEVA EPS S.A." con el mismo codigo).
+--
+-- El catalogo legacy real ya lo hace: temporal.afpriesgos (10-temporal-schema.sql)
+-- trae dos filas con codigo 0 -"NO SUMINISTRADO" y "DESCONOCIDO"- y esa tabla no
+-- declara ninguna restriccion. En cambio img004 se aprovisiono en algunos ambientes
+-- con `codigo` como PRIMARY KEY, y esa PK rechazaba la segunda variante: por eso
+-- img004.afpriesgos aqui solo tenia "DESCONOCIDO".
+--
+-- Se quita la PK si existe. Es idempotente y no falla si la tabla aun no existe.
+-- compat-backend repite este DROP al guardar el catalogo como red de seguridad, igual
+-- que el "ADD COLUMN IF NOT EXISTS activo".
+--
+
+ALTER TABLE IF EXISTS public.epsriesgos DROP CONSTRAINT IF EXISTS epsriesgos_pkey;
+ALTER TABLE IF EXISTS public.afpriesgos DROP CONSTRAINT IF EXISTS afpriesgos_pkey;
 
 --
 -- PostgreSQL database dump complete

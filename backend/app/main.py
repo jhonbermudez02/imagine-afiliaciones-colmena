@@ -16,6 +16,9 @@ from fastapi.responses import FileResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 
 from .cases import (
+    _afi_rad_set_estado,
+    _case_lote_and_contract,
+    _contrato_para_afi_rad,
     analyze_case,
     approve_case,
     delete_case,
@@ -46,6 +49,7 @@ from .cases import (
 )
 from .config import settings
 from .embeddings import get_embed_dims, get_engine_name
+from .legacy_bridge import generate_legacy_flatfile_926_http
 from .notifications import send_case_notification, send_tester_activity_summary
 from .rag import generate_grounded_answer, infer_operational_decision, reindex_knowledge, search_knowledge
 from .services import get_eval_summary, get_feed_summary, get_system_health, get_system_status
@@ -3446,6 +3450,7 @@ async def consolidated_926(request: Consolidated926Request):
 
     chunks: List[str] = []
     selected_cases: List[str] = []
+    selected_payloads: List[Dict[str, Any]] = []
     missing_926: List[str] = []
     not_approved: List[str] = []
     for case_id in case_ids:
@@ -3477,6 +3482,7 @@ async def consolidated_926(request: Consolidated926Request):
         nit = str(resumen.get("nit") or profile.get("nit") or "")
         chunks.append(_apply_926_download_overrides(content).strip())
         selected_cases.append(case_id)
+        selected_payloads.append(payload)
 
     if not_approved:
         raise HTTPException(status_code=400, detail=f"Estos contratos no están aprobados y no se pueden consolidar: {', '.join(not_approved)}")
@@ -3484,6 +3490,12 @@ async def consolidated_926(request: Consolidated926Request):
         raise HTTPException(status_code=400, detail="Los contratos seleccionados no tienen un 926 disponible para consolidar.")
     if missing_926:
         raise HTTPException(status_code=400, detail=f"No pude generar el 926 para estos contratos: {', '.join(missing_926)}")
+
+    # afi_rad -> 'Plano' por cada contrato incluido. Se hace despues de las validaciones:
+    # si alguna hubiera abortado con 400 no habria descarga, y marcar 'Plano' un plano que
+    # nunca se entrego dejaria afi_rad adelantado respecto de la realidad.
+    for case_payload in selected_payloads:
+        _marcar_afi_rad_plano(case_payload)
 
     filename = f"lote_{operation_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     return Response(
@@ -3578,20 +3590,56 @@ async def case_report(case_id: str):
         raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
 
 
+def _marcar_afi_rad_plano(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """afi_rad -> 'Plano' al descargar el plano.
+
+    Va en la descarga y no en la entrega del lote porque 'Plano' significa que el plano
+    se entrego al perfil (colmena/imagine), y eso ocurre al descargarlo. El UPDATE exige
+    afi_rad_estado='Indexado', asi que descargar de nuevo el mismo plano devuelve
+    matched=0 sin efecto: la transicion ocurre una sola vez.
+
+    Solo se llama cuando se devuelve el plano real (fresco de BD o el snapshot legacy),
+    nunca con el borrador.
+    """
+    contrato = _contrato_para_afi_rad(payload)
+    if not contrato:
+        return {"ok": False, "skipped": True, "reason": "sin contrato"}
+    return _afi_rad_set_estado(contrato, "plano", datetime.now().strftime("%Y%m%d"))
+
+
 @app.get("/api/cases/{case_id}/926", response_class=PlainTextResponse)
 async def case_926(case_id: str):
     try:
         payload = load_case(case_id)
-        output_926 = (payload.get("analysis") or {}).get("output_926") or {}
-        legacy = output_926.get("legacy") or {}
-        draft = output_926.get("draft") or (payload.get("analysis") or {}).get("draft_926")
-        if legacy.get("ok") and legacy.get("content"):
-            return PlainTextResponse(content=_apply_926_download_overrides(legacy.get("content", "")), media_type="text/plain")
-        if not draft:
-            raise HTTPException(status_code=409, detail="El caso aun no esta listo para borrador 926.")
-        return PlainTextResponse(content=_apply_926_download_overrides(draft.get("content", "")), media_type="text/plain")
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
+
+    analysis = payload.get("analysis") or {}
+    output_926 = analysis.get("output_926") or {}
+    legacy = output_926.get("legacy") or {}
+    draft = output_926.get("draft") or analysis.get("draft_926")
+
+    # El plano se genera SIEMPRE a partir de lo que hoy este en brempresasarp/brafiliadosarp/
+    # etc. (base de datos), no del snapshot de texto que quedo guardado en el JSON del caso al
+    # momento de aprobar: si despues se corrige un dato en la base (backfill, fix de mapeo),
+    # la descarga debe reflejarlo sin necesidad de reprocesar el caso. Se usa el mismo lote
+    # numerico real (payload["lote_usuario"]) que ya usa el resto del pipeline legacy, no el
+    # case-id de texto (ver _case_lote_and_contract).
+    lote = _case_lote_and_contract(payload).get("lote", "")
+    if lote:
+        fresh = generate_legacy_flatfile_926_http(lote=lote)
+        if fresh.get("ok") and fresh.get("content"):
+            _marcar_afi_rad_plano(payload)
+            return PlainTextResponse(content=_apply_926_download_overrides(fresh.get("content", "")), media_type="text/plain")
+
+    # Respaldo si no hay lote o el bridge legacy/BD no responde: el snapshot guardado.
+    if legacy.get("ok") and legacy.get("content"):
+        _marcar_afi_rad_plano(payload)
+        return PlainTextResponse(content=_apply_926_download_overrides(legacy.get("content", "")), media_type="text/plain")
+    if not draft:
+        raise HTTPException(status_code=409, detail="El caso aun no esta listo para borrador 926.")
+    # El borrador NO marca 'Plano': no es el plano entregable.
+    return PlainTextResponse(content=_apply_926_download_overrides(draft.get("content", "")), media_type="text/plain")
 
 
 @app.get("/api/cases/{case_id}/files/{filename:path}")

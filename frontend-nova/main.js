@@ -13,6 +13,7 @@ const API_URL = (
 const PROFILE_KEY = 'afi-colima-profile-v1';
 const TESTER_KEY = 'afi-colima-tester-v1';
 const PROCESS_STATE_KEY = 'afi-colima-process-v1';
+const SIDEBAR_KEY = 'afi-colima-sidebar-collapsed-v1';
 const CLASSIFICATION_ORDER_KEY = 'afi-colima-classif-order-v1';
 
 const OPERATION_OPTIONS = {
@@ -22,8 +23,8 @@ const OPERATION_OPTIONS = {
 const REVIEW_TYPE_OPTIONS = [
     ['formulario_afiliacion', 'Afiliación',        '01'],
     ['anexo_sedes',           'Sedes ·01',         '01'],
-    ['listado_trabajadores',  'Listados',           '03'],
     ['comision',              'Comisión',           '02'],
+    ['listado_trabajadores',  'Listados',           '03'],
     ['carta',                 'Carta',              '29'],
     ['camara_comercio',       'Cámara de comercio', '05'],
     ['cedula',                'Cédula',             '06'],
@@ -42,12 +43,17 @@ const REVIEW_TYPE_OPTIONS = [
     ['autorizacion',          'Autorización',       '98'],
     ['beneficiario_final',    'Beneficiario Final', '27'],
     ['sat',                   'SAT',                '99'],
+    ['retroactivas',          'Retroactivas',       '18'],
     ['pdf',                   'PDF / Imagen',       '99'],
 ];
 
+// Debe reflejar DOCUMENT_DISPLAY_PRIORITY de backend/app/cases.py: si las dos listas se
+// separan, la app muestra un orden distinto al que se archiva.
 const DOCUMENT_DISPLAY_PRIORITY = [
     'formulario_afiliacion',
     'anexo_sedes',
+    // Comisión va inmediatamente después de las sedes.
+    'comision',
     'camara_comercio',
     'rut',
     'cedula',
@@ -55,9 +61,10 @@ const DOCUMENT_DISPLAY_PRIORITY = [
     'inspector',
     'autorizacion',
     'entrega_documentos',
-    'comision',
     'carta',
     'beneficiario_final',
+    // 'retroactivas' NO va aquí: cierra el paquete, después incluso de los no
+    // clasificados, y solo antes del XLSX. Se le da su rango en documentDisplayRank.
 ];
 const DOCUMENT_DISPLAY_PRIORITY_MAP = new Map(DOCUMENT_DISPLAY_PRIORITY.map((type, index) => [type, index]));
 
@@ -119,32 +126,6 @@ async function refreshClassifAfterComisionChange(caseId, filename) {
         renderClassifActions(item, payload);
     }
     return payload;
-}
-
-async function runFullCaseAnalyzeFromClassif(caseId) {
-    if (!caseId) return null;
-    if (!confirm('¿Ejecutar análisis completo? Se volverán a leer Excel y documentos, y puede tardar más.')) return null;
-    setClassifDocListBusy(true, 'Ejecutando análisis completo...');
-    try {
-        showToast('Ejecutando análisis completo del contrato...', 'info', 3000);
-        const r = await fetchWithRetry(caseApiUrl(caseId, '/analyze'), { method: 'POST' });
-        const payload = await r.json();
-        activeCaseId = caseId;
-        activeCasePayload = payload;
-        renderClassifBlockers(payload);
-        renderClassifDocList(payload);
-        const preview = document.getElementById('classifPreviewBody');
-        if (preview) preview.innerHTML = '<div class="empty-state">Selecciona un documento</div>';
-        const actions = document.getElementById('classifPreviewActions');
-        if (actions) actions.innerHTML = '';
-        showToast('Análisis completo finalizado.', 'ok', 3500);
-        return payload;
-    } catch(e) {
-        showToast('No se pudo ejecutar /analyze: ' + e.message, 'err', 6000);
-        return null;
-    } finally {
-        setClassifDocListBusy(false);
-    }
 }
 
 function normalizeOperation(value = '') {
@@ -265,7 +246,11 @@ function canonicalDocumentType(type = '') {
 function documentDisplayRank(item) {
     if (item?.kind === 'xlsx' || canonicalDocumentType(item?.type) === 'xlsx') return 10_000;
     const rank = DOCUMENT_DISPLAY_PRIORITY_MAP.get(canonicalDocumentType(item?.type));
-    return rank ?? 1_000;
+    if (rank !== undefined) return rank;
+    // Retroactivas cierra el paquete: después de los priorizados y de los no
+    // clasificados (1_000); solo el XLSX (10_000) queda detrás.
+    if (canonicalDocumentType(item?.type) === 'retroactivas') return 5_000;
+    return 1_000;
 }
 
 function sortDocItemsByDisplayPriority(items) {
@@ -294,8 +279,8 @@ function sortDocumentGroupsByDisplayPriority(groups) {
     return [...(groups || [])].sort((a, b) => {
         const aType = a?.document_type || a?.type || a?.label || '';
         const bType = b?.document_type || b?.type || b?.label || '';
-        const aRank = DOCUMENT_DISPLAY_PRIORITY_MAP.get(canonicalDocumentType(aType)) ?? 1_000;
-        const bRank = DOCUMENT_DISPLAY_PRIORITY_MAP.get(canonicalDocumentType(bType)) ?? 1_000;
+        const aRank = documentDisplayRank({ type: aType });
+        const bRank = documentDisplayRank({ type: bType });
         if (aRank !== bRank) return aRank - bRank;
         return canonicalDocumentType(aType).localeCompare(canonicalDocumentType(bType));
     });
@@ -517,12 +502,16 @@ function getAcceptedValidationExceptions(payload) {
 async function acceptValidationException(caseId, blocker) {
     if (!caseId || !blocker) return false;
     const shortMsg = String(blocker.message || '').slice(0, 220);
+    // Un solo prompt. Antes venía un segundo para una "observación adicional opcional"
+    // que no se muestra en ninguna vista, y al ser opcional no podía distinguir Cancelar
+    // de dejarlo vacío: prompt() devuelve null al cancelar y `null || ''` lo volvía "",
+    // así que cancelar el segundo diálogo igual guardaba la excepción. Con un solo
+    // prompt, Cancelar (null) aborta de verdad por la guarda de abajo.
     const reason = prompt(
         `Justificación para aceptar este hallazgo solo en este contrato:\n\n${shortMsg}`,
         'Validado manualmente por operador'
     );
     if (!reason || !reason.trim()) return false;
-    const note = prompt('Observación adicional opcional:', '') || '';
     const tester = readTester();
     await fetchWithRetry(caseApiUrl(caseId, '/validation-exceptions'), {
         method: 'POST',
@@ -532,7 +521,6 @@ async function acceptValidationException(caseId, blocker) {
             message: blocker.message || '',
             fingerprint: blocker.fingerprint || '',
             reason: reason.trim(),
-            note: note.trim(),
             operator: tester.email || tester.name || '',
         }),
     });
@@ -887,6 +875,25 @@ const VIEW_META = {
     admin:         { title: 'Administración',           breadcrumb: 'Sistema · estado y configuración' },
 };
 
+function applySidebarCollapsed(collapsed) {
+    const shell = document.getElementById('appShell');
+    const btn = document.getElementById('sidebarToggle');
+    if (!shell) return;
+    shell.classList.toggle('sidebar-collapsed', collapsed);
+    if (btn) {
+        // aria-expanded describe el sidebar (aria-controls), no el botón.
+        btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        const label = collapsed ? 'Mostrar menú lateral' : 'Ocultar menú lateral';
+        btn.setAttribute('title', label);
+        btn.setAttribute('aria-label', label);
+    }
+    try {
+        localStorage.setItem(SIDEBAR_KEY, collapsed ? '1' : '0');
+    } catch (e) {
+        // Modo privado / storage bloqueado: el colapso sigue funcionando, solo no persiste.
+    }
+}
+
 function switchView(viewId) {
     currentView = viewId;
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -1164,7 +1171,7 @@ function renderCasesTable(cases, tab = 'todos') {
     }
     let hasProcessing = false;
     wrap.innerHTML = `<div class="case-cards">${filtered.map(item => {
-        const { empresa, nit, fecha, status, finalStatus, has926, filename, nroAfiliacion } = resolveCase(item);
+        const { empresa, nit, fecha, status, finalStatus, has926, filename, nroAfiliacion, approved } = resolveCase(item);
         const wfStatus = normalizeText(status);
         const isProcessing = ['processing','pending','uploaded','queued'].includes(wfStatus);
         if (isProcessing) hasProcessing = true;
@@ -1200,6 +1207,7 @@ function renderCasesTable(cases, tab = 'todos') {
                     <span class="pill pill-${cls}">${escapeHtml(label)}</span>
                     <span class="pill pill-neutral">${escapeHtml((item.operation_label || currentOperation().name))}</span>
                     <div class="case-card-actions" role="group">
+                        ${readProfile() !== 'colmena' && has926 && approved ? `<button class="btn-primary" data-action="descargar926" data-case="${escapeHtml(id)}" data-file="${escapeHtml(filename)}" type="button">Descargar plano</button>` : ''}
                         ${readProfile() !== 'colmena' ? `<button class="table-action-link table-action-danger table-action-delete" data-action="eliminar" data-case="${escapeHtml(id)}" data-empresa="${escapeHtml(empresa)}" type="button">Eliminar</button>` : ''}
                     </div>
                 </div>
@@ -1247,6 +1255,19 @@ async function handleCaseAction(action, caseId, file) {
         if (btn) { btn.textContent = 'Descargando...'; btn.disabled = true; }
         try {
             await download926(caseId, file || btn?.dataset?.file || 'archivo_926.txt');
+            // Perfil Colmena: una vez generado/descargado el plano, el caso se elimina por
+            // completo (su ciclo termina ahi). Perfil Imagine: solo se descarga, el caso queda.
+            if (readProfile() === 'colmena') {
+                try {
+                    const r = await fetch(caseApiUrl(caseId), { method: 'DELETE' });
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                    showToast('Caso eliminado tras generar el plano', 'ok');
+                    if (currentView === 'reporte') switchView('produccion');
+                    loadProduccion();
+                } catch(e) {
+                    showToast('Plano descargado, pero no se pudo eliminar el caso: ' + e.message, 'err');
+                }
+            }
         } finally {
             if (btn) { btn.textContent = original; btn.disabled = false; }
         }
@@ -1637,7 +1658,7 @@ function renderWorkflowResult(payload) {
             <div class="result-actions">
                 <button class="btn-secondary" data-action="reporte" data-case="${escapeHtml(payload.id||'')}" type="button">Ver reporte ejecutivo</button>
                 <button class="btn-secondary" data-action="clasificacion" data-case="${escapeHtml(payload.id||'')}" type="button">Ver documentos</button>
-                ${has926 ? `<button class="btn-primary" data-action="descargar926" data-case="${escapeHtml(payload.id||'')}" data-file="${escapeHtml(filename926)}" type="button">Descargar plano</button>` : ''}
+                ${has926 && approved ? `<button class="btn-primary" data-action="descargar926" data-case="${escapeHtml(payload.id||'')}" data-file="${escapeHtml(filename926)}" type="button">Descargar plano</button>` : ''}
             </div>
         </div>
     `;
@@ -2244,7 +2265,7 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
         return;
     }
 
-    // Header con conteo y botones de ordenamiento
+    // Header con conteo y acciones de la lista
     const headerEl = el.previousElementSibling;
     if (headerEl && headerEl.classList.contains('classif-doc-header')) {
         headerEl.remove();
@@ -2253,32 +2274,14 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
     header.className = 'classif-doc-header';
     header.style.cssText = 'padding:6px 8px 2px;font-size:11px;color:var(--c-text-2);border-bottom:1px solid var(--c-border);margin-bottom:2px';
     header.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:4px">
             <span>${items.length} documentos</span>
-            <button class="classif-sort-btn" id="btnBackToCaseInfo" type="button">Volver a información</button>
-        </div>
-        <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
-            <span style="font-size:10px;opacity:0.6;margin-right:2px">Orden:</span>
-            <span class="classif-sort-btn active" style="cursor:default">Prioridad documental</span>
             ${isApproved ? '<span class="classif-readonly-pill">Aprobado · solo lectura</span>' : ''}
-            <button class="classif-sort-btn" id="btnFullAnalyze" type="button" style="margin-left:auto;color:var(--c-warn)">Análisis completo</button>
-            <button class="classif-sort-btn" id="btnGalleryMode" type="button" style="color:var(--c-blue)">🖼 Galería</button>
+            <button class="classif-sort-btn" id="btnGalleryMode" type="button" style="margin-left:auto;color:var(--c-blue)">🖼 Galería</button>
+            <button class="classif-back-btn" id="btnBackToCaseInfo" type="button">← Volver a información</button>
         </div>
     `;
     el.parentElement?.insertBefore(header, el);
-
-    header.querySelector('#btnFullAnalyze')?.addEventListener('click', async () => {
-        const btn = header.querySelector('#btnFullAnalyze');
-        if (btn) {
-            btn.disabled = true;
-            btn.textContent = 'Analizando...';
-        }
-        await runFullCaseAnalyzeFromClassif(payload.id || activeCaseId);
-        if (btn) {
-            btn.disabled = false;
-            btn.textContent = 'Análisis completo';
-        }
-    });
 
     // Listener galería
     header.querySelector('#btnGalleryMode')?.addEventListener('click', () => {
@@ -3290,13 +3293,26 @@ function buildFormularioSedes(payload, declaredTotal) {
     });
 
     return [...bySedeCode.values()].sort((a, b) => a.number - b.number).map(sede => {
-        const prefix = sedePrefixFromCode(sede.code);
+        // El prefijo para leer formFields (sede_principal_*, sede_02_*, ...) debe salir del
+        // orden secuencial de la hoja ("Sede 01", "Sede 02"...), NO de sede.code: ese es el
+        // codigo_sede de la celda F12, que en el formulario real es un codigo de catalogo
+        // legacy (ej. "101") sin relacion con el numero de hoja, y el backend siempre nombra
+        // los form_fields por el numero secuencial (ver _extract_sede_info_from_sheet).
+        const prefix = sedePrefixFromCode(sede.number);
         const centros = Array.isArray(formFields[`${prefix}_centros_de_trabajo`])
             ? formFields[`${prefix}_centros_de_trabajo`]
             : [];
         const workersSalary = sede.workers.reduce((sum, worker) => sum + (Number(worker.salario) || 0), 0);
         const salary = workersSalary || Number(sede.salaryTotal || 0);
         const responsableNombre = formFields[`responsable_${prefix}_nombre_completo`] || '';
+        // El formulario trae las cuatro casillas del responsable por separado: se llevan
+        // tal cual para no tener que re-partir nombre_completo por posición.
+        const responsablePartes = {
+            primerApellido: formFields[`responsable_${prefix}_primer_apellido`] || '',
+            segundoApellido: formFields[`responsable_${prefix}_segundo_apellido`] || '',
+            primerNombre: formFields[`responsable_${prefix}_primer_nombre`] || '',
+            segundoNombre: formFields[`responsable_${prefix}_segundo_nombre`] || '',
+        };
         const responsableTipoDoc = formFields[`responsable_${prefix}_tipo_documento`] || '';
         const responsableNumeroDoc = formFields[`responsable_${prefix}_numero_documento`] || '';
         const responsableDoc = [
@@ -3316,6 +3332,7 @@ function buildFormularioSedes(payload, declaredTotal) {
             telefono: formFields[`${prefix}_telefono`] || '',
             correo: formFields[`${prefix}_correo`] || '',
             responsable: responsableNombre,
+            responsablePartes,
             responsableTipoDoc,
             responsableNumeroDoc,
             responsableCorreo: formFields[`responsable_${prefix}_correo`] || '',
@@ -3397,8 +3414,32 @@ function sumWorkersSalary(workers) {
     return (workers || []).reduce((sum, worker) => sum + (Number(worker.salario) || 0), 0);
 }
 
+// "0" y "00" son el marcador de casilla vacía del formulario, no un nombre: se vacían
+// conservando su posición, porque eliminarlos correría los campos siguientes.
+function cleanNamePlaceholder(value) {
+    const txt = String(value ?? '').trim();
+    return (txt === '0' || txt === '00') ? '' : txt;
+}
+
+// Partes del nombre del responsable de sede. Se usan las cuatro casillas separadas que
+// entrega el formulario; volver a partir nombre_completo por posición pierde el dato
+// cuando un apellido tiene dos palabras ("DE CASTRO") o cuando una casilla viene vacía,
+// porque el corrimiento cambia el significado de las siguientes.
+function sedeResponsibleNameParts(sede) {
+    const partes = sede?.responsablePartes || {};
+    const directas = {
+        primerApellido: cleanNamePlaceholder(partes.primerApellido),
+        segundoApellido: cleanNamePlaceholder(partes.segundoApellido),
+        primerNombre: cleanNamePlaceholder(partes.primerNombre),
+        segundoNombre: cleanNamePlaceholder(partes.segundoNombre),
+    };
+    if (Object.values(directas).some(Boolean)) return directas;
+    // Sin casillas separadas (formularios viejos) queda el nombre concatenado.
+    return splitPersonName(sede?.responsable);
+}
+
 function splitPersonName(value) {
-    const parts = String(value || '').trim().split(/\s+/).filter(Boolean);
+    const parts = String(value || '').trim().split(/\s+/).map(cleanNamePlaceholder).filter(Boolean);
     if (!parts.length) return {};
     if (parts.length === 1) return { primerNombre: parts[0] };
     if (parts.length === 2) return { primerApellido: parts[0], primerNombre: parts[1] };
@@ -3610,7 +3651,7 @@ function renderSedeOfficialInfo(sede) {
 
 function renderSedeResponsibleOfficialInfo(sede) {
     if (!sede?.responsable && !sede?.responsableDoc && !sede?.responsableCorreo) return '';
-    const nameParts = splitPersonName(sede.responsable);
+    const nameParts = sedeResponsibleNameParts(sede);
     return `
         <table class="sede-official-table sede-official-table-responsible">
             <thead>
@@ -4311,7 +4352,7 @@ function renderReporte(container, payload) {
                 ${isAprobable && !approved ? `<button class="btn-success" id="approveCaseBtn" type="button">Aprobar contrato</button>` : ''}
                 <button class="btn-secondary" data-action="clasificacion" data-case="${escapeHtml(caseId)}" type="button">Ver documentos</button>
                 <button class="btn-secondary" data-panel="comisiones" id="btnComisiones" type="button">Comisiones</button>
-                ${has926 ? `<button class="btn-primary" data-action="descargar926" data-case="${escapeHtml(caseId)}" data-file="${escapeHtml(filename926)}" type="button">Descargar plano</button>` : ''}
+                ${has926 && approved ? `<button class="btn-primary" data-action="descargar926" data-case="${escapeHtml(caseId)}" data-file="${escapeHtml(filename926)}" type="button">Descargar plano</button>` : ''}
                 ${!isAprobable ? `<button class="btn-warn" id="reprocesarBtn" data-case="${escapeHtml(caseId)}" type="button" title="Volver a ejecutar la prevalidación">↺ Reprocesar</button>` : ''}
             </div>
         </div>
@@ -5198,6 +5239,25 @@ async function downloadColmenaBatch() {
         a.href = url; a.download = filename;
         document.body.appendChild(a); a.click(); a.remove();
         URL.revokeObjectURL(url);
+        // Perfil Colmena: igual que la descarga individual, el ciclo de cada caso
+        // termina al generar su plano. En el lote colectivo se elimina cada contrato
+        // seleccionado tras la descarga exitosa.
+        const failed = [];
+        for (const id of ids) {
+            try {
+                const dr = await fetch(caseApiUrl(id), { method: 'DELETE' });
+                if (!dr.ok) throw new Error(`HTTP ${dr.status}`);
+            } catch(e) {
+                failed.push(id);
+            }
+        }
+        selectedColmenaCaseIds = new Set();
+        if (failed.length) {
+            showToast(`Lote descargado. ${failed.length} contrato(s) no se pudieron eliminar`, 'err');
+        } else {
+            showToast(`Lote descargado y ${ids.length} contrato(s) eliminado(s)`, 'ok');
+        }
+        loadProduccion();
     } catch(e) {
         showToast('Error descargando lote: ' + e.message, 'err');
     } finally {
@@ -5475,7 +5535,7 @@ async function loadAdminTables() {
         renderCatalogTable('eps', epsR.items || [], ['codigo','nombre','na'], ['Código','Nombre','N/A'],
             async (items) => {
                 const r = await fetch(`${API_URL}/api/admin/tables/eps`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
-                await assertAdminSaveOk(r, 'EPS');
+                return assertAdminSaveOk(r, 'EPS');
             }
         );
 
@@ -5483,7 +5543,7 @@ async function loadAdminTables() {
         renderCatalogTable('afp', afpR.items || [], ['codigo','nombre','na','activo'], ['Código','Nombre','N/A','Activo'],
             async (items) => {
                 const r = await fetch(`${API_URL}/api/admin/tables/afp`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
-                await assertAdminSaveOk(r, 'AFP');
+                return assertAdminSaveOk(r, 'AFP');
             }
         );
 
@@ -5713,10 +5773,18 @@ window.saveCatalog = async function(type) {
         const normalized = data
             .map(row => ({...row}))
             .filter(row => Object.values(row).some(value => String(value ?? '').trim() !== ''));
-        await saveFn(normalized);
+        const result = await saveFn(normalized);
         window[`_tableData_${type}`] = normalized;
         window[`_tableRender_${type}`]?.();
-        showToast(`Tabla ${type.toUpperCase()} guardada (${normalized.length} registros)`, 'ok');
+        const skipped = result?.skipped || [];
+        if (skipped.length > 0) {
+            // Filas que el backend descartó (ej. código vacío/no numérico o duplicado):
+            // sin esto el usuario veía "guardado" sin enterarse de que algo no quedó.
+            const detail = skipped.map(s => `fila ${s.index + 1}${s.nombre ? ` (${s.nombre})` : ''}: ${s.reason}`).join('; ');
+            showToast(`Tabla ${type.toUpperCase()} guardada, pero ${skipped.length} fila(s) NO se guardaron: ${detail}`, 'err');
+        } else {
+            showToast(`Tabla ${type.toUpperCase()} guardada (${normalized.length} registros)`, 'ok');
+        }
     } catch(e) {
         showToast('Error guardando: ' + e.message, 'err');
     }
@@ -5863,6 +5931,12 @@ function init() {
     document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
         btn.addEventListener('click', () => switchView(btn.dataset.view));
     });
+
+    // Colapsar / mostrar el sidebar
+    applySidebarCollapsed(localStorage.getItem(SIDEBAR_KEY) === '1');
+    document.getElementById('sidebarToggle')?.addEventListener('click', () => {
+        applySidebarCollapsed(!document.getElementById('appShell')?.classList.contains('sidebar-collapsed'));
+    });
     document.getElementById('mobileViewSelect')?.addEventListener('change', e => {
         switchView(e.target.value);
     });
@@ -5937,12 +6011,6 @@ function init() {
     document.getElementById('docModalClose')?.addEventListener('click', closeModal);
     document.getElementById('docModalBackdrop')?.addEventListener('click', closeModal);
 
-    // Arranque
-    fetch(`${API_URL}/health`)
-        .then(r => r.json())
-        .then(d => console.log('✅ AFI Colima conectado:', d))
-        .catch(e => console.warn('⚠ Health check:', e.message));
-
     loadTesterRoster();
 
     if (hasSession()) {
@@ -5950,38 +6018,6 @@ function init() {
     } else {
         openLogin();
     }
-
-    // Widget flotante de recursos — polling cada 20s
-    async function updateResourceWidget() {
-        try {
-            const [hR, cR] = await Promise.all([
-                fetch(`${API_URL}/health`).catch(() => null),
-                fetch(operationApiUrl('/api/cases/production-summary')).catch(() => null),
-            ]);
-            const h = hR?.ok ? await hR.json() : {};
-            const c = cR?.ok ? await cR.json() : {};
-            const res = h.resources || {};
-            const cases = c.cases || [];
-            const enCola = cases.filter(x => ['queued','processing','pending'].includes(String(x.status||''))).length;
-            const isOk = h.api === 'healthy';
-
-            const dot = document.getElementById('rwDot');
-            const status = document.getElementById('rwStatus');
-            const ram = document.getElementById('rwRam');
-            const rss = document.getElementById('rwRss');
-            const queueEl = document.getElementById('rwQueue');
-            const queueVal = document.getElementById('rwQueueVal');
-
-            if (dot) dot.style.background = isOk ? 'var(--c-ok)' : 'var(--c-err)';
-            if (status) status.textContent = isOk ? 'OK' : 'Error';
-            if (ram) ram.textContent = res.mem_used_mb ? `${res.mem_used_mb}MB` : '—';
-            if (rss) rss.textContent = res.process_rss_mb ? `${res.process_rss_mb}MB` : '—';
-            if (queueEl) queueEl.style.display = enCola > 0 ? '' : 'none';
-            if (queueVal) queueVal.textContent = enCola;
-        } catch {}
-    }
-    updateResourceWidget();
-    setInterval(updateResourceWidget, 20000);
 }
 
 init();
