@@ -66,6 +66,11 @@ rm -rf "$PKG"; mkdir -p "$PKG/build/backend" "$PKG/build/compat-backend" "$PKG/b
 rsync -a --exclude='__pycache__' --exclude='*.pyc' "$REPO/backend/" "$PKG/build/backend/"
 rsync -a --exclude='__pycache__' --exclude='*.pyc' "$REPO/compat-backend/" "$PKG/build/compat-backend/"
 cp -r "$FRONT/dist" "$PKG/build/frontend/dist"
+# nginx.conf tambien: vive horneado en la imagen (/etc/nginx/conf.d/default.conf), no en
+# el volumen del bundle. Sin copiarlo, cualquier ruta nueva del proxy -por ejemplo
+# /sso/ del ingreso desde Yii- se queda fuera del server y responde el index de la SPA
+# en vez de llegar al backend.
+cp "$FRONT/nginx.conf" "$PKG/build/frontend/nginx.conf"
 
 # ---- 3. Dockerfiles delta ----
 cat > "$PKG/build/backend/Dockerfile.delta" <<'DF'
@@ -83,11 +88,13 @@ WORKDIR /app
 COPY . .
 DF
 cat > "$PKG/build/frontend/Dockerfile.delta" <<'DF'
-# La imagen base ya trae nginx + nginx.conf; solo se reemplaza el bundle.
+# La imagen base ya trae nginx; se reemplazan el bundle y la config del proxy (esta
+# ultima porque las rutas nuevas -/sso/, etc.- viven en nginx.conf, no en el bundle).
 ARG BASE_IMAGE=imagine-afiliaciones-imagine_frontend:latest
 FROM ${BASE_IMAGE}
 RUN rm -rf /usr/share/nginx/html/*
 COPY dist/ /usr/share/nginx/html/
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 DF
 
 # ---- 4. Script que se ejecuta EN EL SERVER (auto-detecta nombres de imagen) ----

@@ -647,6 +647,34 @@ def _record_first_value(record: Dict[str, Any], *keys: str) -> str:
     return ""
 
 
+def _record_zona_trabajador(record: Dict[str, Any]) -> str:
+    """Zona del trabajador, tolerante a cómo quedó normalizado el encabezado del XLSX.
+
+    El nombre de la columna llega de formas distintas segun el archivo: "Zona",
+    "Zona Rural/Urbana" o "Zona (Rural/Urbana)" producen las claves zona,
+    zona_rural_urbana y zona_(rural_urbana) -los parentesis se conservan y la barra pasa
+    a guion bajo-. Buscar solo literales fijos hacia que un formulario correcto se
+    reportara como "Zona vacia en fila N": la celda decia "Urbana" pero ninguna de las
+    claves probadas existia.
+
+    Se excluyen las claves del centro de trabajo (zona_ct / zona_centro_trabajo), que son
+    otro dato y tienen su propia validacion.
+    """
+    directo = _record_first_value(
+        record, "zona", "zona_rural_urbana", "zona_(rural_urbana)", "zona_(rural/urbana)"
+    )
+    if directo:
+        return directo
+    for key, value in record.items():
+        plano = re.sub(r"[^a-z0-9]+", "", str(key).lower())
+        if not plano.startswith("zona") or plano.startswith(("zonact", "zonacentro")):
+            continue
+        texto = normalize_text(value)
+        if texto:
+            return texto
+    return ""
+
+
 def _business_days_between(start: datetime, end: datetime) -> int:
     from datetime import date as _date
     # Festivos Colombia 2025-2026 (Ley Emiliani)
@@ -5652,7 +5680,10 @@ def _explode_multipage_pdf_bytes(filename: str, content: bytes, max_pages: int =
 
 def _extract_worker_records_from_rows(rows: List[tuple[Any, ...]]) -> tuple[List[Dict[str, str]], int]:
     def _header_key(value: Any) -> str:
-        return normalize_haystack(normalize_text(value)).replace(" ", "_")
+        # Encabezados como "Municipio/Distrito" deben quedar "municipio_distrito"
+        # (con guion bajo, no la barra literal) para calzar con las claves que
+        # busca el frontend (workerValue) y el resto del backend.
+        return normalize_haystack(normalize_text(value)).replace(" ", "_").replace("/", "_")
 
     header_index = -1
     headers: List[str] = []
@@ -7586,7 +7617,7 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
         elif sexo not in valid_sexos:
             row_errors.append({"row": row_excel, "code": "SEXO_INVALIDO", "message": f"Sexo identificación inválido en fila {row_excel} ({sexo_raw}). Usa solo M, F, T, NB u O.", "documento": row_document})
 
-        zona_raw = record.get("zona", "") or record.get("zona_rural_urbana", "") or record.get("zona_(rural/urbana)", "")
+        zona_raw = _record_zona_trabajador(record)
         zona = _normalize_zona(zona_raw)
         if not zona:
             row_errors.append({"row": row_excel, "code": "ZONA_VACIA", "message": f"Zona vacía en fila {row_excel}.", "documento": row_document})
@@ -9988,14 +10019,14 @@ def _form_field_delivery_lines(xlsx_profile: Dict[str, Any]) -> List[str]:
     lugar_afiliacion = normalize_text((form_cell_values.get("lugar_afiliacion") or {}).get("value") or "")
     numero_radicacion = only_digits((form_cell_values.get("numero_radicacion") or {}).get("value") or form_fields.get("numero_radicacion") or "")
 
-    # ARL anterior (solo traslado): "14-23 Positiva Compañía..." -> el "14-23" es la
-    # posición del combo del formulario legacy, NO el código real de arpriesgos (ese
-    # catálogo no tiene continuidad 1..99, ej. Positiva es código 10, no 23). Se manda
-    # el NOMBRE que sigue al número; compat-backend lo resuelve contra arpriesgos por
-    # nombre (tolerante a variaciones), igual que EPS/AFP.
+    # ARL anterior (solo traslado): el campo D30 viene como "NN-NN Nombre..." (ej.
+    # "14-11 Compañía Suramericana..."). El SEGUNDO número del "NN-NN" es el código de la
+    # ARL anterior (aquí 11 = Suramericana). El formato lo valida run_xlsx_primary_validations
+    # (bloqueante si no cumple); aquí solo se extrae el código. Si no viene el patrón, se
+    # deja vacío (el bloqueante evita que un traslado sin ARL válida llegue a aprobarse).
     arl_raw = normalize_text(form_fields.get("b_arl_de_la_cual_se_traslada") or "")
-    arl_match = re.search(r"^\d{1,2}\s*-\s*\d{1,2}\s*(.+)$", arl_raw)
-    arl_code = arl_match.group(1).strip() if arl_match else arl_raw.strip()
+    arl_match = re.match(r"^\s*\d+\s*-\s*(\d+)", arl_raw)
+    arl_code = arl_match.group(1) if arl_match else ""
 
     profile_num_trab = only_digits(str(profile.get("numero_trabajadores") or ""))
 
@@ -11495,20 +11526,11 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
     else:
         _clear_manual_approval(payload, "Reproceso de validaciones del caso.")
 
-    # afi_rad -> 'Radicada'. Se hace aqui y no en la subida porque el numero de contrato
-    # sale del XLSX y solo se conoce despues de analizarlo. Una sola vez por caso: este
-    # analisis se re-ejecuta en cada "refrescar validaciones", y como el UPDATE de
-    # 'Radicada' no lleva guarda de estado previo, repetirlo devolveria a 'Radicada' un
-    # contrato que ya avanzo a 'Indexado'/'Plano'.
-    if not payload.get("afi_rad_radicada_at"):
-        contrato_radica = _contrato_para_afi_rad(payload)
-        if contrato_radica:
-            resultado_radica = _afi_rad_set_estado(
-                contrato_radica, "radicada", datetime.now().strftime("%d/%m/%Y")
-            )
-            analysis["afi_rad_radicada"] = resultado_radica
-            if resultado_radica.get("ok"):
-                payload["afi_rad_radicada_at"] = utc_now()
+    # afi_rad: la transicion a 'Radicada' NO la hace este flujo. Las filas de afi_rad las
+    # crea y deja en 'Radicada' el modulo externo de radicacion; re-radicar aqui pisaba
+    # TODAS las filas historicas con el mismo contrato (el UPDATE no lleva guarda de estado
+    # previo) y devolvia a 'Radicada' registros que ya habian avanzado. Solo conservamos las
+    # transiciones 'Indexado' (al aprobar) y 'Plano' (al descargar el plano).
 
     save_case(payload)
     rebuild_document_registry()

@@ -5,32 +5,8 @@
   },
   "recipients": [
     {
-      "name": "Rocio del Pilar",
-      "email": "rocio.laguna@imagine-tech.com"
-    },
-    {
-      "name": "Jenry Henao Valencia",
-      "email": "jenry.henao@imagineltda.com"
-    },
-    {
-      "name": "Jennifer Molano",
-      "email": "jennifer.molano@imagine-tech.com"
-    },
-    {
-      "name": "Liyiber Perez",
-      "email": "lperez@imagineltda.com"
-    },
-    {
-      "name": "Brayant Diaz",
-      "email": "bdiaz@imagine-tech.com"
-    },
-    {
-      "name": "Hernan Escobar Mesa",
-      "email": "hdescobar@imagine-tech.com"
-    },
-    {
-      "name": "Fabio Forero",
-      "email": "fabio.forero@imagine-tech.com"
+      "name": "jhon",
+      "email": "jjbermudez"
     }
   ]
 }

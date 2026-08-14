@@ -213,13 +213,18 @@ def _stringify_payload(payload: dict[str, Any]) -> dict[str, str]:
 
 
 def _validate_926_structure(content: str) -> dict[str, Any]:
-    # Perfil de salida real del clon/legacy observado:
-    # tipos 1/2/3/5/7 a 942, tipo 4 corto (comisiones), tipo 6 marcas día.
+    # Anchos de la salida: tipos 1/2/3/5/7 a 942, tipo 6 marcas día a 26, y tipo 4
+    # (comisiones) a 387 = 28 de datos + 359 de relleno que arranca en la posición 29.
+    #
+    # El tipo 4 estaba declarado en 28 porque _line_926 le hacía rstrip() y la línea
+    # llegaba sin relleno. Al corregir el ancho en el motor había que corregirlo también
+    # aquí: si no, el propio generador produce una línea que este validador rechaza
+    # ("Validación estructural/semántica 926 falló", bad_length_internal_count=1).
     expected_lengths_by_type = {
         "1": {942},
         "2": {942},
         "3": {942},
-        "4": {28},
+        "4": {387},
         "5": {942},
         "6": {26},
         "7": {942},
@@ -249,6 +254,11 @@ def _validate_926_structure(content: str) -> dict[str, Any]:
             )
         for j, ch in enumerate(line, start=1):
             code = ord(ch)
+            # La Ñ/ñ es el único caracter fuera de ASCII que se acepta: el plano se
+            # codifica en latin-1, donde ocupa un byte (0xD1/0xF1) y no corre el ancho
+            # fijo. El resto de acentos ya llega convertido por _vb_text.
+            if code in {209, 241}:
+                continue
             if code < 32 or code > 126:
                 non_ascii.append({"line": i, "col": j, "char_code": code})
                 break
@@ -701,18 +711,38 @@ def _sede_salary_totals_from_xlsx(excel_bytes: bytes) -> dict[str, Any]:
     sum_pat = re.compile(r"SUM\(\s*S(\d+)\s*:\s*S(\d+)\s*\)", re.IGNORECASE)
     docs = {"CC", "CE", "TI", "RC", "PA", "PT", "SC", "CD", "NI"}
 
-    def _fallback_total_by_rows(ws: Any) -> tuple[int, int]:
+    # openpyxl en modo read_only NO indexa las celdas: cada ws.cell(r, c) vuelve a parsear el
+    # XML de la hoja desde el principio, asi que el costo por llamada crece con el numero de
+    # fila y un barrido completo resulta O(n^2). Con las hojas reales de sede (1000 filas x
+    # ~195 columnas) esto tardaba minutos y hacia que prebuild-check superara su timeout de
+    # 120s, dejando la aprobacion en 'stopped_prebuild: timed out'. Se lee cada hoja UNA sola
+    # vez y se guardan solo las tres columnas que se usan: F=6 (tipo de documento), G=7
+    # (numero de documento) y S=19 (salario / etiqueta / formula de total).
+    def _leer_columnas(hoja: Any) -> dict[int, tuple[Any, Any, Any]]:
+        filas: dict[int, tuple[Any, Any, Any]] = {}
+        for indice, fila in enumerate(hoja.iter_rows(min_col=1, max_col=19, values_only=True), start=1):
+            largo = len(fila)
+            filas[indice] = (
+                fila[5] if largo > 5 else None,
+                fila[6] if largo > 6 else None,
+                fila[18] if largo > 18 else None,
+            )
+        return filas
+
+    def _valor_s(filas: dict[int, tuple[Any, Any, Any]], rr: int) -> Any:
+        return (filas.get(rr) or (None, None, None))[2]
+
+    def _fallback_total_by_rows(filas: dict[int, tuple[Any, Any, Any]]) -> tuple[int, int]:
         total = 0
         workers = 0
-        max_scan = int(ws.max_row or 0)
-        for rr in range(1, max_scan + 1):
-            doc_type = as_text(ws.cell(rr, 6).value).strip().upper()
+        for _rr, (col_f, col_g, col_s) in filas.items():
+            doc_type = as_text(col_f).strip().upper()
             if doc_type not in docs:
                 continue
-            doc = re.sub(r"\D+", "", as_text(ws.cell(rr, 7).value))
+            doc = re.sub(r"\D+", "", as_text(col_g))
             if not re.fullmatch(r"\d{6,15}", doc):
                 continue
-            salario_txt, _ = _parse_money_text(ws.cell(rr, 19).value)
+            salario_txt, _ = _parse_money_text(col_s)
             salario = _to_int_safe(salario_txt, default=0)
             total += salario
             workers += 1
@@ -732,18 +762,24 @@ def _sede_salary_totals_from_xlsx(excel_bytes: bytes) -> dict[str, Any]:
         # legacy (ej. "101") que no tiene por que coincidir con el numero de hoja, y si no
         # coinciden esta conciliacion compara sedes distintas (falso bloqueante).
         ws_values = wb_values[name] if wb_values is not None and name in wb_values.sheetnames else None
-        codigo_sede_cell = as_text((ws_values.cell(12, 6).value if ws_values is not None else None)).strip()
+        codigo_sede_cell = ""
+        if ws_values is not None:
+            for fila_valores in ws_values.iter_rows(min_row=12, max_row=12, min_col=6, max_col=6, values_only=True):
+                codigo_sede_cell = as_text(fila_valores[0] if fila_valores else None).strip()
+                break
         sede_code = str(int(codigo_sede_cell)) if codigo_sede_cell.isdigit() else str(int(m.group(1)))
+
+        filas = _leer_columnas(ws)
 
         total_label_row: Optional[int] = None
         max_scan_rows = min(int(ws.max_row or 0), 400)
         for r in range(1, max_scan_rows + 1):
-            v = ws.cell(r, 19).value  # Columna S
+            v = _valor_s(filas, r)  # Columna S
             if isinstance(v, str) and "total salarios" in v.lower():
                 total_label_row = r
                 break
         if total_label_row is None:
-            fb_total, fb_workers = _fallback_total_by_rows(ws)
+            fb_total, fb_workers = _fallback_total_by_rows(filas)
             if fb_workers > 0:
                 totals[sede_code] = fb_total
                 worker_totals[sede_code] = fb_total
@@ -768,14 +804,14 @@ def _sede_salary_totals_from_xlsx(excel_bytes: bytes) -> dict[str, Any]:
             )
             continue
 
-        formula = ws.cell(total_label_row + 1, 19).value
+        formula = _valor_s(filas, total_label_row + 1)
         r0 = r1 = None
         if isinstance(formula, str):
             fm = sum_pat.search(formula.replace("$", ""))
             if fm:
                 r0, r1 = int(fm.group(1)), int(fm.group(2))
         if r0 is None or r1 is None:
-            fb_total, fb_workers = _fallback_total_by_rows(ws)
+            fb_total, fb_workers = _fallback_total_by_rows(filas)
             if fb_workers > 0:
                 totals[sede_code] = fb_total
                 worker_totals[sede_code] = fb_total
@@ -803,7 +839,7 @@ def _sede_salary_totals_from_xlsx(excel_bytes: bytes) -> dict[str, Any]:
         total_float = 0.0
         numeric_rows = 0
         for rr in range(r0, r1 + 1):
-            raw = ws.cell(rr, 19).value
+            raw = _valor_s(filas, rr)
             if raw in (None, ""):
                 continue
             if isinstance(raw, (int, float)):
@@ -820,7 +856,7 @@ def _sede_salary_totals_from_xlsx(excel_bytes: bytes) -> dict[str, Any]:
         # detectar y explicar cuándo la fórmula "Total salarios" del Excel viene con rango
         # mal escrito (error humano: ej. =SUM(S40:S44) cuando hay un trabajador en la fila
         # 39). NO se corrige en silencio: la discrepancia se reporta como bloqueante.
-        fb_total, fb_workers = _fallback_total_by_rows(ws)
+        fb_total, fb_workers = _fallback_total_by_rows(filas)
         worker_totals[sede_code] = fb_total
         totals[sede_code] = total
         details.append(
@@ -1004,19 +1040,25 @@ def _excel_contract_executive_summary(excel_bytes: bytes) -> dict[str, Any]:
         sede_workers = 0
         sede_salary = 0
         sede_centers: set[str] = set()
-        max_scan = int(ws.max_row or 0)
-        for rr in range(1, max_scan + 1):
-            doc_type = as_text(ws.cell(rr, 6).value).strip().upper()
+        # Una sola pasada por hoja: ws.cell() en read_only reparsea el XML desde el inicio en
+        # cada llamada (O(n^2)). Ver la nota en _sede_salary_totals_from_xlsx.
+        for fila in ws.iter_rows(min_col=1, max_col=19, values_only=True):
+            largo = len(fila)
+            col_e = fila[4] if largo > 4 else None
+            col_f = fila[5] if largo > 5 else None
+            col_g = fila[6] if largo > 6 else None
+            col_s = fila[18] if largo > 18 else None
+            doc_type = as_text(col_f).strip().upper()
             if doc_type not in docs:
                 continue
-            doc = re.sub(r"\D+", "", as_text(ws.cell(rr, 7).value))
+            doc = re.sub(r"\D+", "", as_text(col_g))
             if not re.fullmatch(r"\d{6,15}", doc):
                 continue
             sede_workers += 1
-            salario_txt, _ = _parse_money_text(ws.cell(rr, 19).value)
+            salario_txt, _ = _parse_money_text(col_s)
             salario = _to_int_safe(salario_txt, default=0)
             sede_salary += salario
-            ct = re.sub(r"\D+", "", as_text(ws.cell(rr, 5).value))
+            ct = re.sub(r"\D+", "", as_text(col_e))
             if ct:
                 norm_ct = str(int(ct)) if ct.isdigit() else ct
                 sede_centers.add(norm_ct)
@@ -2460,16 +2502,26 @@ def _ddmmyyyy_f35(value: Any) -> str:
 
 
 def _strip_accents(value: Any) -> str:
-    # "PEQUEÑA" -> "PEQUENA" (NFKD descompone la ñ en n + tilde combinante).
-    txt = unicodedata.normalize("NFKD", as_text(value))
-    return "".join(ch for ch in txt if not unicodedata.combining(ch))
+    # Se pliega el resto de tildes pero se CONSERVA la ñ/Ñ ("PEQUEÑA" -> "PEQUEÑA",
+    # "COMPAÑÍA" -> "COMPAÑIA"). La ñ es dato valido en br*/bk*/planillas y en el plano
+    # (latin-1, un byte, no corre el ancho). Se decide caracter por caracter porque el
+    # NFKD parte la ñ en n + tilde combinante y el filtro de marcas la perderia.
+    salida = []
+    for ch in as_text(value):
+        if ch in ("ñ", "Ñ"):
+            salida.append(ch)
+            continue
+        desc = unicodedata.normalize("NFKD", ch)
+        salida.append("".join(c for c in desc if not unicodedata.combining(c)))
+    return "".join(salida)
 
 
 def _alnum_keep_spaces(value: Any) -> str:
     # Quita caracteres especiales (#, -, ., etc.) dejando solo letras, números y
     # espacios (para no destruir la legibilidad de direcciones tipo "CLL 5 # 10-20").
-    txt = unicodedata.normalize("NFKD", as_text(value))
-    txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+    # La ñ se conserva (es letra valida): _strip_accents pliega el resto de tildes pero
+    # deja la ñ, y luego ch.isalnum() la mantiene.
+    txt = _strip_accents(as_text(value))
     txt = "".join(ch if (ch.isalnum() or ch == " ") else " " for ch in txt)
     return " ".join(txt.split())
 
@@ -3473,9 +3525,11 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
         # existe en el catalogo. _riesgos_lookup ya resuelve por nombre (tolerante a sufijos)
         # con fallback a codigo si el valor es puramente numerico, igual que EPS/AFP.
         arl_codigo_p, arl_nombre_p = _riesgos_lookup("arpriesgos", arl_emp)
-        if not arl_nombre_p:
-            # Sin nombre resuelto no hay match real en el catalogo (ej. "99"/vacio, o un
-            # numero que no corresponde a ningun codigo real): no dejar un codigo inventado.
+        # arl_emp ya es el CODIGO de la ARL anterior (segundo numero del "NN-NN" de D30,
+        # que el backend extrajo y valido). Se conserva como f56 aunque el catalogo no
+        # traiga el nombre (combo56 quedara vacio). Solo se limpia si venia un valor NO
+        # numerico que no resolvio, para no inventar un codigo a partir de un nombre suelto.
+        if not arl_nombre_p and not arl_emp.strip().isdigit():
             arl_codigo_p = ""
         profile_num_trab_emp = _num_or_none(row.get("profilenumerotrabajadores"))
         localidad_emp = as_text(row.get("localidadempleador")).strip().upper()

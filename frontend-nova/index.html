@@ -76,9 +76,6 @@
 
       <div class="nav-group" id="navSistema">
         <div class="nav-group-label">Sistema</div>
-        <button class="nav-item" data-view="entrenamiento" type="button">
-          <span class="nav-dot"></span>Hallazgos
-        </button>
         <button class="nav-item" data-view="busqueda" type="button">
           <span class="nav-dot"></span>Búsqueda
         </button>
@@ -116,7 +113,6 @@
         <option value="bandeja">Bandeja</option>
         <option value="flujo">Nuevo contrato</option>
         <option value="produccion">Producción</option>
-        <option value="entrenamiento">Hallazgos</option>
         <option value="busqueda">Búsqueda</option>
         <option value="admin">Admin</option>
       </select>
@@ -293,54 +289,6 @@
           </div>
           <div id="produccionContent">
             <div class="loading-msg">Cargando contratos...</div>
-          </div>
-        </div>
-      </section>
-
-      <!-- HALLAZGOS -->
-      <section class="view" id="view-entrenamiento">
-        <div class="section-card">
-          <div class="section-card-head">
-            <div class="section-title">Hallazgos y mejoras del sistema</div>
-          </div>
-          <div class="feedback-form">
-            <div class="field-row">
-              <label class="field-label">Operador</label>
-              <input class="field-input" id="feedbackName" type="text" placeholder="Tu nombre" readonly />
-            </div>
-            <div class="field-row">
-              <label class="field-label">Tipo de hallazgo</label>
-              <select class="field-select" id="feedbackCategory">
-                <option value="falso_positivo">⚠ Falso positivo — el sistema rechazó algo que debía aprobar</option>
-                <option value="ocr_error">🔍 Error OCR — el sistema leyó mal un documento</option>
-                <option value="clasificacion_erronea">📄 Clasificación errónea — el sistema clasificó mal un PDF</option>
-                <option value="sugerencia">💡 Sugerencia de mejora</option>
-                <option value="otro">📝 Otro</option>
-              </select>
-            </div>
-            <div class="field-row">
-              <label class="field-label">Contrato relacionado</label>
-              <select class="field-select" id="feedbackCaseSelect">
-                <option value="">— Selecciona el contrato (opcional) —</option>
-              </select>
-            </div>
-            <div class="field-row">
-              <label class="field-label">Descripción del hallazgo</label>
-              <textarea class="field-textarea" id="feedbackNote" placeholder="Describe qué falló, qué corregiste, o qué mejoraría el sistema..." rows="4"></textarea>
-            </div>
-            <div class="field-actions">
-              <button class="btn-primary" id="saveFeedbackBtn" type="button">Registrar hallazgo</button>
-              <span class="save-status" id="feedbackSaveStatus"></span>
-            </div>
-          </div>
-        </div>
-        <div class="section-card">
-          <div class="section-card-head">
-            <div class="section-title">Hallazgos registrados</div>
-            <button class="btn-icon" id="refreshFeedbackBtn" type="button">↺</button>
-          </div>
-          <div id="feedbackNotesList">
-            <div class="loading-msg">Cargando hallazgos...</div>
           </div>
         </div>
       </section>

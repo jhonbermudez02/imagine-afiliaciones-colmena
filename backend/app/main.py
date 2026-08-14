@@ -10,9 +10,9 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from .cases import (
@@ -53,6 +53,7 @@ from .legacy_bridge import generate_legacy_flatfile_926_http
 from .notifications import send_case_notification, send_tester_activity_summary
 from .rag import generate_grounded_answer, infer_operational_decision, reindex_knowledge, search_knowledge
 from .services import get_eval_summary, get_feed_summary, get_system_health, get_system_status
+from .sso import crear_sesion, leer_sesion, validar_token
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -201,13 +202,11 @@ class Consolidated926Request(BaseModel):
     operation: Optional[str] = "colima"
 
 
-class FeedbackNoteRequest(BaseModel):
-    name: str
-    text: str
-
-
 class TesterActivityRequest(BaseModel):
-    tester_email: str
+    # Identidad del operador = usuario (del token del portal). tester_email queda como
+    # respaldo para clientes viejos que aun lo envien.
+    tester_usuario: Optional[str] = None
+    tester_email: Optional[str] = None
     tester_name: str
     action: str
     metadata: Optional[Dict[str, Any]] = None
@@ -215,7 +214,6 @@ class TesterActivityRequest(BaseModel):
 
 SEARCH_CALIBRATION_PATH = Path(settings.cases_dir).parent / "evals" / "learning" / "search_calibration.json"
 _SEARCH_CALIBRATION_CACHE: Optional[Dict[str, Any]] = None
-FEEDBACK_NOTES_PATH = Path(settings.cases_dir).parent / "evals" / "feedback_notes.jsonl"
 WORKFLOW_QUEUE_PATH = Path(settings.cases_dir) / "workflow_queue.json"
 TESTER_ACTIVITY_LOG_PATH = Path(settings.cases_dir).parent / "evals" / "tester_activity_log.jsonl"
 WORKFLOW_QUEUE_LOCK = threading.RLock()
@@ -237,11 +235,13 @@ def _load_tester_roster() -> List[Dict[str, str]]:
     for item in recipients:
         if not isinstance(item, dict):
             continue
-        email = str(item.get("email") or "").strip().lower()
+        # La identidad del operador es el "usuario". Se acepta tambien el campo "email"
+        # heredado (que en despliegues nuevos ya contiene el usuario) como respaldo.
+        usuario = str(item.get("usuario") or item.get("email") or "").strip()
         name = str(item.get("name") or "").strip()
-        if not email:
+        if not usuario:
             continue
-        out.append({"email": email, "name": name})
+        out.append({"usuario": usuario, "name": name})
     return out
 
 
@@ -272,10 +272,10 @@ def _summarize_tester_activity(date_str: Optional[str] = None) -> Dict[str, Any]
     roster = _load_tester_roster()
     target_date = date_str or datetime.now().strftime("%Y-%m-%d")
     rows = _iter_tester_activity()
-    by_email: Dict[str, Dict[str, Any]] = {
-        item["email"]: {
-            "email": item["email"],
-            "name": item.get("name") or item["email"],
+    by_usuario: Dict[str, Dict[str, Any]] = {
+        item["usuario"]: {
+            "usuario": item["usuario"],
+            "name": item.get("name") or item["usuario"],
             "total_actions": 0,
             "cases_created": 0,
             "workflow_started": 0,
@@ -291,12 +291,13 @@ def _summarize_tester_activity(date_str: Optional[str] = None) -> Dict[str, Any]
         created_at = str(row.get("created_at") or "")
         if not created_at.startswith(target_date):
             continue
-        email = str(row.get("tester_email") or "").strip().lower()
-        if not email:
+        # tester_usuario es el campo actual; tester_email es el heredado.
+        usuario = str(row.get("tester_usuario") or row.get("tester_email") or "").strip()
+        if not usuario:
             continue
-        bucket = by_email.setdefault(email, {
-            "email": email,
-            "name": str(row.get("tester_name") or email),
+        bucket = by_usuario.setdefault(usuario, {
+            "usuario": usuario,
+            "name": str(row.get("tester_name") or usuario),
             "total_actions": 0,
             "cases_created": 0,
             "workflow_started": 0,
@@ -322,7 +323,7 @@ def _summarize_tester_activity(date_str: Optional[str] = None) -> Dict[str, Any]
             bucket["documents_opened"] += 1
         if created_at > str(bucket.get("last_activity") or ""):
             bucket["last_activity"] = created_at
-    items = list(by_email.values())
+    items = list(by_usuario.values())
     items.sort(key=lambda item: (-int(item["total_actions"]), str(item["name"])))
     inactive = [item for item in items if int(item["total_actions"]) == 0]
     active = [item for item in items if int(item["total_actions"]) > 0]
@@ -746,6 +747,23 @@ def _patch_fixed_position(line: str, start_1based: int, value: str) -> str:
     if len(line) < end:
         line = line + (" " * (end - len(line)))
     return line[:start] + value + line[end:]
+
+
+def _plano_926_response(text: str, filename: str = "") -> Response:
+    """Respuesta del plano 926 codificada en latin-1.
+
+    El archivo es de ancho fijo y el consumidor lee por posicion de BYTE. Starlette
+    codifica en UTF-8 por omision, donde la Ñ ocupa DOS bytes: una linea de 942
+    caracteres saldria de 943+ bytes y todo lo que va despues de la Ñ quedaria corrido.
+    En latin-1 la Ñ es 0xD1, un solo byte, que es como el motor genera el archivo.
+    Mientras el contenido era ASCII puro daba igual; desde que se conserva la Ñ, no.
+    """
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'} if filename else None
+    return Response(
+        content=text.encode("latin-1", errors="replace"),
+        media_type="text/plain; charset=latin-1",
+        headers=headers,
+    )
 
 
 def _apply_926_download_overrides(content: Any) -> str:
@@ -3464,23 +3482,31 @@ async def consolidated_926(request: Consolidated926Request):
         output_926 = workflow.get("output_926") or analysis.get("output_926") or {}
         legacy = output_926.get("legacy") or {}
         draft = output_926.get("draft") or {}
-        content = str(legacy.get("content") or draft.get("content") or "").strip()
-        if not content:
+        # Sin .strip() sobre el contenido: los registros 1/2/3/5/7 son de ancho fijo (942)
+        # y terminan en espacios de relleno. Si la ultima linea del caso es una de esas
+        # -pasa cuando el contrato no tiene comisiones, porque entonces no hay linea
+        # tipo 4 al final-, recortarla la dejaria mas corta de 942 y un lector por
+        # posicion no la interpretaria bien. Para saber si hay contenido basta con
+        # evaluar .strip() aparte, sin tocar el valor.
+        content = str(legacy.get("content") or draft.get("content") or "")
+        if not content.strip():
             payload = run_case_workflow(case_id)
             analysis = payload.get("analysis") or {}
             workflow = analysis.get("workflow_run") or {}
             output_926 = workflow.get("output_926") or analysis.get("output_926") or {}
             legacy = output_926.get("legacy") or {}
             draft = output_926.get("draft") or {}
-            content = str(legacy.get("content") or draft.get("content") or "").strip()
-        if not content:
+            content = str(legacy.get("content") or draft.get("content") or "")
+        if not content.strip():
             missing_926.append(case_id)
             continue
         resumen = (workflow.get("executive_report_final") or workflow.get("executive_report_precheck") or {}).get("resumen_ejecutivo") or {}
         profile = ((analysis.get("xlsx_profile") or {}).get("profile") or {})
         company = str(resumen.get("empresa") or profile.get("empresa") or case_id)
         nit = str(resumen.get("nit") or profile.get("nit") or "")
-        chunks.append(_apply_926_download_overrides(content).strip())
+        # Solo se quitan los saltos de linea de los extremos, para no duplicarlos al
+        # concatenar; el relleno de ancho fijo se conserva.
+        chunks.append(_apply_926_download_overrides(content).strip("\r\n"))
         selected_cases.append(case_id)
         selected_payloads.append(payload)
 
@@ -3498,30 +3524,12 @@ async def consolidated_926(request: Consolidated926Request):
         _marcar_afi_rad_plano(case_payload)
 
     filename = f"lote_{operation_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-    return Response(
-        content="\n".join(chunks),
-        media_type="text/plain; charset=utf-8",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "X-Consolidated-Cases": str(len(selected_cases)),
-        },
-    )
-
-
-@app.get("/api/feedback-notes")
-async def list_feedback_notes():
-    if not FEEDBACK_NOTES_PATH.exists():
-        return {"items": []}
-    items: List[Dict[str, Any]] = []
-    for line in FEEDBACK_NOTES_PATH.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            items.append(json.loads(line))
-        except Exception:
-            continue
-    return {"items": items}
+    # CRLF, igual que el separador interno de cada caso (legacy_compat_engine une sus
+    # lineas con "\r\n"). Con "\n" el archivo quedaba mixto: la ultima linea de cada
+    # contrato -la del registro tipo 4- terminaba en LF y todas las demas en CRLF.
+    response = _plano_926_response("\r\n".join(chunks), filename=filename)
+    response.headers["X-Consolidated-Cases"] = str(len(selected_cases))
+    return response
 
 
 @app.get("/api/testers")
@@ -3529,16 +3537,78 @@ async def list_testers():
     return {"items": _load_tester_roster()}
 
 
+@app.get("/sso/yii")
+async def sso_yii(token: str = Query(default="")):
+    """Canje del token del portal Yii por la sesión propia.
+
+    Responde SIEMPRE con un redirect, nunca con un JSON de error: quien llega aquí es un
+    navegador siguiendo un enlace del menú, no un cliente de API. Si el token no sirve,
+    va a "/" y el front muestra la pantalla que corresponda.
+
+    El motivo del rechazo queda en el log del servidor y no en la respuesta: distinguirle
+    al cliente entre firma inválida, vencido y replay le daría a alguien probando tokens
+    justo la señal que necesita para afinar el intento.
+    """
+    payload, motivo = validar_token(token, settings.sso_shared_secret, settings.sso_token_ttl_seconds)
+    # Redirect RELATIVO ("../") a proposito: este endpoint vive en .../sso/yii, asi que el
+    # navegador resuelve "../" contra su URL actual y vuelve a la raiz de la app, tanto si
+    # esta se sirve en la raiz del dominio como bajo un subpath de un proxy
+    # (p.ej. /intranet/afi-colima/). Un "/" absoluto perderia ese prefijo y sacaria al
+    # usuario fuera de la app.
+    if payload is None:
+        logger.warning("SSO Yii rechazado: %s", motivo)
+        return RedirectResponse(url="../?sso=denied", status_code=303)
+
+    cookie_value = crear_sesion(payload, settings.sso_shared_secret, settings.sso_session_ttl_seconds)
+    # 303 + URL sin token: la barra de direcciones, el historial y el Referer quedan
+    # limpios, y un F5 no reintenta el canje (el jti ya está consumido).
+    response = RedirectResponse(url="../", status_code=303)
+    response.set_cookie(
+        key=settings.sso_cookie_name,
+        value=cookie_value,
+        max_age=settings.sso_session_ttl_seconds,
+        httponly=True,
+        secure=bool(settings.sso_cookie_secure),
+        samesite="lax",
+        path="/",
+    )
+    logger.info("SSO Yii aceptado: usuario=%s perfil=%s", payload.get("usuario"), payload.get("perfil"))
+    return response
+
+
+@app.get("/api/session")
+async def get_session(request: Request):
+    """Sesión vigente para que el front decida si muestra el login o entra directo.
+
+    `manual_login_enabled` viaja aquí para que el front no tenga que adivinar: cuando el
+    acceso es solo por el portal, la pantalla de selección de perfil no debe ofrecerse.
+    """
+    datos = leer_sesion(request.cookies.get(settings.sso_cookie_name, ""), settings.sso_shared_secret)
+    return {
+        "authenticated": bool(datos),
+        "session": datos or None,
+        "manual_login_enabled": bool(settings.manual_login_enabled),
+        "sso_enabled": bool(settings.sso_shared_secret),
+    }
+
+
+@app.post("/api/session/logout")
+async def post_session_logout():
+    response = Response(status_code=204)
+    response.delete_cookie(key=settings.sso_cookie_name, path="/")
+    return response
+
+
 @app.post("/api/test-activity")
 async def create_tester_activity(request: TesterActivityRequest):
-    tester_email = str(request.tester_email or "").strip().lower()
+    tester_usuario = str(request.tester_usuario or request.tester_email or "").strip()
     tester_name = str(request.tester_name or "").strip()
     action = str(request.action or "").strip().lower()
-    if not tester_email or not action:
-        raise HTTPException(status_code=400, detail="tester_email y action son obligatorios.")
+    if not tester_usuario or not action:
+        raise HTTPException(status_code=400, detail="tester_usuario y action son obligatorios.")
     entry = {
-        "tester_email": tester_email,
-        "tester_name": tester_name or tester_email,
+        "tester_usuario": tester_usuario,
+        "tester_name": tester_name or tester_usuario,
         "action": action,
         "metadata": request.metadata or {},
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -3557,25 +3627,6 @@ async def send_tester_activity_summary_email(date: Optional[str] = Query(default
     summary = _summarize_tester_activity(date)
     result = send_tester_activity_summary(summary)
     return {"ok": bool(result.get("ok")), "delivery": result.get("delivery"), "summary": summary}
-
-
-@app.post("/api/feedback-notes")
-async def create_feedback_note(request: FeedbackNoteRequest):
-    name = str(request.name or "").strip()
-    text = str(request.text or "").strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="El nombre no puede estar vacío.")
-    if not text:
-        raise HTTPException(status_code=400, detail="El comentario no puede estar vacío.")
-    FEEDBACK_NOTES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    entry = {
-        "name": name,
-        "text": text,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    with FEEDBACK_NOTES_PATH.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    return {"ok": True, "item": entry}
 
 
 @app.get("/api/cases/{case_id}/report")
@@ -3630,16 +3681,16 @@ async def case_926(case_id: str):
         fresh = generate_legacy_flatfile_926_http(lote=lote)
         if fresh.get("ok") and fresh.get("content"):
             _marcar_afi_rad_plano(payload)
-            return PlainTextResponse(content=_apply_926_download_overrides(fresh.get("content", "")), media_type="text/plain")
+            return _plano_926_response(_apply_926_download_overrides(fresh.get("content", "")))
 
     # Respaldo si no hay lote o el bridge legacy/BD no responde: el snapshot guardado.
     if legacy.get("ok") and legacy.get("content"):
         _marcar_afi_rad_plano(payload)
-        return PlainTextResponse(content=_apply_926_download_overrides(legacy.get("content", "")), media_type="text/plain")
+        return _plano_926_response(_apply_926_download_overrides(legacy.get("content", "")))
     if not draft:
         raise HTTPException(status_code=409, detail="El caso aun no esta listo para borrador 926.")
     # El borrador NO marca 'Plano': no es el plano entregable.
-    return PlainTextResponse(content=_apply_926_download_overrides(draft.get("content", "")), media_type="text/plain")
+    return _plano_926_response(_apply_926_download_overrides(draft.get("content", "")))
 
 
 @app.get("/api/cases/{case_id}/files/{filename:path}")

@@ -123,6 +123,10 @@ services:
       SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
       LEGACY_PROJECT_ROOT: /compat-backend
       LEGACY_BACKEND_URL: http://imagine_compat_backend:8000/api/v1/afiliaciones
+      # Ingreso desde el portal Yii. Vacio deshabilita /sso/yii.
+      SSO_SHARED_SECRET: ${SSO_SHARED_SECRET:-}
+      SSO_COOKIE_SECURE: ${SSO_COOKIE_SECURE:-true}
+      MANUAL_LOGIN_ENABLED: ${MANUAL_LOGIN_ENABLED:-true}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:${FRONTEND_PORT:-8105}}
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
     ports:

@@ -360,7 +360,58 @@ function clearSession() {
 }
 function hasSession() {
     const t = readTester();
-    return Boolean(readProfile() && t.email);
+    return Boolean(readProfile() && t.usuario);
+}
+
+// Sesión abierta por el portal Yii (cookie HttpOnly: el JS no la lee, solo pregunta).
+// Si existe, se vuelca a localStorage para que el resto de la app siga funcionando igual
+// -perfil y operador ya se leen de ahí en todas partes- pero con el valor que fijó el
+// portal, no uno elegido en pantalla.
+let serverSessionState = { authenticated: false, manual_login_enabled: true, sso_enabled: false };
+
+async function resolveServerSession() {
+    try {
+        const r = await fetch(`${API_URL}/api/session`, { credentials: 'same-origin' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        serverSessionState = await r.json();
+    } catch (e) {
+        // Backend viejo o caído: se cae al login manual en vez de dejar la app en blanco.
+        console.warn('No pude consultar /api/session:', e);
+        serverSessionState = { authenticated: false, manual_login_enabled: true, sso_enabled: false };
+    }
+    const s = serverSessionState.session;
+    if (serverSessionState.authenticated && s) {
+        saveProfile(String(s.perfil || '').toLowerCase());
+        saveTester({ usuario: s.usuario || '', name: s.nombre || s.usuario || '' });
+    }
+    return serverSessionState;
+}
+
+function isPortalSession() {
+    return Boolean(serverSessionState.authenticated);
+}
+
+// Acceso bloqueado: el servidor apagó el login manual y no hay sesión del portal. Se
+// consulta en bootApp() y en renderLoginUsers() -no solo al arrancar- porque el perfil y
+// el operador viven en localStorage: sin este cierre, una sesión vieja guardada en el
+// navegador dejaba entrar aunque el servidor ya no permitiera el ingreso manual.
+function manualLoginBloqueado() {
+    return !serverSessionState.manual_login_enabled && !isPortalSession();
+}
+
+function showPortalOnlyNotice() {
+    const login = document.getElementById('loginScreen');
+    const users = document.getElementById('loginUsers');
+    const note = document.getElementById('loginNote');
+    document.getElementById('appShell')?.classList.add('hidden');
+    login?.classList.remove('hidden');
+    document.querySelectorAll('.login-profile-btn').forEach(btn => { btn.disabled = true; });
+    if (users) users.innerHTML = '<div class="login-loading">Ingresa desde el portal</div>';
+    if (note) {
+        note.textContent = new URLSearchParams(location.search).get('sso') === 'denied'
+            ? 'El enlace del portal expiró o ya se usó. Vuelve al menú e ingresa de nuevo.'
+            : 'Esta aplicación se abre desde el menú del portal.';
+    }
 }
 
 // ── URL helpers ──────────────────────────────────────────────
@@ -521,7 +572,7 @@ async function acceptValidationException(caseId, blocker) {
             message: blocker.message || '',
             fingerprint: blocker.fingerprint || '',
             reason: reason.trim(),
-            operator: tester.email || tester.name || '',
+            operator: tester.usuario || tester.name || '',
         }),
     });
     showToast('Excepción guardada. Actualizando validaciones...', 'info', 2500);
@@ -694,7 +745,7 @@ async function approveCaseManually(caseId, container) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 reason: reason.trim(),
-                operator: tester.email || tester.name || '',
+                operator: tester.usuario || tester.name || '',
             }),
         });
         const payload = await r.json();
@@ -732,6 +783,12 @@ async function loadTesterRoster() {
 function renderLoginUsers() {
     const el = document.getElementById('loginUsers');
     if (!el) return;
+    if (manualLoginBloqueado()) {
+        // loadTesterRoster() termina llamando aquí; sin esta guarda, la respuesta del
+        // roster pisaba el aviso de "ingresa desde el portal" y devolvía los botones.
+        el.innerHTML = '<div class="login-loading">Ingresa desde el portal</div>';
+        return;
+    }
     if (!testerRoster.length) {
         el.innerHTML = '<div class="login-loading">No hay operadores registrados</div>';
         return;
@@ -739,16 +796,16 @@ function renderLoginUsers() {
     const profile = readProfile();
     el.innerHTML = testerRoster.map(t => `
         <button class="login-user-btn${!profile ? ' disabled' : ''}" type="button"
-            data-tester-email="${escapeHtml(t.email)}"
+            data-tester-usuario="${escapeHtml(t.usuario)}"
             ${!profile ? 'disabled' : ''}>
-            ${escapeHtml(t.name || t.email)}
-            <div class="login-user-email">${escapeHtml(t.email)}</div>
+            ${escapeHtml(t.name || t.usuario)}
+            <div class="login-user-email">${escapeHtml(t.usuario)}</div>
         </button>
     `).join('');
-    el.querySelectorAll('[data-tester-email]').forEach(btn => {
+    el.querySelectorAll('[data-tester-usuario]').forEach(btn => {
         btn.addEventListener('click', () => {
-            const email = btn.getAttribute('data-tester-email');
-            const tester = testerRoster.find(t => t.email === email) || { email, name: email };
+            const usuario = btn.getAttribute('data-tester-usuario');
+            const tester = testerRoster.find(t => t.usuario === usuario) || { usuario, name: usuario };
             if (!readProfile()) {
                 document.getElementById('loginNote').textContent = 'Primero selecciona un perfil (Imagine o Colmena).';
                 return;
@@ -771,6 +828,9 @@ function openLogin() {
 }
 
 function bootApp() {
+    // Único punto por donde se entra a la app: aquí se corta el ingreso manual cuando el
+    // servidor lo tiene apagado, sin importar qué haya quedado en localStorage.
+    if (manualLoginBloqueado()) { showPortalOnlyNotice(); return; }
     if (!hasSession()) { openLogin(); return; }
     document.getElementById('loginScreen').classList.add('hidden');
     document.getElementById('appShell').classList.remove('hidden');
@@ -788,7 +848,7 @@ function bootApp() {
 function updateSidebarUser() {
     const t = readTester();
     const p = readProfile();
-    const name = t.name || t.email || 'Operador';
+    const name = t.name || t.usuario || 'Operador';
     const initials = name.split(' ').slice(0,2).map(w => w[0]||'').join('').toUpperCase() || 'OP';
     document.getElementById('userAvatar').textContent = initials;
     document.getElementById('userName').textContent = name;
@@ -870,7 +930,6 @@ const VIEW_META = {
     visor:         { title: 'Visor documental',         breadcrumb: 'Revisión · documentos adjuntos' },
     reporte:       { title: 'Reporte ejecutivo',        breadcrumb: 'Revisión · resumen de decisión' },
     produccion:    { title: 'Producción · Colmena',     breadcrumb: 'Colmena · archivo plano' },
-    entrenamiento: { title: 'Hallazgos',                breadcrumb: 'Sistema · mejoras y ajustes' },
     busqueda:      { title: 'Búsqueda',                 breadcrumb: 'Sistema · búsqueda documental' },
     admin:         { title: 'Administración',           breadcrumb: 'Sistema · estado y configuración' },
 };
@@ -914,7 +973,6 @@ function switchView(viewId) {
     if (viewId === 'flujo') resetFlujoView();
     if (viewId === 'bandeja') loadBandeja();
     if (viewId === 'produccion') loadProduccion();
-    if (viewId === 'entrenamiento') { loadFeedbackNotes(); syncFeedbackName(); }
     if (viewId === 'busqueda') { doSearch(''); }
     if (viewId === 'admin') { setTimeout(loadAdminTables, 200); }
     if (viewId === 'clasificacion') {
@@ -1414,7 +1472,7 @@ async function runWorkflow() {
     const files = window.__uploadFiles || [];
     if (!files.length) return;
     const tester = readTester();
-    if (!tester.email) { showToast('Por favor selecciona tu usuario antes de continuar.', 'warn'); return; }
+    if (!tester.usuario) { showToast('Por favor selecciona tu usuario antes de continuar.', 'warn'); return; }
 
     const btn = document.getElementById('runWorkflowBtn');
     const progressCard = document.getElementById('workflowProgressCard');
@@ -1459,8 +1517,8 @@ async function runWorkflow() {
         const label = deriveCaseLabel(files);
         formData.append('label', label);
         formData.append('operation', readOperation());
-        formData.append('tester_email', tester.email);
-        formData.append('tester_name', tester.name || tester.email);
+        formData.append('tester_usuario', tester.usuario);
+        formData.append('tester_name', tester.name || tester.usuario);
         for (const f of files) formData.append('files', f, f.name);
 
         const uploadRes = await fetchWithRetry(operationApiUrl('/api/cases'), {
@@ -3066,7 +3124,9 @@ function formFieldLabel(key) {
         sede_principal_as22: 'Dato adicional sede',
         responsable_sede_principal_nombre_completo: 'Responsable sede',
         responsable_sede_principal_primer_apellido: 'Primer apellido resp.',
+        responsable_sede_principal_segundo_apellido: 'Segundo apellido resp.',
         responsable_sede_principal_primer_nombre: 'Primer nombre resp.',
+        responsable_sede_principal_segundo_nombre: 'Segundo nombre resp.',
         responsable_sede_principal_tipo_documento: 'Tipo doc. resp.',
         responsable_sede_principal_numero_documento: 'Documento resp.',
         responsable_sede_principal_documento: 'Documento responsable',
@@ -3907,7 +3967,9 @@ function buildEmpresaInfoSections(formFields, profile, resumen, meta = {}) {
         ['sede_principal_telefono', formFields.sede_principal_telefono],
         ['sede_principal_correo', formFields.sede_principal_correo],
         ['responsable_sede_principal_primer_nombre', formFields.responsable_sede_principal_primer_nombre],
+        ['responsable_sede_principal_segundo_nombre', formFields.responsable_sede_principal_segundo_nombre],
         ['responsable_sede_principal_primer_apellido', formFields.responsable_sede_principal_primer_apellido],
+        ['responsable_sede_principal_segundo_apellido', formFields.responsable_sede_principal_segundo_apellido],
         ['responsable_sede_principal_documento', responsableSedeDocumento],
         ['responsable_sede_principal_correo', formFields.responsable_sede_principal_correo],
     ];
@@ -4669,11 +4731,12 @@ function renderReporte(container, payload) {
                         </div>
                         <div style="overflow-x:auto;max-height:300px;overflow-y:auto">
                         <table class="blocker-table">
-                            <thead><tr><th>Documento</th><th>Nombre</th><th>Sede</th><th>Salario</th><th>AFP</th><th>EPS</th></tr></thead>
+                            <thead><tr><th>Documento</th><th>Nombre</th><th>Sede</th><th>Ciudad</th><th>Salario</th><th>AFP</th><th>EPS</th></tr></thead>
                             <tbody>${workers.map(r => `<tr>
                                 <td>${escapeHtml(String(r.documento||r.cedula||r.doc||''))}</td>
                                 <td>${escapeHtml(String(r.nombre||r.name||[r.primer_nombre,r.segundo_nombre,r.primer_apellido,r.segundo_apellido].filter(Boolean).join(' ')||''))}</td>
                                 <td>${escapeHtml(String(r.sede||r.sheet||''))}</td>
+                                <td>${escapeHtml(String(r.municipio_distrito||r.municipio||''))}</td>
                                 <td>${escapeHtml(String(r.salario||r.salary||''))}</td>
                                 <td>${escapeHtml(String(r.afp||''))}</td>
                                 <td>${escapeHtml(String(r.eps||''))}</td>
@@ -5265,122 +5328,6 @@ async function downloadColmenaBatch() {
     }
 }
 
-// ── ENTRENAMIENTO / FEEDBACK ──────────────────────────────────
-function syncFeedbackName() {
-    const t = readTester();
-    const el = document.getElementById('feedbackName');
-    if (el && t.name) { el.value = t.name; }
-    // Cargar selector de contratos
-    loadFeedbackCaseSelect();
-}
-
-async function loadFeedbackCaseSelect() {
-    const sel = document.getElementById('feedbackCaseSelect');
-    if (!sel) return;
-    try {
-        const r = await fetch(operationApiUrl('/api/cases/production-summary'));
-        const data = await r.json();
-        const cases = Array.isArray(data.cases) ? data.cases : [];
-        cases.sort((a,b) => String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
-        sel.innerHTML = '<option value="">— Contrato relacionado (opcional) —</option>' +
-            cases.map(c => {
-                const { empresa, nit } = resolveCase(c);
-                const label = empresa !== 'n/d' ? empresa : c.label || c.id;
-                const nitStr = nit !== 'n/d' ? ` · ${nit}` : '';
-                return `<option value="${escapeHtml(c.id)}">${escapeHtml(label)}${escapeHtml(nitStr)}</option>`;
-            }).join('');
-    } catch(e) { console.warn('loadFeedbackCaseSelect:', e); }
-}
-
-async function loadFeedbackNotes() {
-    const el = document.getElementById('feedbackNotesList');
-    if (!el) return;
-    el.innerHTML = '<div class="loading-msg">Cargando observaciones...</div>';
-    try {
-        const r = await fetchWithRetry(`${API_URL}/api/feedback-notes`);
-        const data = await r.json();
-        const items = Array.isArray(data.items) ? data.items.slice().reverse() : [];
-        if (!items.length) { el.innerHTML = '<div class="empty-state">No hay observaciones registradas aún</div>'; return; }
-        el.innerHTML = items.map(item => {
-            const category = item.category || '';
-            const caseId = item.case_id || '';
-            const caseLabel = item.case_label || caseId;
-            const categoryColors = {
-                'falso_positivo': 'var(--c-warn)',
-                'ocr_error': 'var(--c-info)',
-                'clasificacion_erronea': 'var(--c-err)',
-                'sugerencia': 'var(--c-ok)',
-                'otro': 'var(--c-text-2)',
-            };
-            const categoryLabels = {
-                'falso_positivo': '⚠ Falso positivo',
-                'ocr_error': '🔍 Error OCR',
-                'clasificacion_erronea': '📄 Clasificación errónea',
-                'sugerencia': '💡 Sugerencia',
-                'otro': '📝 Otro',
-            };
-            return `
-                <div class="feedback-note-item">
-                    <div class="feedback-note-meta" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                        <span style="font-weight:600">${escapeHtml(item.name||'Anónimo')}</span>
-                        <span style="color:var(--c-text-3)">${formatDateTime(item.created_at)}</span>
-                        ${category ? `<span style="font-size:11px;color:${categoryColors[category]||'var(--c-text-2)'}">${escapeHtml(categoryLabels[category]||category)}</span>` : ''}
-                        ${caseLabel ? `<span class="pill pill-neutral" style="font-size:10px;cursor:pointer" data-goto-case="${escapeHtml(caseId)}">${escapeHtml(caseLabel.slice(0,30))}</span>` : ''}
-                    </div>
-                    <div class="feedback-note-text">${escapeHtml(item.text||item.comment||'')}</div>
-                </div>
-            `;
-        }).join('');
-        // Click en pill del contrato → ir al reporte
-        el.querySelectorAll('[data-goto-case]').forEach(pill => {
-            pill.addEventListener('click', () => {
-                const id = pill.dataset.gotoCase;
-                if (id) { activeCaseId = id; switchView('reporte'); loadReporteForCase(id); }
-            });
-        });
-    } catch(e) {
-        el.innerHTML = `<div class="error-msg">${escapeHtml(e.message)}</div>`;
-    }
-}
-
-async function saveFeedbackNote() {
-    const t = readTester();
-    const name = t.name || String(document.getElementById('feedbackName')?.value||'').trim();
-    const text = String(document.getElementById('feedbackNote')?.value||'').trim();
-    const category = String(document.getElementById('feedbackCategory')?.value||'').trim();
-    const caseId = String(document.getElementById('feedbackCaseSelect')?.value||'').trim();
-    if (!name || !text) { showToast('Completa tu nombre y la observación', 'warn'); return; }
-    const btn = document.getElementById('saveFeedbackBtn');
-    const status = document.getElementById('feedbackSaveStatus');
-    if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
-
-    // Obtener label del contrato seleccionado
-    let caseLabel = '';
-    if (caseId) {
-        const sel = document.getElementById('feedbackCaseSelect');
-        const opt = sel?.querySelector(`option[value="${caseId}"]`);
-        caseLabel = opt?.textContent?.trim() || caseId;
-    }
-
-    try {
-        const r = await fetch(`${API_URL}/api/feedback-notes`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, text, category, case_id: caseId, case_label: caseLabel }),
-        });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const noteEl = document.getElementById('feedbackNote');
-        if (noteEl) noteEl.value = '';
-        if (status) { status.style.color = 'var(--c-ok)'; status.textContent = '✓ Observación registrada'; }
-        await loadFeedbackNotes();
-        setTimeout(() => { if (status) status.textContent = ''; }, 3000);
-    } catch(e) {
-        if (status) { status.style.color = 'var(--c-err)'; status.textContent = 'Error: ' + e.message; }
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Guardar observación'; }
-    }
-}
-
 // ── BÚSQUEDA ──────────────────────────────────────────────────
 async function doSearch(query) {
     const el = document.getElementById('searchResults');
@@ -5942,9 +5889,16 @@ function init() {
     });
 
     // Logout
-    document.getElementById('logoutBtn')?.addEventListener('click', () => {
+    document.getElementById('logoutBtn')?.addEventListener('click', async () => {
+        // Sin borrar la cookie, salir solo limpiaría localStorage y el siguiente F5
+        // volvería a entrar con la sesión del portal.
+        const eraPortal = isPortalSession();
+        try { await fetch(`${API_URL}/api/session/logout`, { method: 'POST', credentials: 'same-origin' }); }
+        catch (e) { console.warn('logout:', e); }
+        serverSessionState = { ...serverSessionState, authenticated: false, session: null };
         clearSession(); activeCaseId = null; activeCasePayload = null;
-        openLogin();
+        if (eraPortal && !serverSessionState.manual_login_enabled) showPortalOnlyNotice();
+        else openLogin();
     });
 
     // Bandeja tabs
@@ -5994,10 +5948,6 @@ function init() {
     });
     document.getElementById('downloadColmenaBtn')?.addEventListener('click', downloadColmenaBatch);
 
-    // Entrenamiento
-    document.getElementById('saveFeedbackBtn')?.addEventListener('click', saveFeedbackNote);
-    document.getElementById('refreshFeedbackBtn')?.addEventListener('click', loadFeedbackNotes);
-
     // Búsqueda
     document.getElementById('searchBtn')?.addEventListener('click', () => {
         doSearch(document.getElementById('searchInput')?.value);
@@ -6013,11 +5963,13 @@ function init() {
 
     loadTesterRoster();
 
-    if (hasSession()) {
-        bootApp();
-    } else {
-        openLogin();
-    }
+    // La sesión del portal manda sobre lo que haya en localStorage: si el usuario llegó
+    // por el submenú de Yii, el perfil lo fijó el enlace y no puede reelegirse aquí.
+    resolveServerSession().then(estado => {
+        if (estado.authenticated) { bootApp(); return; }
+        if (!estado.manual_login_enabled) { showPortalOnlyNotice(); return; }
+        if (hasSession()) bootApp(); else openLogin();
+    });
 }
 
 init();

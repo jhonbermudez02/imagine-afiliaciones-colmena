@@ -184,7 +184,7 @@ def send_tester_activity_summary(summary: Dict[str, Any], recipients: Optional[L
     if top:
         for idx, item in enumerate(top, start=1):
             lines.append(
-                f"{idx}. {item.get('name') or item.get('email')} · eventos={item.get('total_actions', 0)} · "
+                f"{idx}. {item.get('name') or item.get('usuario') or item.get('email')} · eventos={item.get('total_actions', 0)} · "
                 f"contratos={item.get('cases_created', 0)} · ejecuciones={item.get('workflow_started', 0)} · "
                 f"busquedas={item.get('searches', 0)} · comentarios={item.get('feedback_notes', 0)}"
             )
@@ -192,7 +192,7 @@ def send_tester_activity_summary(summary: Dict[str, Any], recipients: Optional[L
         lines.append("Sin actividad registrada.")
     lines.extend(["", "Sin actividad:"])
     if inactive:
-        lines.extend([f"- {item.get('name') or item.get('email')}" for item in inactive])
+        lines.extend([f"- {item.get('name') or item.get('usuario') or item.get('email')}" for item in inactive])
     else:
         lines.append("- Ninguno")
 

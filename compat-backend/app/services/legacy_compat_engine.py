@@ -1366,14 +1366,19 @@ class LegacyCompatEngine:
     @staticmethod
     def _line_926(payload: str) -> str:
         txt = payload or ""
-        # Paridad con salida legacy observada:
-        # - tipos 1/2/3/5/7 se exportan a ancho 942 (943 visible con CRLF).
-        # - tipo 4 se entrega sin padding final.
-        if txt.startswith("4"):
-            return txt.rstrip()
-        if len(txt) >= 942:
-            return txt[:942]
-        return txt + (" " * (942 - len(txt)))
+        # Anchos fijos de la salida legacy (943 visible con CRLF en el caso de 942):
+        # - tipos 1/2/3/5/7: 942.
+        # - tipo 4 (comisiones): 387 = 28 de datos + 359 de relleno, que arranca en la
+        #   posicion 29.
+        #
+        # El relleno del tipo 4 ya se arma en _append_type4_lines, pero aqui habia un
+        # rstrip() que lo borraba y dejaba la linea terminando en la posicion 28. La
+        # linea llegaba corta al archivo aunque el layout la define de ancho fijo igual
+        # que las demas.
+        ancho = 387 if txt.startswith("4") else 942
+        if len(txt) >= ancho:
+            return txt[:ancho]
+        return txt + (" " * (ancho - len(txt)))
 
     @staticmethod
     def _day_marks(row: Dict[str, Any], prefix: str) -> str:
@@ -1383,12 +1388,28 @@ class LegacyCompatEngine:
             marks.append("X" if as_text(row.get(key, "")).strip() else " ")
         return prefix + "".join(marks)
 
+    # La Ñ se conserva en el plano; el resto de acentos se quitan (Í -> I). Se decide
+    # caracter por caracter porque NFD parte la Ñ en N + virgulilla combinante y el
+    # filtro de marcas la dejaba como N. La Ñ existe en latin-1 (0xD1), que es la
+    # codificacion del archivo, asi que sigue ocupando UN byte y no corre el ancho fijo.
+    _TEXTO_CONSERVAR = {"Ñ", "ñ"}
+
     @staticmethod
     def _vb_text(value: Any, width: int) -> str:
         txt = as_text(value).strip().upper()
-        txt = unicodedata.normalize("NFD", txt)
-        txt = "".join(ch for ch in txt if unicodedata.category(ch) != "Mn")
-        txt = "".join(ch if 32 <= ord(ch) <= 126 else " " for ch in txt)
+        salida = []
+        for ch in txt:
+            if ch in LegacyCompatEngine._TEXTO_CONSERVAR:
+                salida.append(ch)
+                continue
+            desc = unicodedata.normalize("NFD", ch)
+            desc = "".join(c for c in desc if unicodedata.category(c) != "Mn")
+            salida.append(desc)
+        txt = "".join(salida)
+        txt = "".join(
+            ch if (32 <= ord(ch) <= 126 or ch in LegacyCompatEngine._TEXTO_CONSERVAR) else " "
+            for ch in txt
+        )
         if len(txt) > width:
             return txt[:width]
         return txt.ljust(width, " ")

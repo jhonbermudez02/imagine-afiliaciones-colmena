@@ -1248,6 +1248,26 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
                     ),
                 }
             )
+        # ARL anterior (D30): en traslados el campo viene como "NN-NN Nombre..." (ej.
+        # "14-11 Compañia Suramericana..."). El SEGUNDO numero es el codigo real de la ARL
+        # anterior. Si no llega con ese formato NN-NN, es bloqueante (no se puede derivar el
+        # codigo). El caso vacio ya lo cubre la validacion de celda requerida de arriba.
+        b_arl_info = form_cell_values.get("b_arl_de_la_cual_se_traslada") or {}
+        b_arl_value = b_arl_info.get("value")
+        if not _is_blank_value(b_arl_value) and not re.match(r"^\s*\d+\s*-\s*\d+", str(b_arl_value)):
+            blockers.append(
+                {
+                    "code": "XLSX_TRASLADO_ARL_ANTERIOR_FORMATO",
+                    "severity": "blocker",
+                    "field": "b_arl_de_la_cual_se_traslada",
+                    "cell": b_arl_info.get("cell") or "D30",
+                    "message": (
+                        "La 'ARL de la cual se traslada' (D30) debe iniciar con el formato 'NN-NN' "
+                        "(ej. '14-11 ...'); el segundo numero es el codigo de la ARL anterior. "
+                        f"Valor recibido: {b_arl_value}."
+                    ),
+                }
+            )
         for field in PRIMARY_REQUIRED_TRASLADO:
             if not normalize_text(form_fields.get(field, "")):
                 missing_fields.append(field)

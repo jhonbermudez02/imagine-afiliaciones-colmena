@@ -42,6 +42,24 @@ class Settings(BaseSettings):
     legacy_backend_url: str = "http://imagine_compat_backend:8000/api/v1/afiliaciones"
     legacy_delivery_enabled: bool = True
     legacy_delivery_execute_sql: bool = True
+    # --- Ingreso desde el portal Yii 1.1 (SSO por token firmado) ---
+    # Secreto compartido con Yii para firmar el token de traspaso (HMAC-SHA256). Vacío
+    # deshabilita /sso/yii por completo: sin secreto no hay forma de validar nada, y
+    # aceptar tokens sin firma sería peor que no tener la ruta.
+    sso_shared_secret: str = ""
+    # Ventana de validez del token de traspaso. Solo tiene que sobrevivir al clic en el
+    # menú; cuanto más corta, menos margen para reusarlo desde el historial o los logs.
+    sso_token_ttl_seconds: int = 90
+    # Duración de la sesión propia (la cookie que se entrega al canjear el token).
+    sso_session_ttl_seconds: int = 12 * 60 * 60
+    sso_cookie_name: str = "afi_session"
+    # Secure=false permite probar por http:// en local. En producción va en true (la app
+    # queda detrás del reverse proxy con TLS).
+    sso_cookie_secure: bool = True
+    # Login manual (selector de perfil + operador). Es el único acceso en esta máquina;
+    # en producción se apaga para que la entrada sea exclusivamente por el portal.
+    manual_login_enabled: bool = True
+
     search_limit: int = 4
     chunk_size: int = 900
     chunk_overlap: int = 120
