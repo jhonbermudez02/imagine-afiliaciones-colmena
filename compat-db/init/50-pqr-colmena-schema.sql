@@ -3,8 +3,9 @@
 --
 -- Cuarta base legacy del stack, junto a temporal / img004 (alias wimg004) / br
 -- (alias ybr). Sirve la trazabilidad de PQR: afa_trazabilidad guarda una fila por
--- gestion sobre una radicacion (id_radicacion_sa), y campos / tipo_solicitud_campo /
--- valores son el formulario dinamico asociado al tipo de solicitud.
+-- gestion sobre una radicacion (id_radicacion_sa), campos / tipo_solicitud_campo /
+-- valores son el formulario dinamico asociado al tipo de solicitud, y afa_adjuntosrad
+-- son los archivos cargados en esa radicacion.
 --
 -- Origen: files_migration/schemassql/pqr_colmena/*_schema.csv, que es un export de
 -- information_schema.columns de la base real. Ese export trae columnas, tipos,
@@ -21,6 +22,47 @@
 --
 -- Es seguro correrlo mas de una vez (todo con IF NOT EXISTS).
 --
+
+--
+-- Name: afa_adjuntosrad; Type: TABLE; Schema: public; Owner: escobar
+--
+-- Adjuntos cargados en la radicacion (id_radicacion = id_radicacion_sa de valores /
+-- afa_trazabilidad). Es la lista de archivos que el radicador subio para el tramite:
+-- formulario, anexos, sedes, listado de trabajadores. `path` es la ruta en el
+-- repositorio de imagenes del legacy (/imagenes4/...), no una ruta de este stack.
+--
+-- Origen: files_migration/new_feature/pqr_colmena/schema_afa_adjuntosrad.csv
+--
+
+CREATE SEQUENCE IF NOT EXISTS public.afa_adjuntosrad_id_adjunto_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+CREATE TABLE IF NOT EXISTS public.afa_adjuntosrad (
+    id_adjunto integer NOT NULL DEFAULT nextval('public.afa_adjuntosrad_id_adjunto_seq'::regclass),
+    usuario character varying,
+    fecha_insert timestamp with time zone DEFAULT now(),
+    id_radicacion integer,
+    nombre_original character varying,
+    path character varying,
+    tipo character varying DEFAULT 'radicacion'::character varying,
+    orden numeric,
+    desc_documental character varying,
+    tiene_error boolean DEFAULT false,
+    errores_validacion text
+);
+
+ALTER SEQUENCE public.afa_adjuntosrad_id_adjunto_seq OWNED BY public.afa_adjuntosrad.id_adjunto;
+
+-- El acceso natural es "dame los adjuntos de esta radicacion". Sin indice eso es un
+-- seq scan sobre toda la tabla de adjuntos del legacy.
+CREATE INDEX IF NOT EXISTS afa_adjuntosrad_id_radicacion_idx
+    ON public.afa_adjuntosrad (id_radicacion);
+
 
 --
 -- Name: afa_trazabilidad; Type: TABLE; Schema: public; Owner: escobar

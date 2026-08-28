@@ -19,6 +19,9 @@
 \set ON_ERROR_STOP on
 
 -- afa_trazabilidad
+-- OJO: 57-reload-pqr-trazabilidad.sql corre despues y reemplaza el contenido de esta
+-- tabla por las 11 gestiones del export vigente. Este \copy queda como la fuente del
+-- historico completo, para poder volver atras sacando el 57 del init.
 SELECT CASE WHEN EXISTS (SELECT 1 FROM public.afa_trazabilidad) THEN '/dev/null' ELSE '/pqr_seed/data-afa_trazabilidad.csv' END AS ruta \gset
 \copy public.afa_trazabilidad (id_trazabilidad, id_radicacion_sa, afi_rad_na, actividad, usuario_gestion, fecha_gestion, fecha_asignacion, observacion) FROM :'ruta' WITH (FORMAT csv)
 

@@ -7,6 +7,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 from pathlib import Path
+from urllib.parse import quote
 from datetime import datetime, timezone
 
 import httpx
@@ -18,6 +19,7 @@ from pydantic import BaseModel
 from .cases import (
     _afi_rad_set_estado,
     _case_lote_and_contract,
+    _legacy_post,
     _contrato_para_afi_rad,
     analyze_case,
     approve_case,
@@ -27,6 +29,7 @@ from .cases import (
     format_reason_lines,
     get_document_reviews_export_path,
     get_case_file_path,
+    active_blocker_messages,
     is_case_manually_approved,
     list_cases,
     load_case,
@@ -45,11 +48,19 @@ from .cases import (
     refresh_case_validations,
     search_cases,
     search_document_registry,
+    utc_now,
     store_case_files,
+    _unique_duplicate_path,
 )
 from .config import settings
 from .embeddings import get_embed_dims, get_engine_name
-from .legacy_bridge import generate_legacy_flatfile_926_http
+from .legacy_bridge import (
+    generate_legacy_flatfile_926_http,
+    pqr_adjunto_bytes,
+    pqr_adjuntos,
+    pqr_adjuntos_zip,
+    pqr_pendientes,
+)
 from .notifications import send_case_notification, send_tester_activity_summary
 from .rag import generate_grounded_answer, infer_operational_decision, reindex_knowledge, search_knowledge
 from .services import get_eval_summary, get_feed_summary, get_system_health, get_system_status
@@ -200,6 +211,9 @@ class CaseDocumentWorkspaceRequest(BaseModel):
 class Consolidated926Request(BaseModel):
     case_ids: List[str]
     operation: Optional[str] = "colima"
+    # Solo se usa como respaldo cuando no hay sesion SSO (login manual/local). Con cookie
+    # de sesion manda la cookie: ver _perfil_efectivo.
+    perfil: Optional[str] = ""
 
 
 class TesterActivityRequest(BaseModel):
@@ -695,6 +709,26 @@ def _find_existing_case_by_contract(contract_number: str, operation: str = "coli
     return None
 
 
+def _find_case_by_radicacion(id_radicacion: Any, operation: str = "colima") -> Optional[Dict[str, Any]]:
+    """Expediente creado desde una radicacion concreta, si existe.
+
+    Emparejar por numero de contrato no sirve para esto: el contrato sale del xlsx y solo
+    se conoce cuando el analisis termina, asi que entre la carga y el fin del workflow el
+    caso seria invisible y la bandeja dejaria volver a cargarlo. `origen_pendiente` se
+    escribe en el momento de crear el expediente, de modo que el emparejamiento es exacto
+    desde el primer instante.
+    """
+    clave = str(id_radicacion or "").strip()
+    if not clave:
+        return None
+    operation_key = normalize_operation(operation)
+    for payload in list_cases(include_all=True, operation=operation_key):
+        origen = payload.get("origen_pendiente") or {}
+        if str(origen.get("id_radicacion") or "").strip() == clave:
+            return payload
+    return None
+
+
 def _unique_filenames(files: List[Any]) -> List[str]:
     seen: set[str] = set()
     ordered: List[str] = []
@@ -774,7 +808,19 @@ def _apply_926_download_overrides(content: Any) -> str:
     trailing_newline = text.endswith(("\n", "\r"))
     patched_lines: List[str] = []
     for line in text.splitlines():
-        if line.startswith("3") and len(line) >= 163 and line[162:163] == "D":
+        if line.startswith("1"):
+            # ARL anterior (f56, inicio 261 longitud 5, alineado a la izquierda). El valor
+            # sale del combo de D30 del Excel, cuya posicion 23 corresponde a Positiva;
+            # el codigo real de Positiva en arpriesgos es 10 y el catalogo NO tiene ningun
+            # 23, asi que un plano con 23 lleva una ARL que el legacy no resuelve.
+            #
+            # El origen ya quedo corregido (compat-backend, donde se arma f56), pero esto
+            # se queda: los contratos sincronizados ANTES de ese arreglo tienen el 23
+            # guardado en brempresasarp, y el plano se genera leyendo esa tabla, no
+            # recalculando desde el Excel. Sin este parche seguirian saliendo con 23.
+            if line[260:265].strip() == "23":
+                line = _patch_fixed_position(line, 261, "10   ")
+        elif line.startswith("3") and len(line) >= 163 and line[162:163] == "D":
             line = _patch_fixed_position(line, 511, "0")
             line = _patch_fixed_position(line, 512, "00000")
         elif line.startswith("7"):
@@ -852,6 +898,7 @@ class CaseCreateResponse(BaseModel):
     final_status: Optional[str] = None
     manual_approval: Optional[Dict[str, Any]] = None
     upload_summary: Optional[Dict[str, Any]] = None
+    origen_pendiente: Optional[Dict[str, Any]] = None
 
 
 class CaseListResponse(BaseModel):
@@ -1486,6 +1533,23 @@ def _is_generic_operational_query(query: str) -> bool:
         return True
     return all(token in GENERIC_OPERATIONAL_TERMS for token in tokens)
 
+
+# El unico archivo del expediente que se puede corregir despues de cargado. Los demas
+# son los documentos que radico el portal: evidencia, no insumo editable.
+EXCEL_CASE_EXTENSIONS = {".xlsx", ".xlsm", ".xls"}
+
+# Tipos que el navegador puede pintar en un iframe. Lo que no este aqui se baja.
+_PENDIENTES_INLINE_TYPES = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+}
 
 SUPPORTED_CASE_UPLOAD_EXTENSIONS = {
     ".xlsx",
@@ -2536,22 +2600,6 @@ def _normalize_pila_catalog(items: Any) -> List[Dict[str, Any]]:
     return normalized
 
 
-def _normalize_asesores(items: Any) -> List[Dict[str, Any]]:
-    # Tabla plana img004.consultores: cedula/nombre. Acepta la llave legacy `codigo`.
-    if not isinstance(items, list):
-        return []
-    normalized: List[Dict[str, Any]] = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        cedula = str(item.get("cedula") or item.get("codigo") or "").strip()
-        nombre = str(item.get("nombre") or "").strip().upper()
-        if not cedula and not nombre:
-            continue
-        normalized.append({"cedula": cedula, "nombre": nombre})
-    return normalized
-
-
 def _normalize_smmlv_table(payload: Any) -> Dict[str, int]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="SMMLV debe ser un objeto {año: valor}.")
@@ -2618,45 +2666,69 @@ def _legacy_catalog_url(tipo: str) -> str:
     return f"{_legacy_db_base_url()}/catalog/{tipo}"
 
 
+def _legacy_error_detail(r: "httpx.Response") -> str:
+    """Motivo legible de una respuesta de error del compat-backend."""
+    try:
+        payload = r.json()
+    except ValueError:
+        return (r.text or "").strip()[:300]
+    if isinstance(payload, dict):
+        return str(payload.get("detail") or payload.get("error") or payload)[:300]
+    return str(payload)[:300]
+
+
+def _legacy_request_json(metodo: str, url: str, que: str, **kwargs) -> dict:
+    """Llama al compat-backend y traduce cualquier fallo a un HTTPException con motivo.
+
+    Antes se usaba httpx + raise_for_status() sin capturar: si el compat estaba caido o
+    respondia 503 por un error de base, la excepcion subia sin manejar y Starlette
+    contestaba el texto plano "Internal Server Error". El front hacia r.json() sobre eso
+    y solo mostraba «Unexpected token 'I', "Internal S"... is not valid JSON», que no
+    dice que se rompio ni donde. Ahora el motivo real viaja en el detail.
+    """
+    try:
+        r = httpx.request(metodo, url, timeout=30.0, **kwargs)
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"No pude contactar el backend legacy para {que} ({url}): {type(exc).__name__}: {exc}",
+        ) from exc
+    if r.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail=f"El backend legacy respondio {r.status_code} en {que}: {_legacy_error_detail(r)}",
+        )
+    try:
+        payload = r.json()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"El backend legacy devolvio una respuesta no-JSON en {que}: {(r.text or '').strip()[:200]}",
+        ) from exc
+    return payload if isinstance(payload, dict) else {"items": payload}
+
+
+def _legacy_items(url: str, que: str) -> list:
+    return _legacy_request_json("GET", url, que).get("items", [])
+
+
 @app.get("/api/admin/tables/eps")
 async def get_eps_catalog():
-    r = httpx.get(_legacy_catalog_url("eps"), timeout=30.0)
-    r.raise_for_status()
-    return {"items": r.json().get("items", [])}
+    return {"items": _legacy_items(_legacy_catalog_url("eps"), "el catálogo EPS")}
 
 @app.post("/api/admin/tables/eps")
 async def save_eps_catalog(payload: dict):
     items = _normalize_entity_catalog(payload.get("items", []))
-    r = httpx.post(_legacy_catalog_url("eps"), json={"items": items}, timeout=30.0)
-    r.raise_for_status()
-    return r.json()
+    return _legacy_request_json("POST", _legacy_catalog_url("eps"), "el guardado del catálogo EPS", json={"items": items})
 
 @app.get("/api/admin/tables/afp")
 async def get_afp_catalog():
-    r = httpx.get(_legacy_catalog_url("afp"), timeout=30.0)
-    r.raise_for_status()
-    return {"items": r.json().get("items", [])}
+    return {"items": _legacy_items(_legacy_catalog_url("afp"), "el catálogo AFP")}
 
 @app.post("/api/admin/tables/afp")
 async def save_afp_catalog(payload: dict):
     items = _normalize_entity_catalog(payload.get("items", []), include_active=True)
-    r = httpx.post(_legacy_catalog_url("afp"), json={"items": items}, timeout=30.0)
-    r.raise_for_status()
-    return r.json()
-
-@app.get("/api/admin/tables/asesores")
-async def get_asesores():
-    # Tabla real img004.consultores (plana). Reemplaza data/evals/asesores_colmena.json.
-    r = httpx.get(f"{_legacy_db_base_url()}/consultores", timeout=30.0)
-    r.raise_for_status()
-    return {"items": r.json().get("items", [])}
-
-@app.post("/api/admin/tables/asesores")
-async def save_asesores(payload: dict):
-    items = _normalize_asesores(payload.get("items", []))
-    r = httpx.post(f"{_legacy_db_base_url()}/consultores", json={"items": items}, timeout=30.0)
-    r.raise_for_status()
-    return r.json()
+    return _legacy_request_json("POST", _legacy_catalog_url("afp"), "el guardado del catálogo AFP", json={"items": items})
 
 @app.get("/api/admin/tables/smmlv")
 async def get_smmlv():
@@ -3120,26 +3192,22 @@ async def documents_search(q: str = Query(..., min_length=2), limit: int = Query
     return {"query": q, "results": search_document_registry(q, limit=limit)}
 
 
-@app.post("/api/cases", response_model=CaseCreateResponse)
-async def create_case(
-    label: str = Form(default=""),
-    operation: str = Form(default="colima"),
-    files: Optional[List[UploadFile]] = File(default=None),
-    xlsx_file: Optional[UploadFile] = File(default=None),
-    attachments: Optional[List[UploadFile]] = File(default=None),
-):
-    operation_key = normalize_operation(operation)
-    uploads: List[tuple[str, bytes]] = []
-    rejected_files: List[Dict[str, str]] = []
-    for item in files or []:
-        uploads.append((item.filename or "archivo.bin", await item.read()))
-    if xlsx_file is not None:
-        uploads.append((xlsx_file.filename or "case.xlsx", await xlsx_file.read()))
-    for item in attachments or []:
-        uploads.append((item.filename or "adjunto.bin", await item.read()))
-    if not uploads:
-        raise HTTPException(status_code=400, detail="Debes adjuntar al menos un XLSX o un soporte.")
+def _build_case_from_uploads(
+    label: str,
+    uploads: List[tuple[str, bytes]],
+    operation_key: str,
+    rejected_files: Optional[List[Dict[str, str]]] = None,
+) -> Dict[str, Any]:
+    """Valida un paquete de archivos y crea el expediente.
 
+    Es el camino UNICO de creacion de casos: lo usan tanto la carga manual desde el
+    navegador (POST /api/cases) como la carga desde la bandeja de pendientes, que trae
+    los mismos archivos pero desde el repositorio legacy via compat-backend. Compartir
+    esta funcion es lo que garantiza que un expediente creado por una via sea
+    indistinguible del creado por la otra: mismas extensiones aceptadas, mismo minimo
+    de un xlsx + un pdf, misma deteccion de contrato duplicado y mismo store_case_files.
+    """
+    rejected_files = list(rejected_files or [])
     accepted_uploads: List[tuple[str, bytes]] = []
     for filename, content in uploads:
         lower_name = str(filename or "").lower()
@@ -3206,7 +3274,37 @@ async def create_case(
         "accepted_files": [filename for filename, _ in accepted_uploads],
         "rejected_files": rejected_files,
     }
-    return CaseCreateResponse(**case_payload)
+    return case_payload
+
+
+@app.post("/api/cases", response_model=CaseCreateResponse)
+async def create_case(
+    label: str = Form(default=""),
+    operation: str = Form(default="colima"),
+    files: Optional[List[UploadFile]] = File(default=None),
+    xlsx_file: Optional[UploadFile] = File(default=None),
+    attachments: Optional[List[UploadFile]] = File(default=None),
+):
+    operation_key = normalize_operation(operation)
+    uploads: List[tuple[str, bytes]] = []
+    rejected_files: List[Dict[str, str]] = []
+    for item in files or []:
+        uploads.append((item.filename or "archivo.bin", await item.read()))
+    if xlsx_file is not None:
+        uploads.append((xlsx_file.filename or "case.xlsx", await xlsx_file.read()))
+    for item in attachments or []:
+        uploads.append((item.filename or "adjunto.bin", await item.read()))
+    if not uploads:
+        raise HTTPException(status_code=400, detail="Debes adjuntar al menos un XLSX o un soporte.")
+
+    return CaseCreateResponse(
+        **_build_case_from_uploads(
+            label=label,
+            uploads=uploads,
+            operation_key=operation_key,
+            rejected_files=rejected_files,
+        )
+    )
 
 
 @app.get("/api/cases/{case_id}", response_model=CaseCreateResponse)
@@ -3224,17 +3322,72 @@ async def case_detail(case_id: str, operation: Optional[str] = Query(default=Non
 
 
 @app.delete("/api/cases/{case_id}")
-async def case_delete(case_id: str, operation: Optional[str] = Query(default=None)):
-    """Elimina un caso y todos sus archivos adjuntos."""
+async def case_delete(
+    case_id: str,
+    operation: Optional[str] = Query(default=None),
+    cierre_ciclo: bool = Query(
+        default=False,
+        description=(
+            "Marca el borrado como cierre de ciclo (perfil Colmena, tras descargar el "
+            "plano). Es la unica via por la que se puede eliminar un caso aprobado."
+        ),
+    ),
+):
+    """Elimina un caso y todos sus archivos adjuntos.
+
+    Un caso APROBADO no lo puede eliminar el operador. Aprobar no es un estado interno:
+    mueve wimg004.afi_rad a 'Indexado', cierra la gestion en pqr_colmena y deja el lote
+    entregado en las tablas de archivo. Borrar el expediente no deshace nada de eso -solo
+    la gestion PQR es reversible-, asi que quedaria un contrato vivo en los sistemas
+    vecinos sin expediente que lo respalde. Revertir una aprobacion tiene que ser una
+    operacion propia y consciente, no un efecto colateral de pulsar "Eliminar".
+
+    La excepcion es `cierre_ciclo=true`: en el perfil Colmena el expediente se elimina
+    solo despues de descargar el plano, y ahi el borrado no es una decision del operador
+    sino el final del recorrido -en ese punto afi_rad ya paso a 'Plano'-. Ese flujo sigue
+    funcionando; lo que se bloquea es el borrado a mano.
+    """
     try:
         payload = load_case(case_id)
         _ensure_case_operation(payload, operation)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Caso no encontrado.")
+
+    if is_case_manually_approved(payload) and not cierre_ciclo:
+        aprobacion = payload.get("manual_approval") or {}
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    "Este contrato ya fue aprobado y no se puede eliminar. La aprobacion ya "
+                    "movio afi_rad a 'Indexado', cerro la gestion en PQR y entrego el lote. "
+                    "En Colmena el expediente se elimina solo al descargar el plano."
+                ),
+                "code": "CASO_APROBADO",
+                "case_id": case_id,
+                "aprobado_por": aprobacion.get("operator") or "",
+                "aprobado_en": aprobacion.get("approved_at") or "",
+            },
+        )
+
     case_dir = Path(settings.cases_dir) / case_id
     if case_dir.exists():
-        delete_case(case_id)
-        return {"ok": True, "deleted": case_id, "message": f"Caso {case_id} eliminado."}
+        resultado = delete_case(case_id, cierre_ciclo=cierre_ciclo)
+        # La reapertura de la gestion PQR se reporta para que se vea en la respuesta: si
+        # fallo, el operador tiene que saber que la radicacion quedo cerrada en el portal
+        # aunque el expediente ya no exista.
+        reapertura = (resultado or {}).get("pqr_trazabilidad_reabierta") or {}
+        mensaje = f"Caso {case_id} eliminado."
+        if reapertura.get("reabierta"):
+            mensaje += " La radicacion vuelve a quedar pendiente."
+        elif reapertura.get("ok") is False:
+            mensaje += " OJO: no se pudo reabrir la gestion en PQR."
+        return {
+            "ok": True,
+            "deleted": case_id,
+            "message": mensaje,
+            "pqr_trazabilidad_reabierta": reapertura,
+        }
     raise HTTPException(status_code=404, detail="Directorio del caso no encontrado.")
 
 
@@ -3453,8 +3606,9 @@ async def export_document_reviews():
 
 
 @app.post("/api/926/consolidated")
-async def consolidated_926(request: Consolidated926Request):
+async def consolidated_926(request: Consolidated926Request, http_request: Request):
     operation_key = normalize_operation(request.operation)
+    perfil = _perfil_efectivo(http_request, request.perfil or "")
     case_ids: List[str] = []
     seen = set()
     for case_id in request.case_ids or []:
@@ -3469,6 +3623,7 @@ async def consolidated_926(request: Consolidated926Request):
     chunks: List[str] = []
     selected_cases: List[str] = []
     selected_payloads: List[Dict[str, Any]] = []
+    selected_chunks: List[str] = []
     missing_926: List[str] = []
     not_approved: List[str] = []
     for case_id in case_ids:
@@ -3506,9 +3661,13 @@ async def consolidated_926(request: Consolidated926Request):
         nit = str(resumen.get("nit") or profile.get("nit") or "")
         # Solo se quitan los saltos de linea de los extremos, para no duplicarlos al
         # concatenar; el relleno de ancho fijo se conserva.
-        chunks.append(_apply_926_download_overrides(content).strip("\r\n"))
+        chunk = _apply_926_download_overrides(content).strip("\r\n")
+        chunks.append(chunk)
         selected_cases.append(case_id)
         selected_payloads.append(payload)
+        # El trozo de ESTE contrato, tal cual entra al archivo consolidado. Se guarda
+        # aparte de la concatenacion porque lo que se archiva es el plano por contrato.
+        selected_chunks.append(chunk)
 
     if not_approved:
         raise HTTPException(status_code=400, detail=f"Estos contratos no están aprobados y no se pueden consolidar: {', '.join(not_approved)}")
@@ -3520,8 +3679,9 @@ async def consolidated_926(request: Consolidated926Request):
     # afi_rad -> 'Plano' por cada contrato incluido. Se hace despues de las validaciones:
     # si alguna hubiera abortado con 400 no habria descarga, y marcar 'Plano' un plano que
     # nunca se entrego dejaria afi_rad adelantado respecto de la realidad.
-    for case_payload in selected_payloads:
-        _marcar_afi_rad_plano(case_payload)
+    for case_payload, chunk in zip(selected_payloads, selected_chunks):
+        _marcar_afi_rad_plano(case_payload, perfil)
+        _guardar_plano_del_contrato(case_payload, chunk, perfil)
 
     filename = f"lote_{operation_key}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     # CRLF, igual que el separador interno de cada caso (legacy_compat_engine une sus
@@ -3641,17 +3801,80 @@ async def case_report(case_id: str):
         raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
 
 
-def _marcar_afi_rad_plano(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """afi_rad -> 'Plano' al descargar el plano.
+def _perfil_de_sesion(request: Optional[Request]) -> str:
+    """Perfil de la cookie de sesion firmada, o '' si no hay sesion."""
+    if request is None:
+        return ""
+    datos = leer_sesion(request.cookies.get(settings.sso_cookie_name, ""), settings.sso_shared_secret)
+    return str((datos or {}).get("perfil") or "").strip().lower()
 
-    Va en la descarga y no en la entrega del lote porque 'Plano' significa que el plano
-    se entrego al perfil (colmena/imagine), y eso ocurre al descargarlo. El UPDATE exige
-    afi_rad_estado='Indexado', asi que descargar de nuevo el mismo plano devuelve
-    matched=0 sin efecto: la transicion ocurre una sola vez.
+
+def _perfil_efectivo(request: Optional[Request], hint: str = "") -> str:
+    """Perfil del que pide, con la cookie firmada por encima de lo que diga el cliente.
+
+    Con SSO el perfil viene del portal y no es negociable. Sin SSO (login manual, que es
+    como corre el entorno local) no hay cookie y la unica fuente es el front, que lo
+    guarda al elegir Imagine/Colmena. Se acepta ese respaldo a proposito: aqui no se
+    decide un permiso sino a quien se le entrego el plano, y quien puede llamar al
+    endpoint ya puede descargarlo de todos modos.
+    """
+    return _perfil_de_sesion(request) or str(hint or "").strip().lower()
+
+
+def _guardar_plano_del_contrato(payload: Dict[str, Any], contenido: str, perfil: str = "") -> Dict[str, Any]:
+    """Deja una copia del plano junto a los documentos archivados del contrato.
+
+    Solo para el perfil Colmena y por la misma razon que 'Plano': esa descarga es LA
+    entrega. Cuando Imagine baja el plano para revisarlo no hay nada que archivar, y
+    escribir en el repositorio en cada revision dejaria versiones intermedias donde
+    despues nadie sabria cual fue la entregada.
+
+    Se guarda UNO POR CONTRATO tanto en la descarga individual como en el lote
+    consolidado: el archivo consolidado es una comodidad de descarga, pero en el
+    repositorio cada contrato tiene su carpeta y ahi es donde se busca su plano.
+
+    Nunca levanta: si el repositorio no responde, el operador igual debe recibir su
+    plano. El fallo queda en el log y en la respuesta del endpoint.
+    """
+    if perfil != "colmena":
+        return {"ok": True, "skipped": True, "reason": f"perfil {perfil or 'desconocido'}: solo se archiva la entrega a Colmena"}
+    if not str(contenido or "").strip():
+        return {"ok": False, "skipped": True, "reason": "plano vacio"}
+    datos = _case_lote_and_contract(payload)
+    lote = str(datos.get("lote") or "").strip()
+    contrato = _contrato_para_afi_rad(payload) or str(datos.get("contrato") or "").strip()
+    if not lote or not contrato:
+        return {"ok": False, "skipped": True, "reason": f"sin lote ({lote or '-'}) o contrato ({contrato or '-'})"}
+    try:
+        return _legacy_post(
+            "legacy/flatfile/guardar-plano-contrato",
+            {"lote": lote, "contrato": contrato, "content": contenido},
+            timeout=30.0,
+        )
+    except Exception as exc:
+        logger.error("No pude archivar el plano del contrato %s (lote %s): %s", contrato, lote, exc)
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _marcar_afi_rad_plano(payload: Dict[str, Any], perfil: str = "") -> Dict[str, Any]:
+    """afi_rad -> 'Plano' al descargar el plano, y SOLO para el perfil Colmena.
+
+    'Plano' significa que el plano se le entrego a Colmena: es el ultimo tramo del
+    recorrido del contrato y el que cierra su ciclo. Cuando el que descarga es Imagine
+    -desde la bandeja, el reporte o la vista de documentos- la descarga es operativa: se
+    revisa el archivo, se comparte, se vuelve a bajar. Marcar 'Plano' ahi adelantaba
+    afi_rad a un estado que todavia no habia ocurrido, y como el UPDATE exige
+    afi_rad_estado='Indexado', la transicion se consumia una sola vez: cuando Colmena
+    descargara el plano de verdad, el UPDATE ya no encontraba fila.
+
+    Aplica igual a la descarga individual y a la del lote consolidado; las dos son
+    entrega a Colmena.
 
     Solo se llama cuando se devuelve el plano real (fresco de BD o el snapshot legacy),
     nunca con el borrador.
     """
+    if perfil != "colmena":
+        return {"ok": True, "skipped": True, "reason": f"perfil {perfil or 'desconocido'}: la entrega a Colmena es la que marca Plano"}
     contrato = _contrato_para_afi_rad(payload)
     if not contrato:
         return {"ok": False, "skipped": True, "reason": "sin contrato"}
@@ -3659,7 +3882,8 @@ def _marcar_afi_rad_plano(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @app.get("/api/cases/{case_id}/926", response_class=PlainTextResponse)
-async def case_926(case_id: str):
+async def case_926(case_id: str, http_request: Request, perfil: str = Query(default="")):
+    perfil_efectivo = _perfil_efectivo(http_request, perfil)
     try:
         payload = load_case(case_id)
     except FileNotFoundError as exc:
@@ -3680,13 +3904,19 @@ async def case_926(case_id: str):
     if lote:
         fresh = generate_legacy_flatfile_926_http(lote=lote)
         if fresh.get("ok") and fresh.get("content"):
-            _marcar_afi_rad_plano(payload)
-            return _plano_926_response(_apply_926_download_overrides(fresh.get("content", "")))
+            _marcar_afi_rad_plano(payload, perfil_efectivo)
+            # Se archiva EXACTAMENTE lo que se entrega, con los overrides ya aplicados:
+            # el archivo del repositorio tiene que ser byte a byte el que recibio Colmena.
+            final = _apply_926_download_overrides(fresh.get("content", ""))
+            _guardar_plano_del_contrato(payload, final, perfil_efectivo)
+            return _plano_926_response(final)
 
     # Respaldo si no hay lote o el bridge legacy/BD no responde: el snapshot guardado.
     if legacy.get("ok") and legacy.get("content"):
-        _marcar_afi_rad_plano(payload)
-        return _plano_926_response(_apply_926_download_overrides(legacy.get("content", "")))
+        _marcar_afi_rad_plano(payload, perfil_efectivo)
+        final = _apply_926_download_overrides(legacy.get("content", ""))
+        _guardar_plano_del_contrato(payload, final, perfil_efectivo)
+        return _plano_926_response(final)
     if not draft:
         raise HTTPException(status_code=409, detail="El caso aun no esta listo para borrador 926.")
     # El borrador NO marca 'Plano': no es el plano entregable.
@@ -3877,6 +4107,573 @@ async def case_package(case_id: str):
             "Content-Disposition": f'attachment; filename="paquete_{safe_name}.zip"'
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Bandeja de afiliaciones pendientes
+#
+# Las afiliaciones que el portal radico y nadie ha gestionado todavia viven en
+# pqr_colmena (view afa_pendientes) y sus documentos en el repositorio de imagenes
+# legacy. Este backend NO tiene montado ese repositorio -solo lo tiene el
+# compat-backend-, asi que todo lo fisico se pide por HTTP y aca se arma el
+# expediente con el mismo _build_case_from_uploads de la carga manual.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/pendientes")
+async def pendientes_list(operation: Optional[str] = Query(default=None)):
+    """Bandeja de pendientes, con el inventario de adjuntos de cada radicacion.
+
+    A cada fila se le resuelve, por numero de contrato, si ya tiene expediente creado.
+    Eso es lo que le permite a la bandeja ofrecer "Cargar" o "Ya cargado" sin que el
+    operador tenga que ir a buscarlo, y es tambien la unica forma de saber a que caso
+    aplicarle el reemplazo de un archivo corregido.
+    """
+    operation_key = normalize_operation(operation or "colima")
+    try:
+        data = pqr_pendientes()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"No pude leer la bandeja de pendientes: {exc}")
+
+    for item in data.get("items") or []:
+        # Por radicacion primero -exacto y disponible desde el instante de la carga-; el
+        # contrato es el respaldo, y cubre los expedientes cargados a mano antes de que
+        # existiera esta bandeja, que no tienen origen_pendiente.
+        existente = _find_case_by_radicacion(item.get("id_radicacion_sa"), operation=operation_key)
+        if existente is None:
+            existente = _find_existing_case_by_contract(str(item.get("contrato") or ""), operation=operation_key)
+        if existente:
+            # Los bloqueantes salen de active_blocker_messages, la misma funcion que usa
+            # approve_case: la bandeja no puede opinar distinto que la aprobacion.
+            bloqueantes = active_blocker_messages(existente)
+            item["case_id"] = existente.get("id") or ""
+            item["case_status"] = existente.get("status") or ""
+            item["case_final_status"] = existente.get("final_status") or ""
+            item["case_label"] = existente.get("label") or ""
+            item["case_files"] = [
+                str(f.get("filename") or "") for f in (existente.get("files") or []) if isinstance(f, dict)
+            ]
+            # El Excel ACTIVO del expediente, que es el unico archivo corregible y no
+            # tiene por que llamarse como el que radico el portal: tras una correccion
+            # pasa a ser `<nombre>__corregido.xlsx`. La bandeja necesita este nombre para
+            # apuntar la siguiente correccion al archivo bueno, no al original.
+            excel_activo = next(
+                (
+                    f
+                    for f in (existente.get("files") or [])
+                    if isinstance(f, dict)
+                    and Path(str(f.get("filename") or "")).suffix.lower() in EXCEL_CASE_EXTENSIONS
+                ),
+                None,
+            )
+            item["case_excel"] = str((excel_activo or {}).get("filename") or "")
+            item["case_excel_corrige_a"] = str((excel_activo or {}).get("corrige_a") or "")
+            item["case_aprobado"] = is_case_manually_approved(existente)
+            item["bloqueantes"] = bloqueantes
+            item["bloqueantes_total"] = len(bloqueantes)
+            # El analisis se detuvo en el Excel: los soportes ni se leyeron. La bandeja
+            # lo necesita para no ofrecer el expediente todavia -no hay clasificacion que
+            # mirar- y para decir de que son los bloqueantes que esta mostrando.
+            item["excel_bloqueado"] = bool(
+                ((existente.get("analysis") or {}).get("decision") or {}).get("documents_pending_ocr")
+            )
+        else:
+            item["case_id"] = ""
+            item["case_status"] = ""
+            item["case_final_status"] = ""
+            item["case_label"] = ""
+            item["case_files"] = []
+            item["case_excel"] = ""
+            item["case_excel_corrige_a"] = ""
+            item["case_aprobado"] = False
+            item["bloqueantes"] = []
+            item["bloqueantes_total"] = 0
+            item["excel_bloqueado"] = False
+        item["formulario"] = _pendiente_formulario_info(item.get("id_radicacion_sa") or 0)
+    return data
+
+
+@app.get("/api/pendientes/{id_radicacion}/adjuntos")
+async def pendientes_adjuntos(id_radicacion: int):
+    """Inventario de adjuntos de una radicacion, para pintar el detalle en la bandeja."""
+    try:
+        return pqr_adjuntos(id_radicacion)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.get("/api/pendientes/{id_radicacion}/descargar")
+async def pendientes_descargar(id_radicacion: int):
+    """Zip con todos los documentos de la radicacion.
+
+    Es el "descargar todos" de la bandeja: el operador se lleva el paquete completo,
+    corrige lo que haga falta -tipicamente el xlsx- y vuelve a cargar solo ese archivo.
+    """
+    try:
+        contenido = pqr_adjuntos_zip(id_radicacion)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return Response(
+        content=contenido,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="radicacion-{id_radicacion}.zip"'},
+    )
+
+
+@app.get("/api/pendientes/{id_radicacion}/adjuntos/{id_adjunto}/descargar")
+async def pendientes_descargar_uno(
+    id_radicacion: int,
+    id_adjunto: int,
+    inline: bool = Query(default=False),
+):
+    """Un solo documento de la radicacion.
+
+    Con `inline=1` se sirve para VERLO en pantalla (visor de la bandeja) en vez de
+    bajarlo: el navegador necesita el media_type real -no application/octet-stream- y
+    un Content-Disposition inline, o abre el dialogo de descarga igual.
+    """
+    try:
+        inventario = pqr_adjuntos(id_radicacion)
+        contenido = pqr_adjunto_bytes(id_radicacion, id_adjunto)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    nombre = next(
+        (
+            str(item.get("nombre_original") or "")
+            for item in inventario.get("items") or []
+            if item.get("id_adjunto") == id_adjunto
+        ),
+        f"adjunto-{id_adjunto}",
+    )
+    if not inline:
+        return Response(
+            content=contenido,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(nombre, safe='')}"},
+        )
+    media_type = _PENDIENTES_INLINE_TYPES.get(Path(nombre).suffix.lower())
+    if not media_type:
+        # Un tipo que el navegador no sabe mostrar se baja igual: mejor eso que una
+        # pestana en blanco.
+        return Response(
+            content=contenido,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(nombre, safe='')}"},
+        )
+    return Response(
+        content=contenido,
+        media_type=media_type,
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(nombre, safe='')}"},
+    )
+
+
+def _pendientes_formularios_dir() -> Path:
+    """Donde viven los formularios corregidos que aun no tienen expediente.
+
+    Va al lado de los casos pero NO dentro: get_cases_root() se recorre buscando
+    `*/case.json`, y una carpeta intrusa ahi es una invitacion a que algun listado la
+    trate como un caso a medio escribir.
+    """
+    destino = Path(settings.cases_dir).parent / "pendientes_formularios"
+    destino.mkdir(parents=True, exist_ok=True)
+    return destino
+
+
+def _pendiente_formulario_path(id_radicacion: int) -> Optional[Path]:
+    """Formulario corregido guardado para esta radicacion, si hay alguno."""
+    carpeta = _pendientes_formularios_dir() / str(int(id_radicacion))
+    if not carpeta.is_dir():
+        return None
+    archivos = sorted(
+        (f for f in carpeta.iterdir() if f.is_file() and f.suffix.lower() in EXCEL_CASE_EXTENSIONS),
+        key=lambda f: f.stat().st_mtime,
+        reverse=True,
+    )
+    return archivos[0] if archivos else None
+
+
+def _pendiente_formulario_info(id_radicacion: int) -> Dict[str, Any]:
+    ruta = _pendiente_formulario_path(id_radicacion)
+    if ruta is None:
+        return {"reemplazado": False, "filename": "", "size_bytes": 0, "subido_en": ""}
+    stat = ruta.stat()
+    return {
+        "reemplazado": True,
+        "filename": ruta.name,
+        "size_bytes": stat.st_size,
+        "subido_en": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+    }
+
+
+def _pendiente_xlsx_del_repositorio(id_radicacion: int) -> tuple[str, int]:
+    """(nombre, id_adjunto) del Excel que radico el portal. Vacio si no hay."""
+    try:
+        inventario = pqr_adjuntos(id_radicacion)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    for item in inventario.get("items") or []:
+        nombre = str(item.get("nombre_original") or "")
+        if Path(nombre).suffix.lower() in EXCEL_CASE_EXTENSIONS and item.get("existe"):
+            return nombre, int(item.get("id_adjunto") or 0)
+    return "", 0
+
+
+@app.get("/api/pendientes/{id_radicacion}/formulario")
+async def pendientes_formulario_descargar(id_radicacion: int):
+    """Baja el formulario vigente de la radicacion, sin necesidad de cargar el contrato.
+
+    Vigente = el corregido si ya se subio uno, y si no el que radico el portal. Asi el
+    operador siempre baja lo mismo que se va a usar al cargar, y una segunda correccion
+    parte de la primera en vez de volver al original.
+    """
+    corregido = _pendiente_formulario_path(id_radicacion)
+    if corregido is not None:
+        return Response(
+            content=corregido.read_bytes(),
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(corregido.name, safe='')}"},
+        )
+    nombre, id_adjunto = _pendiente_xlsx_del_repositorio(id_radicacion)
+    if not nombre:
+        raise HTTPException(status_code=404, detail="Esta radicacion no tiene formulario Excel en el repositorio.")
+    try:
+        contenido = pqr_adjunto_bytes(id_radicacion, id_adjunto)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return Response(
+        content=contenido,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(nombre, safe='')}"},
+    )
+
+
+@app.post("/api/pendientes/{id_radicacion}/formulario")
+async def pendientes_formulario_cargar(
+    id_radicacion: int,
+    upload: UploadFile = File(...),
+    operation: Optional[str] = Form(default=None),
+):
+    """Guarda un formulario corregido para una radicacion que TODAVIA no tiene expediente.
+
+    Es el mismo arreglo que permite /replace-file, pero un paso antes: si el operador ya
+    sabe que el Excel viene mal, no tiene que crear el expediente, verlo fallar y
+    corregirlo despues. Sube el bueno aqui y "Cargar" arma el caso con ese en lugar del
+    que trajo el portal.
+
+    El repositorio legacy NO se toca: alli queda lo que radicaron, como evidencia. El
+    corregido vive aparte y se puede descartar para volver al original.
+    """
+    operation_key = normalize_operation(operation or "colima")
+    ya_cargada = _find_case_by_radicacion(id_radicacion, operation=operation_key)
+    if ya_cargada:
+        # Con expediente creado, el archivo que manda es el del caso: cambiarlo aqui no
+        # tendria efecto y dejaria dos "formularios vigentes" en desacuerdo.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    f"La radicacion {id_radicacion} ya tiene expediente. Corrige el Excel desde el "
+                    "caso con 'Cargar corregido'."
+                ),
+                "code": "RADICACION_YA_CARGADA",
+                "case_id": ya_cargada.get("id"),
+            },
+        )
+
+    contenido = await upload.read()
+    if not contenido:
+        raise HTTPException(status_code=400, detail="El archivo llego vacio.")
+    nombre = (upload.filename or "").replace("\\", "/").split("/")[-1]
+    extension = Path(nombre).suffix.lower()
+    if extension not in EXCEL_CASE_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Solo se puede reemplazar el formulario Excel. Recibi: {extension or '(sin extension)'}",
+        )
+
+    carpeta = _pendientes_formularios_dir() / str(int(id_radicacion))
+    carpeta.mkdir(parents=True, exist_ok=True)
+    # Se conserva UNO solo: el vigente. Guardar versiones aqui no aporta -el historial
+    # util es el del expediente, que si registra original y correcciones-.
+    for viejo in carpeta.iterdir():
+        if viejo.is_file():
+            try:
+                viejo.unlink()
+            except OSError:
+                pass
+    destino = carpeta / (Path(nombre).name or f"formulario-{id_radicacion}{extension}")
+    destino.write_bytes(contenido)
+    return {"ok": True, "id_radicacion": id_radicacion, "formulario": _pendiente_formulario_info(id_radicacion)}
+
+
+@app.delete("/api/pendientes/{id_radicacion}/formulario")
+async def pendientes_formulario_descartar(id_radicacion: int):
+    """Descarta el formulario corregido: al cargar se vuelve a usar el del portal."""
+    carpeta = _pendientes_formularios_dir() / str(int(id_radicacion))
+    borrados = 0
+    if carpeta.is_dir():
+        for archivo in carpeta.iterdir():
+            if archivo.is_file():
+                try:
+                    archivo.unlink()
+                    borrados += 1
+                except OSError:
+                    pass
+        try:
+            carpeta.rmdir()
+        except OSError:
+            pass
+    return {"ok": True, "descartados": borrados, "formulario": _pendiente_formulario_info(id_radicacion)}
+
+
+@app.post("/api/pendientes/{id_radicacion}/cargar", response_model=CaseCreateResponse)
+async def pendientes_cargar(
+    id_radicacion: int,
+    label: str = Form(default=""),
+    operation: str = Form(default="colima"),
+):
+    """Crea el expediente de una radicacion pendiente con los documentos del repositorio.
+
+    Equivale a que el operador hubiera arrastrado esos mismos archivos en "Nuevo
+    contrato": se descargan del compat-backend y se entregan a _build_case_from_uploads,
+    que es la misma funcion que usa la carga manual. De ahi en adelante el caso es
+    indistinguible de uno cargado a mano -incluida la deteccion de contrato duplicado,
+    que evita crear dos expedientes para la misma radicacion si se pulsa dos veces-.
+    """
+    operation_key = normalize_operation(operation)
+    # Guarda contra la doble carga: la deteccion de contrato duplicado de
+    # _build_case_from_uploads solo puede actuar cuando los casos ya tienen numero de
+    # contrato, y ese dato aparece al terminar el analisis. Entre el POST y ese momento,
+    # dos clics seguidos crearian dos expedientes para la misma radicacion.
+    ya_cargada = _find_case_by_radicacion(id_radicacion, operation=operation_key)
+    if ya_cargada:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    f"La radicacion {id_radicacion} ya tiene expediente: "
+                    f"{ya_cargada.get('label') or ya_cargada.get('id')}."
+                ),
+                "code": "RADICACION_YA_CARGADA",
+                "case_id": ya_cargada.get("id"),
+                "case_status": ya_cargada.get("status") or "",
+            },
+        )
+    try:
+        inventario = pqr_adjuntos(id_radicacion)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    items = inventario.get("items") or []
+    presentes = [item for item in items if item.get("existe")]
+    faltantes = [str(item.get("nombre_original") or "") for item in items if not item.get("existe")]
+    if not presentes:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    f"La radicacion {id_radicacion} no tiene ningun documento disponible en el "
+                    "repositorio de imagenes."
+                ),
+                "code": "SIN_ADJUNTOS",
+                "faltantes": faltantes,
+            },
+        )
+
+    # Formulario corregido subido ANTES de cargar: sustituye al Excel del portal en el
+    # expediente. El del repositorio no se descarga siquiera.
+    formulario_corregido = _pendiente_formulario_path(id_radicacion)
+
+    uploads: List[tuple[str, bytes]] = []
+    rejected_files: List[Dict[str, str]] = []
+    xlsx_sustituido = ""
+    for item in presentes:
+        id_adjunto = item.get("id_adjunto")
+        nombre = str(item.get("nombre_original") or f"adjunto-{id_adjunto}")
+        if formulario_corregido is not None and Path(nombre).suffix.lower() in EXCEL_CASE_EXTENSIONS:
+            xlsx_sustituido = nombre
+            continue
+        try:
+            uploads.append((nombre, pqr_adjunto_bytes(id_radicacion, id_adjunto)))
+        except Exception as exc:
+            # Un adjunto ilegible no debe tumbar la carga entera: se reporta como
+            # rechazado y _build_case_from_uploads decidira si lo que queda alcanza.
+            rejected_files.append({"filename": nombre, "reason": f"No se pudo traer del repositorio: {exc}"})
+    if formulario_corregido is not None:
+        uploads.append((formulario_corregido.name, formulario_corregido.read_bytes()))
+    for nombre in faltantes:
+        rejected_files.append({"filename": nombre, "reason": "Registrado en afa_adjuntosrad pero ausente del repositorio."})
+
+    case_payload = _build_case_from_uploads(
+        label=label or f"Radicacion {id_radicacion}",
+        uploads=uploads,
+        operation_key=operation_key,
+        rejected_files=rejected_files,
+    )
+    # Trazabilidad del origen: deja constancia de que el expediente no se cargo a mano,
+    # y de con que radicacion hay que reconciliarlo despues.
+    case_payload["origen_pendiente"] = {
+        "id_radicacion": id_radicacion,
+        "adjuntos_tomados": len(uploads),
+        "adjuntos_faltantes": faltantes,
+        "cargado_en": utc_now(),
+        # Queda constancia de que el Excel del expediente NO es el que radico el portal.
+        "formulario_corregido": formulario_corregido.name if formulario_corregido else "",
+        "formulario_original": xlsx_sustituido,
+    }
+    try:
+        guardado = load_case(case_payload["id"])
+        guardado["origen_pendiente"] = case_payload["origen_pendiente"]
+        save_case(guardado)
+    except Exception:
+        # La marca de origen es informativa; si no se puede persistir, el caso ya existe
+        # y es valido igual. No vale la pena abortar una carga correcta por esto.
+        pass
+    return CaseCreateResponse(**case_payload)
+
+
+@app.post("/api/cases/{case_id}/replace-file", response_model=CaseCreateResponse)
+async def case_replace_file(
+    case_id: str,
+    filename: str = Form(default=""),
+    upload: UploadFile = File(...),
+    operation: Optional[str] = Form(default=None),
+):
+    """Carga una version corregida del Excel del expediente y vuelve a validar.
+
+    SOLO el Excel. El resto del expediente son las imagenes que radico el portal: son la
+    evidencia de lo que el cliente entrego y no se corrigen desde aqui. El Excel si,
+    porque es el unico que trae datos capturados, que es lo que la prevalidacion rechaza.
+
+    NADA se sobrescribe. El archivo original se queda en el expediente tal como llego
+    -mismo nombre, mismo contenido, mismo sha- y la version corregida entra como un
+    archivo NUEVO (`<nombre>__corregido.xlsx`). Lo unico que cambia es cual de los dos
+    usa el analisis: la lista `files` del caso pasa a apuntar al corregido, y el original
+    queda registrado en `archivos_corregidos` como historial. Asi el expediente conserva
+    las dos caras -lo radicado y lo corregido- y se puede auditar la diferencia.
+
+    Se conserva el mismo case_id, y con el el historial, las excepciones manuales y las
+    revisiones documentales. El repositorio legacy tampoco se toca: alli queda lo que
+    radico el portal.
+    """
+    try:
+        payload = load_case(case_id)
+        _ensure_case_operation(payload, operation)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
+
+    contenido = await upload.read()
+    if not contenido:
+        raise HTTPException(status_code=400, detail="El archivo llego vacio.")
+
+    nombre_nuevo = (upload.filename or "").replace("\\", "/").split("/")[-1]
+    objetivo = (filename or "").replace("\\", "/").split("/")[-1] or nombre_nuevo
+
+    archivos = payload.get("files") or []
+    # Si no se dijo cual, se asume el Excel activo del expediente: es el unico
+    # reemplazable, asi que no hay ambiguedad que resolver.
+    if not objetivo:
+        excel_activos = [f for f in archivos if Path(str(f.get("filename") or "")).suffix.lower() in EXCEL_CASE_EXTENSIONS]
+        if len(excel_activos) == 1:
+            objetivo = str(excel_activos[0].get("filename") or "")
+    if not objetivo:
+        raise HTTPException(status_code=400, detail="No se pudo determinar que archivo corregir.")
+
+    ext_objetivo = Path(objetivo).suffix.lower()
+    ext_nueva = Path(nombre_nuevo).suffix.lower()
+    if ext_objetivo not in EXCEL_CASE_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Solo se puede corregir el Excel del expediente. '{objetivo}' no lo es. "
+                "Los documentos radicados son evidencia y no se sustituyen."
+            ),
+        )
+    if ext_nueva not in EXCEL_CASE_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"El archivo que subiste no es un Excel: {ext_nueva or '(sin extension)'}",
+        )
+
+    indice = next(
+        (i for i, f in enumerate(archivos) if str(f.get("filename") or "") == objetivo),
+        None,
+    )
+    if indice is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "message": f"El caso no tiene un archivo llamado '{objetivo}'.",
+                "archivos_disponibles": sorted(str(f.get("filename") or "") for f in archivos),
+            },
+        )
+
+    files_dir = Path(settings.cases_dir) / case_id / "files"
+    files_dir.mkdir(parents=True, exist_ok=True)
+    # La raiz del nombre es la del Excel ORIGINAL, no la del corregido anterior: corregir
+    # dos veces debe dar `LISTADO__corregido2.xlsx`, no `LISTADO__corregido__corregido.xlsx`.
+    raiz = re.sub(r"__corregido\d*$", "", Path(objetivo).stem)
+    destino = _unique_duplicate_path(files_dir, raiz, ext_nueva, "corregido")
+    # El nombre sale de un archivo ya registrado en el caso, pero la comprobacion se
+    # mantiene: escribir dentro del expediente es lo unico aceptable pase lo que pase.
+    try:
+        destino_resuelto = destino.resolve()
+        raiz_resuelta = files_dir.resolve()
+    except (OSError, RuntimeError):
+        raise HTTPException(status_code=400, detail="Ruta de archivo invalida.")
+    if raiz_resuelta not in destino_resuelto.parents:
+        raise HTTPException(status_code=400, detail="Ruta de archivo invalida.")
+
+    destino_resuelto.write_bytes(contenido)
+
+    entrada_original = dict(archivos[indice])
+    # Se parte de la entrada original para no perder metadatos que otras partes del flujo
+    # puedan haber colgado ahi (source_filename, generated_role, ...).
+    entrada_nueva = dict(entrada_original)
+    entrada_nueva.update(
+        {
+            "filename": destino_resuelto.name,
+            "stored_path": str(destino_resuelto),
+            "size_bytes": len(contenido),
+            "content_type": ext_nueva,
+            "corrige_a": entrada_original.get("filename"),
+            "subido_en": utc_now(),
+        }
+    )
+    archivos[indice] = entrada_nueva
+    payload["files"] = archivos
+    # El original NO se borra del disco ni del caso: sale de `files` -para que el analisis
+    # lea uno solo y no dependa del orden de la lista- y queda aqui, con su ruta intacta.
+    historial = payload.setdefault("archivos_corregidos", [])
+    historial.append(
+        {
+            "original": entrada_original,
+            "corregido": {
+                "filename": entrada_nueva["filename"],
+                "size_bytes": entrada_nueva["size_bytes"],
+                "nombre_subido": nombre_nuevo,
+            },
+            "en": utc_now(),
+        }
+    )
+    save_case(payload)
+
+    # analyze_case y NO refresh_case_validations. refresh trabaja sobre lo que ya estaba
+    # guardado en el analisis: reutiliza `analysis.xlsx_profile` -o sea el Excel VIEJO ya
+    # parseado, nunca vuelve a llamar a _read_xlsx- y reutiliza `analysis.documents` sin
+    # correr OCR. Con eso, cargar un Excel corregido dejaba el archivo en disco pero
+    # seguia validando contra el anterior, y las imagenes de un caso que se detuvo antes
+    # de clasificar se quedaban sin clasificar para siempre.
+    #
+    # analyze_case relee el xlsx del disco, corre el OCR y la clasificacion documental, y
+    # recalcula las validaciones. No escribe en ningun sistema vecino -ni entrega el lote,
+    # ni toca afi_rad, ni cierra la gestion en PQR-, asi que sirve para corregir sin
+    # provocar ninguno de los efectos que solo deben ocurrir al aprobar.
+    try:
+        actualizado = analyze_case(case_id, preserve_manual_approval=True)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Excel corregido cargado, pero el reanalisis fallo: {exc}")
+    return CaseCreateResponse(**actualizado)
 
 
 @app.get("/api/modelos")

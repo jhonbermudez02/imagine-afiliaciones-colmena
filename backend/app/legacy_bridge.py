@@ -62,11 +62,7 @@ def generate_legacy_flatfile_926_http(lote: str, base: str = "ybr", strict_valid
     if not lote:
         return {"available": False, "ok": False, "error": "Se requiere lote para generar 926 por HTTP."}
 
-    candidate_urls = [configured_url]
-    if "127.0.0.1" in configured_url:
-        candidate_urls.append(configured_url.replace("127.0.0.1", "host.docker.internal"))
-    if "localhost" in configured_url:
-        candidate_urls.append(configured_url.replace("localhost", "host.docker.internal"))
+    candidate_urls = _compat_candidate_urls(configured_url)
 
     last_error = ""
     for backend_url in candidate_urls:
@@ -97,3 +93,90 @@ def generate_legacy_flatfile_926_http(lote: str, base: str = "ybr", strict_valid
             last_error = f"{type(exc).__name__}: {exc}"
 
     return {"available": True, "ok": False, "error": last_error or "No pude conectar con el backend legacy."}
+
+
+def _compat_candidate_urls(configured_url: str = "") -> list[str]:
+    """URLs a intentar contra el compat-backend, en orden.
+
+    Dentro de docker el nombre del servicio resuelve solo; cuando el backend corre fuera
+    del compose (desarrollo en el host) la url configurada apunta a 127.0.0.1/localhost,
+    que desde un contenedor no es el host. Por eso se prueba tambien
+    host.docker.internal como alternativa, sin cambiar configuracion.
+    """
+    base = str(configured_url or settings.legacy_backend_url or "").strip().rstrip("/")
+    if not base:
+        return []
+    urls = [base]
+    for local in ("127.0.0.1", "localhost"):
+        if local in base:
+            urls.append(base.replace(local, "host.docker.internal"))
+    return urls
+
+
+def _compat_get(path: str, timeout: float = 60.0) -> httpx.Response:
+    """GET contra el compat-backend probando las urls candidatas.
+
+    Devuelve la primera respuesta con codigo 200. Un 4xx del compat es una respuesta
+    legitima del servicio -no un fallo de conectividad-, asi que se propaga tal cual en
+    vez de seguir intentando con la siguiente url.
+    """
+    candidatos = _compat_candidate_urls()
+    if not candidatos:
+        raise RuntimeError("legacy_backend_url no configurado.")
+    ultimo_error = ""
+    for base in candidatos:
+        try:
+            respuesta = httpx.get(f"{base}{path}", timeout=timeout)
+        except Exception as exc:
+            ultimo_error = f"{type(exc).__name__}: {exc}"
+            continue
+        if respuesta.status_code == 200 or 400 <= respuesta.status_code < 500:
+            return respuesta
+        ultimo_error = f"HTTP {respuesta.status_code}: {respuesta.text[:300]}"
+    raise RuntimeError(ultimo_error or "No pude conectar con el compat-backend.")
+
+
+def pqr_pendientes() -> Dict[str, Any]:
+    """Bandeja de afiliaciones pendientes (view pqr.afa_pendientes) con sus adjuntos."""
+    respuesta = _compat_get("/legacy/pqr/pendientes")
+    if respuesta.status_code != 200:
+        raise RuntimeError(_compat_detalle(respuesta))
+    return respuesta.json()
+
+
+def pqr_adjuntos(id_radicacion: int) -> Dict[str, Any]:
+    """Inventario de adjuntos de una radicacion."""
+    respuesta = _compat_get(f"/legacy/pqr/pendientes/{int(id_radicacion)}/adjuntos")
+    if respuesta.status_code != 200:
+        raise RuntimeError(_compat_detalle(respuesta))
+    return respuesta.json()
+
+
+def pqr_adjunto_bytes(id_radicacion: int, id_adjunto: int) -> bytes:
+    """Contenido de un adjunto del repositorio legacy."""
+    respuesta = _compat_get(
+        f"/legacy/pqr/pendientes/{int(id_radicacion)}/adjuntos/{int(id_adjunto)}",
+        timeout=120.0,
+    )
+    if respuesta.status_code != 200:
+        raise RuntimeError(_compat_detalle(respuesta))
+    return respuesta.content
+
+
+def pqr_adjuntos_zip(id_radicacion: int) -> bytes:
+    """Todos los adjuntos de la radicacion, comprimidos por el compat."""
+    respuesta = _compat_get(f"/legacy/pqr/pendientes/{int(id_radicacion)}/zip", timeout=180.0)
+    if respuesta.status_code != 200:
+        raise RuntimeError(_compat_detalle(respuesta))
+    return respuesta.content
+
+
+def _compat_detalle(respuesta: httpx.Response) -> str:
+    """Mensaje de error del compat, prefiriendo su campo `detail` sobre el cuerpo crudo."""
+    try:
+        cuerpo = respuesta.json()
+        if isinstance(cuerpo, dict) and cuerpo.get("detail"):
+            return str(cuerpo["detail"])
+    except Exception:
+        pass
+    return f"HTTP {respuesta.status_code}: {respuesta.text[:300]}"

@@ -62,8 +62,9 @@
         <button class="nav-item active" data-view="bandeja" type="button">
           <span class="nav-dot"></span>Bandeja de entrada
         </button>
-        <button class="nav-item" data-view="flujo" type="button">
-          <span class="nav-dot"></span>Nuevo contrato
+        <button class="nav-item" data-view="pendientes" type="button">
+          <span class="nav-dot"></span>Pendientes
+          <span class="nav-badge" id="pendientesBadge" hidden>0</span>
         </button>
       </div>
 
@@ -111,7 +112,7 @@
       </div>
       <select class="mobile-view-select" id="mobileViewSelect" aria-label="Cambiar vista">
         <option value="bandeja">Bandeja</option>
-        <option value="flujo">Nuevo contrato</option>
+        <option value="pendientes">Pendientes</option>
         <option value="produccion">Producción</option>
         <option value="busqueda">Búsqueda</option>
         <option value="admin">Admin</option>
@@ -188,6 +189,21 @@
             <div class="section-title">Resultado de prevalidación</div>
           </div>
           <div id="workflowResultContent"></div>
+        </div>
+      </section>
+
+      <!-- PENDIENTES POR CARGAR -->
+      <section class="view" id="view-pendientes">
+        <div class="section-card">
+          <div class="section-card-head">
+            <div class="section-title">Afiliaciones radicadas sin gestionar</div>
+            <div class="pend-head-actions">
+              <button class="btn-icon" id="pendRefreshBtn" title="Actualizar" type="button">↺</button>
+            </div>
+          </div>
+          <div id="pendientesTableWrap">
+            <div class="loading-msg">Cargando pendientes...</div>
+          </div>
         </div>
       </section>
 
@@ -314,7 +330,7 @@
         <div class="section-card">
           <div class="section-card-head">
             <div class="section-title">Administración de Tablas</div>
-            <div class="section-sub">PILA · EPS · AFP · Asesores · SMMLV · Destinatarios de correo</div>
+            <div class="section-sub">PILA · EPS · AFP · SMMLV · Destinatarios de correo</div>
           </div>
           <div id="adminTablesPanel" style="padding:12px">
             <div style="font-size:12px;color:var(--c-text-2)">Cargando...</div>
@@ -335,5 +351,7 @@
   </div>
   <div class="modal-body" id="docModalBody"></div>
 </div>
+
+<input type="file" id="pendReplaceInput" accept=".xlsx,.xls,.xlsm" style="display:none" />
 
 <script type="module" src="/main.js"></script>

@@ -1210,60 +1210,122 @@ def _rag_index_document(case_id: str, filename: str, ocr_text: str, document_typ
         import logging as _logging; _logging.getLogger("afi.rag").debug("RAG index error: %s", exc)
         return False
 
-# ── Tabla asesores Colmena ──────────────────────────────────
+# ── Tablas de intermediacion Colmena ────────────────────────
+# El documento de comisiones trae un codigo que decide CONTRA QUE TABLA se valida la
+# identificacion del intermediario:
+#   01 -> Consultor          -> img004.consultores        (llave: cedula)
+#   03 -> Corredor/Agencia   -> img004.afi_intermediarios (llave: numero_identificacion)
+# Antes ambos codigos se validaban contra consultores, asi que cualquier corredor real
+# aparecia como "no esta en la tabla".
 _ASESORES_CACHE: Dict[str, Any] = {}
+_INTERMEDIARIOS_CACHE: Dict[str, Any] = {}
 
-def _load_asesores_colmena() -> Dict[str, Any]:
-    """Lee la tabla real de consultores Colmena (img004.consultores) via compat-backend.
-    Reemplaza el antiguo data/evals/asesores_colmena.json. Es una tabla PLANA
-    (cedula/nombre): ya no hay listas separadas comerciales(01) / intermediarios(03) --
-    ese split solo existia en el JSON. La validacion de comisiones (codigos 01 y 03) es
-    membresia del documento en esta tabla, indexada por solo-digitos."""
-    global _ASESORES_CACHE
-    if _ASESORES_CACHE.get("loaded"):
-        return _ASESORES_CACHE
+
+def _fetch_tabla_intermediacion(ruta: str, llave: str) -> Dict[str, Any]:
+    """Descarga una tabla de intermediacion del compat-backend, indexada por solo-digitos.
+
+    Devuelve {"filas": {...}, "loaded": bool}. Un fallo NO se cachea: el compat pudo
+    estar caido y la proxima llamada debe reintentar.
+    """
     try:
         base_url = str(settings.legacy_backend_url or "").strip().rstrip("/")
         if not base_url:
-            return {"asesores": {}, "loaded": False}
-        resp = httpx.get(f"{base_url}/legacy/db/consultores", timeout=30.0)
+            return {"filas": {}, "loaded": False}
+        resp = httpx.get(f"{base_url}/{ruta}", timeout=30.0)
         resp.raise_for_status()
         items = resp.json().get("items", [])
-        asesores = {
-            only_digits(str(r.get("cedula", ""))): r
+        filas = {
+            only_digits(str(r.get(llave, ""))): r
             for r in items
-            if only_digits(str(r.get("cedula", "")))
+            if only_digits(str(r.get(llave, "")))
         }
-        _ASESORES_CACHE = {"asesores": asesores, "loaded": True}
+        return {"filas": filas, "loaded": True}
     except Exception:
-        # No cachear el fallo: reintenta en la proxima llamada (compat pudo estar caido).
+        return {"filas": {}, "loaded": False}
+
+
+def _load_asesores_colmena() -> Dict[str, Any]:
+    """Tabla real de consultores Colmena (img004.consultores) via compat-backend.
+    Reemplaza el antiguo data/evals/asesores_colmena.json. Es una tabla PLANA
+    (cedula/nombre). Respalda la validacion del codigo 01 (Consultor)."""
+    global _ASESORES_CACHE
+    if _ASESORES_CACHE.get("loaded"):
+        return _ASESORES_CACHE
+    datos = _fetch_tabla_intermediacion("legacy/db/consultores", "cedula")
+    if not datos.get("loaded"):
         return {"asesores": {}, "loaded": False}
+    _ASESORES_CACHE = {"asesores": datos["filas"], "loaded": True}
     return _ASESORES_CACHE
+
+
+def _load_intermediarios_colmena() -> Dict[str, Any]:
+    """Tabla real de corredores/agencias (img004.afi_intermediarios) via compat-backend.
+    Respalda la validacion del codigo 03 (Corredor/Agencia). La llave es
+    numero_identificacion: puede ser cedula (CC) o NIT segun tipo_documento."""
+    global _INTERMEDIARIOS_CACHE
+    if _INTERMEDIARIOS_CACHE.get("loaded"):
+        return _INTERMEDIARIOS_CACHE
+    datos = _fetch_tabla_intermediacion("legacy/db/intermediarios", "numero_identificacion")
+    if not datos.get("loaded"):
+        return {"intermediarios": {}, "loaded": False}
+    _INTERMEDIARIOS_CACHE = {"intermediarios": datos["filas"], "loaded": True}
+    return _INTERMEDIARIOS_CACHE
+
+
+def _tabla_para_codigo(codigo_intermediario: Any) -> Dict[str, Any]:
+    """Resuelve la tabla que corresponde al codigo del documento de comisiones.
+
+    Devuelve {"filas", "loaded", "tabla"}; "tabla" es el nombre real para los mensajes
+    de error, de modo que el operador sepa donde buscar. Un codigo desconocido devuelve
+    loaded=False y no bloquea: la validez del codigo la reporta aparte
+    _comision_asesor_no_tabla_validation.
+    """
+    codigo = only_digits(str(codigo_intermediario or "")).lstrip("0") or ""
+    if codigo == "1":
+        datos = _load_asesores_colmena()
+        return {
+            "filas": datos.get("asesores", {}),
+            "loaded": bool(datos.get("loaded")),
+            "tabla": "consultores",
+        }
+    if codigo == "3":
+        datos = _load_intermediarios_colmena()
+        return {
+            "filas": datos.get("intermediarios", {}),
+            "loaded": bool(datos.get("loaded")),
+            "tabla": "afi_intermediarios",
+        }
+    return {"filas": {}, "loaded": False, "tabla": ""}
+
+
+def _documento_intermediario_normalizado(documento: Any) -> str:
+    """Solo-digitos, quitando el digito de verificacion (901.778.677-3 -> 901778677)."""
+    texto = str(documento or "").strip()
+    if "-" in texto:
+        texto = texto.split("-")[0]
+    return only_digits(texto)
 
 
 def _validate_asesor_en_tabla(cedula: str, codigo_intermediario: str) -> bool:
     if not cedula:
         return True
-    asesores = _load_asesores_colmena()
-    if not asesores.get("loaded"):
+    tabla = _tabla_para_codigo(codigo_intermediario)
+    # Si la tabla no cargo (compat caido o codigo desconocido) no se bloquea: es un
+    # sistema vecino y su indisponibilidad no puede inventar un hallazgo.
+    if not tabla.get("loaded"):
         return True
-    # Normalizar NIT: quitar puntos y digito de verificacion (ej: 901.778.677-3 -> 901778677)
-    cedula_str = str(cedula).strip()
-    if '-' in cedula_str:
-        cedula_str = cedula_str.split('-')[0]
-    cedula_clean = only_digits(cedula_str)
-    # Tabla plana: la validez del codigo (01/03) se controla aparte; aqui solo membresia.
-    return cedula_clean in asesores.get("asesores", {})
+    # Solo membresia: la validez del codigo (01/03) se controla aparte.
+    return _documento_intermediario_normalizado(cedula) in tabla.get("filas", {})
 
 
 def _lookup_asesor_colmena(cedula: Any, codigo_intermediario: Any) -> Dict[str, Any]:
-    cedula_clean = only_digits(str(cedula or ""))
-    if not cedula_clean:
+    documento = _documento_intermediario_normalizado(cedula)
+    if not documento:
         return {}
-    asesores = _load_asesores_colmena()
-    if not asesores.get("loaded"):
+    tabla = _tabla_para_codigo(codigo_intermediario)
+    if not tabla.get("loaded"):
         return {}
-    row = asesores.get("asesores", {}).get(cedula_clean)
+    row = tabla.get("filas", {}).get(documento)
     return row if isinstance(row, dict) else {}
 
 
@@ -1299,6 +1361,7 @@ def _comision_asesor_no_tabla_validation(row: Dict[str, Any], filename: str = ""
     if _validate_asesor_en_tabla(cedula, codigo):
         return None
     tipo_nombre = _asesor_tipo_nombre(codigo)
+    tabla_nombre = _tabla_para_codigo(codigo).get("tabla") or "consultores"
     filename_text = f" Archivo: {filename}." if filename else ""
     source_text = "comisiones manuales" if source == "manual" else "soporte entrega de documentos"
     return {
@@ -1307,11 +1370,12 @@ def _comision_asesor_no_tabla_validation(row: Dict[str, Any], filename: str = ""
         "severity": "blocker",
         "can_accept_exception": True,
         "message": (
-            f"El {tipo_nombre} con documento {cedula} no se encuentra en la base de comerciales e intermediarios "
+            f"El {tipo_nombre} con documento {cedula} no se encuentra en la tabla {tabla_nombre} "
             f"de Colmena ({source_text}).{filename_text}"
         ),
         "codigo_intermediario": codigo.zfill(2),
         "vendedor_documento": cedula,
+        "tabla_consultada": tabla_nombre,
         "filename": filename,
         "source": source,
     }
@@ -1549,28 +1613,45 @@ def is_case_manually_approved(payload: Dict[str, Any]) -> bool:
     return isinstance(approval, dict) and bool(approval.get("approved"))
 
 
-def approve_case(case_id: str, reason: str = "", operator: str = "", note: str = "") -> Dict[str, Any]:
-    payload = load_case(case_id)
-    analysis = payload.setdefault("analysis", {}) or {}
-    if payload.get("analysis") is None:
-        payload["analysis"] = analysis
+def active_blocker_messages(payload: Dict[str, Any]) -> List[str]:
+    """Bloqueantes activos de un caso, sin repetir, en orden de aparicion.
+
+    Es la MISMA lista que decide si approve_case deja aprobar. Se extrajo para poder
+    mostrarla tambien en la bandeja de pendientes: si la pantalla calculara los
+    bloqueantes por su cuenta, acabaria diciendo "listo para aprobar" sobre un caso que
+    la aprobacion rechaza, o al reves. Un solo origen para las dos cosas.
+
+    Las tres fuentes no son intercambiables y por eso se recorren todas:
+      - decision.blocker_records  -> bloqueantes de la decision, con estructura
+      - precheck.motivos_de_rechazo -> hallazgos de la prevalidacion documental
+      - decision.blockers         -> forma antigua, aun presente en casos ya guardados
+    """
+    analysis = payload.get("analysis") if isinstance(payload.get("analysis"), dict) else {}
     decision = analysis.get("decision") or {}
     validation_summary = analysis.get("validacion_resumen") or {}
     precheck = validation_summary.get("precheck") or {}
-    active_messages: List[str] = []
+    mensajes: List[str] = []
     for source in (decision.get("blocker_records"), precheck.get("motivos_de_rechazo")):
         for item in source or []:
             if isinstance(item, dict):
                 message = normalize_text(item.get("message") or item.get("mensaje") or "")
             else:
                 message = normalize_text(str(item or ""))
-            if message and message not in active_messages:
-                active_messages.append(message)
+            if message and message not in mensajes:
+                mensajes.append(message)
     for item in decision.get("blockers") or []:
         message = normalize_text(item.get("message") if isinstance(item, dict) else str(item or ""))
-        if message and message not in active_messages:
-            active_messages.append(message)
-    if active_messages:
+        if message and message not in mensajes:
+            mensajes.append(message)
+    return mensajes
+
+
+def approve_case(case_id: str, reason: str = "", operator: str = "", note: str = "") -> Dict[str, Any]:
+    payload = load_case(case_id)
+    analysis = payload.setdefault("analysis", {}) or {}
+    if payload.get("analysis") is None:
+        payload["analysis"] = analysis
+    if active_blocker_messages(payload):
         raise ValueError("El contrato aún tiene bloqueantes activos y no se puede aprobar manualmente.")
 
     # El insert a la base de datos ocurre al COMPLETAR el workflow (etapa de entrega). Si
@@ -1621,6 +1702,23 @@ def approve_case(case_id: str, reason: str = "", operator: str = "", note: str =
     resumen = report.get("resumen_ejecutivo") if isinstance(report, dict) else None
     if isinstance(resumen, dict):
         resumen["estado"] = "APROBADO"
+    # Cierre de la gestion pendiente en PQR (pqr_colmena). Este es el momento correcto:
+    # aprobar es una decision humana sobre un caso que ya paso todos los controles, a
+    # diferencia de "el workflow completo", que solo dice que es aprobable. El recibo que
+    # devuelve queda guardado en el analisis porque es lo que permite revertir el cierre
+    # si el expediente se borra despues (ver _pqr_reabrir_trazabilidad).
+    contrato_pqr = _contrato_para_afi_rad(payload)
+    if contrato_pqr:
+        # afi_rad -> 'Indexado'. Va primero porque el paso a 'Plano' (que hace la
+        # descarga) exige afi_rad_estado='Indexado': sin este UPDATE, descargar el plano
+        # no encontraria fila que actualizar.
+        analysis["afi_rad_indexado"] = _afi_rad_set_estado(
+            contrato_pqr, "indexado", datetime.now().strftime("%Y%m%d")
+        )
+        analysis["pqr_trazabilidad"] = _pqr_cerrar_trazabilidad(
+            contrato_pqr, normalize_text(operator or "nova_case_workflow")[:15]
+        )
+
     payload["updated_at"] = now
     return save_case(payload)
 
@@ -2301,7 +2399,15 @@ def refresh_case_validations(case_id: str) -> Dict[str, Any]:
         for item in required_evidence.values()
         if isinstance(item, dict) and item.get("satisfied") and item.get("filename")
     )
+    # El caso puede venir de un analisis que se detuvo en el XLSX: ahi no se corrio OCR y
+    # `documents` quedo vacio a proposito. Este refresco NO vuelve a analizar -reusa lo
+    # guardado-, asi que hereda ese estado y tiene que respetarlo igual que analyze_case.
+    # Sin esto, "faltan" TODOS los soportes obligatorios por la unica razon de que nunca se
+    # leyeron, y ese bloqueante falso tapaba los errores reales del Excel.
     documents_pending_ocr = bool((analysis.get("decision") or {}).get("documents_pending_ocr"))
+    if documents_pending_ocr:
+        missing_docs = []
+        matched_docs = []
     validation_summary = _build_validation_summary(xlsx_profile, docs, missing_docs, documents_pending_ocr=documents_pending_ocr)
     validation_summary = _apply_manual_intermediarios_to_validation_summary(validation_summary, manual_review)
     validation_summary = _apply_validation_exceptions(validation_summary, manual_review)
@@ -2331,11 +2437,31 @@ def refresh_case_validations(case_id: str) -> Dict[str, Any]:
     decision = {
         "flow": "afiliacion_documental",
         "recommended_status": decision_status,
-        "summary": "Contrato listo para radicacion." if decision_status == "aprobable" else "Contrato con faltantes o inconsistencias.",
+        "summary": (
+            "Contrato listo para radicacion."
+            if decision_status == "aprobable"
+            else (
+                "El Excel tiene errores de datos; corrígelos para continuar con la validación de documentos."
+                if documents_pending_ocr
+                else "Contrato con faltantes o inconsistencias."
+            )
+        ),
         "blockers": blockers,
         "blocker_records": blocker_records,
         "alerts": non_blocking_alerts,
-        "next_step": "Validar contrato final y radicar afiliacion." if decision_status == "aprobable" else "Solicitar faltantes o corregir inconsistencias antes de radicar.",
+        "next_step": (
+            "Validar contrato final y radicar afiliacion."
+            if decision_status == "aprobable"
+            else (
+                "Corregir los errores del Excel antes de continuar; los documentos aún no se validaron."
+                if documents_pending_ocr
+                else "Solicitar faltantes o corregir inconsistencias antes de radicar."
+            )
+        ),
+        # Se propaga a proposito: es la unica memoria de que los soportes no se han
+        # leido. Si se pierde aqui, el siguiente refresco lo trata como un caso ya
+        # analizado y vuelve a fabricar el bloqueante de "faltan soportes".
+        "documents_pending_ocr": documents_pending_ocr,
     }
     checklist = {
         "required": required_docs,
@@ -2345,6 +2471,7 @@ def refresh_case_validations(case_id: str) -> Dict[str, Any]:
         "matched_documents": matched_docs,
         "mismatches": [],
         "received_summary": _summarize_received_documents(docs),
+        "documents_pending_ocr": documents_pending_ocr,
     }
     analysis.update(
         {
@@ -5676,6 +5803,88 @@ def _explode_multipage_pdf_bytes(filename: str, content: bytes, max_pages: int =
         writer.write(buffer)
         exploded.append((f"{stem}__p{index:03d}.pdf", buffer.getvalue()))
     return exploded
+
+
+def _explode_case_pdfs(
+    payload: Dict[str, Any],
+    ocr_file_entries: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Parte en paginas los PDF del expediente que aun estan enteros.
+
+    Se llama desde analyze_case DESPUES de que el Excel paso su validacion de
+    integridad, nunca antes: partir un PDF de 4 MB en 22 archivos es trabajo sobre los
+    documentos, y si el Excel viene mal ese contrato se devuelve al cliente sin que nadie
+    llegue a mirarlos.
+
+    Es idempotente: un archivo que ya quedo como `<nombre>__pNNN.pdf` -o un PDF de una
+    sola pagina- no se vuelve a tocar, asi que reanalizar el caso no multiplica archivos.
+
+    Reescribe `payload["files"]` en el sitio, conservando el orden, y borra del disco el
+    PDF entero que reemplazo. Devuelve la lista de entradas que debe procesar el OCR.
+    """
+    files = payload.get("files") or []
+    nuevos_files: List[Dict[str, Any]] = []
+    nuevos_ocr: List[Dict[str, Any]] = []
+    ocr_ids = {id(entry) for entry in ocr_file_entries}
+    hubo_cambios = False
+
+    for entry in files:
+        path = Path(str(entry.get("stored_path") or ""))
+        es_ocr = id(entry) in ocr_ids
+        if path.suffix.lower() != ".pdf" or not path.exists():
+            nuevos_files.append(entry)
+            if es_ocr:
+                nuevos_ocr.append(entry)
+            continue
+        try:
+            contenido = path.read_bytes()
+            paginas = _explode_multipage_pdf_bytes(path.name, contenido)
+        except Exception:
+            # Un PDF ilegible no debe tumbar el analisis: se deja como esta y el OCR
+            # lo intentara y lo reportara con su propio mensaje.
+            nuevos_files.append(entry)
+            if es_ocr:
+                nuevos_ocr.append(entry)
+            continue
+        if len(paginas) <= 1:
+            nuevos_files.append(entry)
+            if es_ocr:
+                nuevos_ocr.append(entry)
+            continue
+
+        hubo_cambios = True
+        files_dir = path.parent
+        for page_name, page_content in paginas:
+            destino = files_dir / page_name
+            contador = 1
+            while destino.exists():
+                destino = files_dir / f"{Path(page_name).stem}-{contador}{Path(page_name).suffix}"
+                contador += 1
+            destino.write_bytes(page_content)
+            nueva = {
+                "filename": destino.name,
+                "stored_path": str(destino),
+                "size_bytes": len(page_content),
+                "content_type": destino.suffix.lower(),
+                "source_filename": path.name,
+            }
+            nuevos_files.append(nueva)
+            nuevos_ocr.append(nueva)
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+    if hubo_cambios:
+        payload["files"] = nuevos_files
+        logger.info(
+            "analyze_case case=%s pdfs partidos en paginas: %d archivo(s) -> %d",
+            payload.get("id"),
+            len(files),
+            len(nuevos_files),
+        )
+        return nuevos_ocr
+    return ocr_file_entries
 
 
 def _extract_worker_records_from_rows(rows: List[tuple[Any, ...]]) -> tuple[List[Dict[str, str]], int]:
@@ -9665,6 +9874,38 @@ def _pqr_cerrar_trazabilidad(contrato: str, usuario_gestion: str = "") -> Dict[s
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
+def _pqr_reabrir_trazabilidad(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Deshace el cierre de gestion PQR de un caso, para que vuelva a la bandeja.
+
+    Contraparte de _pqr_cerrar_trazabilidad. Se usa al borrar un expediente: si el caso se
+    descarta, la gestion nunca se atendio de verdad y la radicacion tiene que volver a
+    quedar pendiente en el portal.
+
+    Solo actua si el caso guarda el recibo del cierre (analysis.pqr_trazabilidad con los
+    ids). Un caso que nunca se aprobo no cerro nada y no hay que revertir nada. Como el
+    resto de efectos sobre sistemas vecinos, no propaga excepciones: un borrado no puede
+    fallar porque la base pqr no este disponible.
+    """
+    recibo = ((payload.get("analysis") or {}).get("pqr_trazabilidad") or {})
+    if not isinstance(recibo, dict) or not recibo.get("ok") or recibo.get("skipped"):
+        return {"ok": True, "skipped": True, "reason": "el caso no tiene cierre PQR que revertir"}
+    if recibo.get("id_trazabilidad") is None and recibo.get("id_trazabilidad_insertado") is None:
+        return {"ok": True, "skipped": True, "reason": "recibo de cierre sin ids (cierre anterior a esta version)"}
+    try:
+        return _legacy_post(
+            "legacy/pqr/trazabilidad/reabrir",
+            {
+                "id_trazabilidad": recibo.get("id_trazabilidad"),
+                "id_trazabilidad_insertado": recibo.get("id_trazabilidad_insertado"),
+                "usuario_gestion_anterior": recibo.get("usuario_gestion_anterior"),
+            },
+            timeout=30.0,
+        )
+    except Exception as exc:
+        logger.warning("No pude reabrir la trazabilidad PQR del caso %s: %s", payload.get("id"), exc)
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
 def _case_lote_and_contract(payload: Dict[str, Any]) -> Dict[str, str]:
     analysis = payload.get("analysis") or {}
     profile = ((analysis.get("xlsx_profile") or {}).get("profile") or {})
@@ -11132,25 +11373,17 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
     payload["analysis"]["output_926"] = output_926
     payload["analysis"]["workflow_run"] = workflow
 
-    # afi_rad -> 'Indexado', ANTES de la entrega. El paso a 'Plano' que hace
-    # _execute_legacy_delivery exige afi_rad_estado='Indexado', asi que el orden
-    # Radicada -> Indexado -> Plano tiene que resolverse dentro de esta misma corrida:
-    # si se dejara para despues, el UPDATE de 'Plano' no encontraria fila.
-    contrato_indexa = _contrato_para_afi_rad(payload)
-    if contrato_indexa:
-        payload["analysis"]["afi_rad_indexado"] = _afi_rad_set_estado(
-            contrato_indexa, "indexado", datetime.now().strftime("%Y%m%d")
-        )
-
-        # Cierre de la gestion pendiente en PQR (pqr_colmena). Va despues de 'Indexado'
-        # porque ambos escriben afi_rad_fecharecibido: 'Indexado' lo hace por contrato y
-        # este por afi_rad_na, y el orden deja como valor final el de este cierre.
-        usuario_gestion = normalize_text(
-            (payload.get("manual_approval") or {}).get("operator") or operator or "nova_case_workflow"
-        )[:15]
-        payload["analysis"]["pqr_trazabilidad"] = _pqr_cerrar_trazabilidad(
-            contrato_indexa, usuario_gestion
-        )
+    # Ni 'Indexado' ni el cierre de la gestion PQR van aca. Los tres estados de afi_rad
+    # responden a decisiones del usuario, no a que el flujo haya terminado de calcular:
+    #
+    #     Radicada  -> al cargar el contrato   (lo pone el modulo externo de radicacion)
+    #     Indexado  -> al APROBAR el caso      (approve_case)
+    #     Plano     -> al DESCARGAR el plano   (_marcar_afi_rad_plano, en la descarga)
+    #
+    # Terminar el workflow solo significa que el caso es *aprobable*, que es un calculo
+    # del sistema. Marcarlo 'Indexado' con eso adelantaba un hecho que quiza nunca pasa
+    # -el operador todavia puede descartarlo-, y ademas dejaba la radicacion fuera de la
+    # bandeja de pendientes sin forma de recuperarla salvo SQL a mano.
 
     payload["updated_at"] = utc_now()
     save_case(payload)
@@ -11308,12 +11541,15 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
     # se procesan en paralelo (con cache de OCR por archivo ya resuelto arriba) en vez de
     # uno por uno, para aprovechar los cores disponibles en vez de dejarlos ociosos.
     if ocr_file_entries and not skip_ocr_for_xlsx_errors:
+        # El Excel paso: recien ahora se toca un documento. Partir los PDF multipagina es
+        # el primer trabajo documental del flujo y va aqui, despues del gate, no al subir.
+        ocr_file_entries = _explode_case_pdfs(payload, ocr_file_entries)
         max_workers = min(8, max(1, os.cpu_count() or 4), len(ocr_file_entries))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             docs.extend(executor.map(_process_document, ocr_file_entries))
     elif skip_ocr_for_xlsx_errors and ocr_file_entries:
         logger.info(
-            "analyze_case case=%s xlsx_precheck_blockers - se omite OCR de %d soporte(s)",
+            "analyze_case case=%s xlsx_precheck_blockers - no se parte ni se procesa ningun soporte (%d archivo(s))",
             case_id,
             len(ocr_file_entries),
         )
@@ -11564,13 +11800,10 @@ def store_case_files(label: str, uploads: List[tuple[str, bytes]], operation: st
         )
 
     def _store_processed(filename: str, content: bytes) -> None:
-        lower_name = filename.lower()
-        if lower_name.endswith(".pdf"):
-            exploded = _explode_multipage_pdf_bytes(filename, content)
-            if len(exploded) > 1:
-                for page_name, page_content in exploded:
-                    _store_one(page_name, page_content)
-                return
+        # Los PDF se guardan ENTEROS. El despiece por paginas ya no ocurre al subir:
+        # es trabajo sobre los documentos, y lo primero que debe pasar es la validacion
+        # del Excel. analyze_case los parte justo antes del OCR, y solo si el Excel paso
+        # (ver _explode_case_pdfs). Si el Excel trae errores no se parte nada.
         _store_one(filename, content)
 
     for original_name, content in uploads:
@@ -11609,6 +11842,37 @@ def store_case_files(label: str, uploads: List[tuple[str, bytes]], operation: st
     return save_case(payload)
 
 
-def delete_case(case_id: str) -> None:
+def delete_case(case_id: str, cierre_ciclo: bool = False) -> Dict[str, Any]:
+    """Borra el expediente y, si es un descarte, reabre la gestion PQR que hubiera cerrado.
+
+    El borrado era hasta ahora puramente local (un rmtree), asi que un caso aprobado y
+    despues descartado dejaba la radicacion cerrada en el portal y fuera de la bandeja
+    para siempre. La reapertura va ANTES del rmtree porque el recibo del cierre vive
+    dentro del propio case.json: una vez borrado el directorio ya no hay con que revertir.
+
+    `cierre_ciclo=True` NO reabre nada, y la distincion es lo importante:
+
+      - descarte: el caso se tira porque no servia. La gestion nunca se atendio de
+        verdad, asi que la radicacion tiene que volver a la bandeja.
+      - cierre de ciclo (Colmena, tras descargar el plano): el contrato recorrio el flujo
+        entero y termino bien. Reabrir su gestion lo devolveria a la bandeja como si
+        estuviera sin atender, que es exactamente lo contrario de lo que paso.
+
+    Sigue sin revertir wimg004.afi_rad ni la entrega del lote a ybr/wimg004; esos son
+    efectos aparte y su reversion es una decision distinta.
+    """
+    if cierre_ciclo:
+        reapertura: Dict[str, Any] = {
+            "ok": True,
+            "skipped": True,
+            "reason": "cierre de ciclo: el contrato completo el flujo, su gestion queda cerrada",
+        }
+    else:
+        reapertura = {"ok": True, "skipped": True, "reason": "caso ilegible"}
+        try:
+            reapertura = _pqr_reabrir_trazabilidad(load_case(case_id))
+        except Exception as exc:
+            logger.warning("No pude leer el caso %s antes de borrarlo: %s", case_id, exc)
     shutil.rmtree(get_case_dir(case_id), ignore_errors=True)
     clear_cases_cache()
+    return {"deleted": case_id, "pqr_trazabilidad_reabierta": reapertura}

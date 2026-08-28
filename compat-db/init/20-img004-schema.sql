@@ -768,6 +768,41 @@ ALTER SEQUENCE public.consultores_id_consultor_seq OWNED BY public.consultores.i
 ALTER TABLE ONLY public.consultores ALTER COLUMN id_consultor SET DEFAULT nextval('public.consultores_id_consultor_seq'::regclass);
 
 --
+-- Name: afi_intermediarios; Type: TABLE; Schema: public; Owner: escobar
+--
+-- Corredores / agencias / agentes. Respalda la validacion del documento de comisiones
+-- para el codigo 03 (Corredor/Agencia); el codigo 01 (Consultor) va contra consultores.
+-- Sin PRIMARY KEY sobre numero_identificacion: el volcado real trae identificaciones
+-- repetidas (un mismo NIT con varias sucursales o regionales). El contenido lo carga
+-- 46-seed-afi-intermediarios-img004.sql.
+--
+
+CREATE TABLE public.afi_intermediarios (
+    sr integer NOT NULL,
+    fecha_insert timestamp with time zone DEFAULT now(),
+    ramo varchar,
+    regional varchar,
+    numero_identificacion numeric,
+    nit1 varchar,
+    nit2 varchar,
+    rui varchar,
+    tipo varchar,
+    sucursal varchar,
+    nombre varchar,
+    ciudad varchar,
+    estado_autorizacion varchar DEFAULT 'AUTORIZADO'::character varying,
+    usuario varchar,
+    estado_registro boolean,
+    tipo_documento varchar
+);
+
+
+ALTER TABLE public.afi_intermediarios OWNER TO escobar;
+
+CREATE INDEX afi_intermediarios_num_ident_idx ON public.afi_intermediarios (numero_identificacion);
+
+
+--
 -- Name: salarios; Type: TABLE; Schema: public; Owner: escobar
 --
 

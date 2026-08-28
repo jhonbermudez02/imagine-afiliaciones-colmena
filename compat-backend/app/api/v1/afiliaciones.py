@@ -8,6 +8,8 @@ import json
 import base64
 import shutil
 import unicodedata
+import zipfile
+from urllib.parse import quote
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -3517,6 +3519,13 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
         f49_code = _tipo_tramite_f49(row.get("tipoafiliacion"))
         if arl_emp == "" and f49_code == "1":
             arl_emp = "10"
+        # Excepcion unica del combo de D30: la posicion 23 es Positiva, y el codigo real
+        # de Positiva en arpriesgos es 10 -el catalogo no tiene ningun 23-. El resto de
+        # posiciones del combo si coinciden con su codigo, asi que esto NO es un remapeo
+        # general: es la unica que se desvia, y sin ella el plano sale con un f56 que el
+        # legacy no puede resolver.
+        if arl_emp == "23":
+            arl_emp = "10"
         # ARL anterior (f56/combo56): arl_emp puede traer el nombre de la ARL (ej.
         # "Positiva Compañía de Seguros de Vida", con ruido OCR alrededor) o ya un código
         # directo. El "NN" que antecede al nombre en el formulario ("14-23 Positiva...") es
@@ -6784,6 +6793,55 @@ def legacy_db_consultores_get() -> dict[str, Any]:
     return {"ok": True, "items": items}
 
 
+@router.get("/legacy/db/intermediarios")
+def legacy_db_intermediarios_get() -> dict[str, Any]:
+    """Tabla real de corredores/agencias (img004.afi_intermediarios).
+
+    Respalda la validacion del documento de comisiones cuando el codigo es 03
+    (Corredor/Agencia); el codigo 01 (Consultor) se valida contra img004.consultores.
+    La llave de busqueda es numero_identificacion, normalizada a entero-como-texto.
+
+    Solo se devuelven las filas con estado_registro verdadero: un intermediario dado de
+    baja no habilita comisiones. No se filtra por estado_autorizacion porque en el
+    volcado real vale 'AUTORIZADO' en todas las filas y no discrimina nada.
+    """
+    try:
+        rows = fetch_all_by_alias(
+            "wimg004",
+            "SELECT numero_identificacion, nombre, tipo, tipo_documento, estado_registro, "
+            "estado_autorizacion FROM afi_intermediarios WHERE estado_registro IS TRUE "
+            "ORDER BY numero_identificacion",
+            {},
+        )
+    except (ValueError, SQLAlchemyError, NoSuchTableError) as exc:
+        raise HTTPException(
+            status_code=503, detail=f"Error leyendo afi_intermediarios: {type(exc).__name__}: {exc}"
+        )
+    items = []
+    vistos: set[str] = set()
+    for row in rows:
+        # numero_identificacion es numeric en PG: normalizar a entero-como-texto.
+        ident = str(_to_int_safe(row.get("numero_identificacion"), default=0))
+        if ident == "0":
+            continue
+        # El volcado real repite identificaciones (mismo NIT en varias sucursales o
+        # regionales). Para una validacion de membresia basta la primera aparicion.
+        if ident in vistos:
+            continue
+        vistos.add(ident)
+        items.append(
+            {
+                "numero_identificacion": ident,
+                "nombre": as_text(row.get("nombre")).strip(),
+                "tipo": as_text(row.get("tipo")).strip(),
+                "tipo_documento": as_text(row.get("tipo_documento")).strip(),
+                "estado_registro": bool(row.get("estado_registro")),
+                "estado_autorizacion": as_text(row.get("estado_autorizacion")).strip(),
+            }
+        )
+    return {"ok": True, "items": items}
+
+
 @router.post("/legacy/db/consultores")
 def legacy_db_consultores_save(payload: dict[str, Any]) -> dict[str, Any]:
     """Reemplaza el contenido completo de img004.consultores (misma semantica que el
@@ -7061,6 +7119,20 @@ def legacy_pqr_trazabilidad_cierre(payload: dict[str, Any]) -> dict[str, Any]:
     id_radicacion_sa = fila.get("id_radicacion_sa")
     afi_rad_na = fila.get("afi_rad_na")
 
+    # usuario_gestion previo: el UPDATE de abajo lo pisa, y sin guardarlo no habria forma
+    # de dejar la fila como estaba si despues hay que reabrirla.
+    usuario_anterior = None
+    try:
+        previa = fetch_all_by_alias(
+            "pqr",
+            "SELECT usuario_gestion FROM afa_trazabilidad WHERE id_trazabilidad = :id",
+            {"id": id_trazabilidad},
+        )
+        if previa:
+            usuario_anterior = previa[0].get("usuario_gestion")
+    except (ValueError, SQLAlchemyError):
+        usuario_anterior = None
+
     try:
         with get_engine_by_alias("pqr").begin() as conn:
             cerrada = conn.execute(
@@ -7070,18 +7142,21 @@ def legacy_pqr_trazabilidad_cierre(payload: dict[str, Any]) -> dict[str, Any]:
                 ),
                 {"usuario_gestion": usuario_gestion[:64], "id_trazabilidad": id_trazabilidad},
             ).rowcount
-            conn.execute(
+            # RETURNING para saber que fila se creo: es lo unico que permite borrar
+            # exactamente esa -y no otra 390 de la misma radicacion- si hay que revertir.
+            insertado = conn.execute(
                 text(
                     "INSERT INTO afa_trazabilidad "
                     "(id_radicacion_sa, afi_rad_na, actividad, usuario_gestion, fecha_gestion) "
-                    "VALUES (:id_radicacion_sa, :afi_rad_na, 390, :usuario_gestion, NOW())"
+                    "VALUES (:id_radicacion_sa, :afi_rad_na, 390, :usuario_gestion, NOW()) "
+                    "RETURNING id_trazabilidad"
                 ),
                 {
                     "id_radicacion_sa": id_radicacion_sa,
                     "afi_rad_na": afi_rad_na,
                     "usuario_gestion": usuario_gestion[:64],
                 },
-            )
+            ).scalar()
     except (ValueError, SQLAlchemyError) as exc:
         raise HTTPException(status_code=503, detail=f"Error cerrando trazabilidad PQR: {type(exc).__name__}: {exc}")
 
@@ -7113,9 +7188,330 @@ def legacy_pqr_trazabilidad_cierre(payload: dict[str, Any]) -> dict[str, Any]:
         "afi_rad_na": afi_rad_na,
         "gestion_cerrada": int(cerrada or 0),
         "cierre_insertado": 1,
+        # Estos tres son el "recibo" del cierre: con ellos se puede revertir con
+        # precision (ver /legacy/pqr/trazabilidad/reabrir).
+        "id_trazabilidad_insertado": insertado,
+        "usuario_gestion_anterior": usuario_anterior,
         "afi_rad_fecharecibido_actualizado": int(afi_rad_actualizado or 0),
         "afi_rad_nota": afi_rad_nota,
     }
+
+
+
+@router.post("/legacy/pqr/trazabilidad/reabrir")
+def legacy_pqr_trazabilidad_reabrir(payload: dict[str, Any]) -> dict[str, Any]:
+    """Deshace un cierre de gestion hecho por esta app, dejando la radicacion pendiente.
+
+    Existe porque borrar un expediente no puede dejar la radicacion cerrada en el portal:
+    si el caso se descarta -aunque el flujo lo hubiera dado por aprobable- la gestion
+    nunca llego a atenderse de verdad y tiene que volver a la bandeja.
+
+    Revierte SOLO lo que escribio el cierre, y por id, nunca por heuristica:
+      1. La fila que se cerro vuelve a fecha_gestion NULL con su usuario_gestion previo.
+      2. Se borra la fila 390 que se inserto -identificada por el id que devolvio el
+         cierre, no por "la ultima 390 de la radicacion"-.
+
+    Los ids salen del recibo que guardo el caso en analysis.pqr_trazabilidad. Sin ese
+    recibo no se toca nada: adivinar que revertir sobre una tabla de trazabilidad es
+    peor que no revertir.
+
+    NO toca wimg004.afi_rad ni la entrega del lote: revertir eso es una decision aparte.
+    """
+    id_trazabilidad = payload.get("id_trazabilidad")
+    id_insertado = payload.get("id_trazabilidad_insertado")
+    usuario_anterior = payload.get("usuario_gestion_anterior")
+
+    if id_trazabilidad is None and id_insertado is None:
+        return {"ok": True, "skipped": True, "reason": "sin recibo de cierre que revertir", "reabierta": 0, "borrada": 0}
+
+    if not _table_exists_alias("pqr", "afa_trazabilidad"):
+        return {"ok": True, "skipped": True, "reason": "pqr.afa_trazabilidad no existe o alias 'pqr' sin configurar"}
+
+    reabierta = 0
+    borrada = 0
+    try:
+        with get_engine_by_alias("pqr").begin() as conn:
+            if id_trazabilidad is not None:
+                # Sin guarda por actividad: el cierre reabre la fila que el recibo dice
+                # que cerro, y esa puede ser de cualquier actividad. Normalmente es la 391
+                # que dejo abierta el portal, pero tambien puede ser una 390 -pasa cuando
+                # una gestion anterior se reabrio a mano-. Filtrar por actividad hacia que
+                # la reversion no encontrara fila y fallara en silencio. El id del recibo
+                # ya identifica la fila sin ambiguedad.
+                reabierta = conn.execute(
+                    text(
+                        "UPDATE afa_trazabilidad "
+                        "SET fecha_gestion = NULL, usuario_gestion = :usuario_anterior "
+                        "WHERE id_trazabilidad = :id"
+                    ),
+                    {"id": id_trazabilidad, "usuario_anterior": usuario_anterior},
+                ).rowcount
+            if id_insertado is not None:
+                borrada = conn.execute(
+                    text("DELETE FROM afa_trazabilidad WHERE id_trazabilidad = :id AND actividad = 390"),
+                    {"id": id_insertado},
+                ).rowcount
+    except (ValueError, SQLAlchemyError) as exc:
+        raise HTTPException(status_code=503, detail=f"Error reabriendo trazabilidad PQR: {type(exc).__name__}: {exc}")
+
+    return {
+        "ok": True,
+        "id_trazabilidad": id_trazabilidad,
+        "id_trazabilidad_insertado": id_insertado,
+        "reabierta": int(reabierta or 0),
+        "borrada": int(borrada or 0),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Bandeja de afiliaciones pendientes (view pqr_colmena.afa_pendientes) y sus
+# adjuntos. Es SOLO LECTURA: el repositorio de imagenes es la evidencia de lo que
+# radico el portal y no se toca desde aca. Las correcciones (tipicamente un xlsx
+# rehecho) viven en el expediente del backend principal, no en el repositorio.
+# ---------------------------------------------------------------------------
+
+# Segmento de fecha del repositorio legacy: .../<ndisco>/<YYYYMMDD>/<Afa|Pia>/...
+_PQR_FECHA_SEG_RE = re.compile(r"^\d{8}$")
+
+
+def _pqr_adjunto_rel_path(path_bd: Any) -> str:
+    """Traduce la ruta guardada en BD a una ruta relativa dentro de PI_ARCHIVE_MOUNT.
+
+    La columna `path` de afa_adjuntosrad es texto de exhibicion del entorno que la
+    genero (`/imagenes4/img11/...`, o UNC `\\\\10.17.0.125\\imagenes4\\img11\\...`), NO una
+    ruta de esta maquina: el disco real lo decide docker-compose via
+    LEGACY_IMG_HOST_MOUNT y el codigo siempre entra por PI_ARCHIVE_MOUNT. Ver el
+    comentario largo de PI_ARCHIVE_SEQ_START.
+
+    En vez de recortar un prefijo fijo -que se rompe en cuanto el ndisco o el recurso
+    cambian de nombre entre ambientes- se ancla en el primer segmento con forma de
+    fecha YYYYMMDD, que es donde arranca la parte estable de la ruta.
+    """
+    raw = as_text(path_bd).strip().replace("\\", "/")
+    if not raw:
+        return ""
+    partes = [p for p in raw.split("/") if p]
+    for i, parte in enumerate(partes):
+        if _PQR_FECHA_SEG_RE.match(parte):
+            return "/".join(partes[i:])
+    return ""
+
+
+def _pqr_adjunto_local_path(path_bd: Any) -> Optional[Path]:
+    """Ruta fisica dentro del contenedor, o None si no se puede resolver con seguridad."""
+    rel = _pqr_adjunto_rel_path(path_bd)
+    if not rel:
+        return None
+    root = Path(PI_ARCHIVE_MOUNT).resolve()
+    try:
+        destino = (root / rel).resolve()
+    except (OSError, RuntimeError):
+        return None
+    # Guarda contra traversal: un `..` en la ruta de BD no puede sacarnos del mount.
+    if destino != root and root not in destino.parents:
+        return None
+    return destino
+
+
+def _pqr_adjuntos_de(id_radicacion: int) -> list[dict[str, Any]]:
+    """Adjuntos de una radicacion, con el estado fisico de cada archivo resuelto."""
+    filas = fetch_all_by_alias(
+        "pqr",
+        "SELECT id_adjunto, usuario, fecha_insert, id_radicacion, nombre_original, path, "
+        "tipo, orden, desc_documental, tiene_error, errores_validacion "
+        "FROM afa_adjuntosrad WHERE id_radicacion = :rad ORDER BY id_adjunto",
+        {"rad": id_radicacion},
+    )
+    salida: list[dict[str, Any]] = []
+    for fila in filas:
+        local = _pqr_adjunto_local_path(fila.get("path"))
+        existe = bool(local and local.is_file())
+        nombre = as_text(fila.get("nombre_original")).strip()
+        if not nombre and local:
+            nombre = local.name
+        salida.append(
+            {
+                "id_adjunto": fila.get("id_adjunto"),
+                "id_radicacion": fila.get("id_radicacion"),
+                "nombre_original": nombre,
+                "extension": Path(nombre).suffix.lower(),
+                "path_bd": as_text(fila.get("path")),
+                "path_local": str(local) if local else "",
+                "existe": existe,
+                "size_bytes": local.stat().st_size if existe else 0,
+                "tipo": as_text(fila.get("tipo")),
+                "usuario": as_text(fila.get("usuario")),
+                "fecha_insert": fila.get("fecha_insert"),
+                "tiene_error": bool(fila.get("tiene_error")),
+            }
+        )
+    return salida
+
+
+def _pqr_header_safe(valor: Any) -> str:
+    """Texto apto para una cabecera HTTP (latin-1). Un nombre con "n con virgulilla" o
+    tilde -y este repositorio esta lleno- revienta uvicorn al serializar la cabecera."""
+    texto = as_text(valor)
+    return texto.encode("latin-1", errors="replace").decode("latin-1")
+
+
+def _pqr_ascii_filename(valor: Any) -> str:
+    """Nombre de archivo reducido a ASCII para el Content-Disposition, sin comillas."""
+    texto = unicodedata.normalize("NFKD", as_text(valor))
+    texto = texto.encode("ascii", errors="ignore").decode("ascii")
+    texto = texto.replace('"', "").replace("\\", "").strip()
+    return texto or "adjunto"
+
+
+def _pqr_content_disposition(nombre: Any) -> str:
+    """Content-Disposition que conserva el nombre real del archivo.
+
+    La cabecera solo admite latin-1, asi que un "Nino" con virgulilla no cabe en el
+    `filename=` clasico. RFC 5987 resuelve justo esto: `filename=` lleva la version ASCII
+    para clientes viejos y `filename*=UTF-8''...` el nombre real percent-encoded, que es
+    el que los navegadores actuales prefieren.
+    """
+    texto = as_text(nombre) or "adjunto"
+    ascii_fb = _pqr_ascii_filename(texto)
+    utf8_q = quote(texto, safe="")
+    return f"attachment; filename=\"{ascii_fb}\"; filename*=UTF-8''{utf8_q}"
+
+@router.get("/legacy/pqr/pendientes")
+def legacy_pqr_pendientes() -> dict[str, Any]:
+    """Afiliaciones pendientes de gestion, desde el view afa_pendientes.
+
+    El view ya hace el pivot del formulario dinamico (contrato / nit / razon social /
+    numero de trabajadores) y filtra por fecha_gestion IS NULL. Aca solo se le suma, por
+    radicacion, el inventario de adjuntos: cuantos hay, cuantos estan fisicamente en el
+    repositorio y si viene el xlsx -sin el, la carga no puede prosperar porque
+    POST /api/cases exige minimo un xlsx y un pdf-.
+    """
+    if not _table_exists_alias("pqr", "afa_pendientes"):
+        raise HTTPException(
+            status_code=503,
+            detail="El view pqr.afa_pendientes no existe o el alias 'pqr' no esta configurado.",
+        )
+    try:
+        filas = fetch_all_by_alias(
+            "pqr",
+            "SELECT contrato, nit, razon_social, num_trabajadores, id_trazabilidad, "
+            "id_radicacion_sa, afi_rad_na, actividad, usuario_gestion, fecha_gestion, "
+            "fecha_asignacion, observacion FROM afa_pendientes ORDER BY id_trazabilidad",
+        )
+    except (ValueError, SQLAlchemyError) as exc:
+        raise HTTPException(status_code=503, detail=f"Error consultando afa_pendientes: {type(exc).__name__}: {exc}")
+
+    items: list[dict[str, Any]] = []
+    for fila in filas:
+        rad = fila.get("id_radicacion_sa")
+        adjuntos = _pqr_adjuntos_de(rad) if rad is not None else []
+        presentes = [a for a in adjuntos if a["existe"]]
+        items.append(
+            {
+                **{k: fila.get(k) for k in (
+                    "contrato", "nit", "razon_social", "num_trabajadores", "id_trazabilidad",
+                    "id_radicacion_sa", "afi_rad_na", "actividad", "usuario_gestion",
+                    "fecha_gestion", "fecha_asignacion", "observacion",
+                )},
+                "adjuntos_total": len(adjuntos),
+                "adjuntos_presentes": len(presentes),
+                "adjuntos_faltantes": [a["nombre_original"] for a in adjuntos if not a["existe"]],
+                "tiene_xlsx": any(a["extension"] in (".xlsx", ".xlsm", ".xls") for a in presentes),
+                "tiene_pdf": any(a["extension"] == ".pdf" for a in presentes),
+            }
+        )
+    return {"ok": True, "count": len(items), "items": items}
+
+
+@router.get("/legacy/pqr/pendientes/{id_radicacion}/adjuntos")
+def legacy_pqr_adjuntos(id_radicacion: int) -> dict[str, Any]:
+    """Inventario de adjuntos de una radicacion, con el estado fisico de cada archivo."""
+    try:
+        adjuntos = _pqr_adjuntos_de(id_radicacion)
+    except (ValueError, SQLAlchemyError) as exc:
+        raise HTTPException(status_code=503, detail=f"Error consultando afa_adjuntosrad: {type(exc).__name__}: {exc}")
+    if not adjuntos:
+        raise HTTPException(status_code=404, detail=f"La radicacion {id_radicacion} no tiene adjuntos registrados.")
+    return {
+        "ok": True,
+        "id_radicacion": id_radicacion,
+        "count": len(adjuntos),
+        "presentes": sum(1 for a in adjuntos if a["existe"]),
+        "items": adjuntos,
+    }
+
+
+@router.get("/legacy/pqr/pendientes/{id_radicacion}/adjuntos/{id_adjunto}")
+def legacy_pqr_adjunto_archivo(id_radicacion: int, id_adjunto: int) -> Response:
+    """Bytes de UN adjunto. Lo consume tanto el backend principal (para armar el
+    expediente) como el navegador (para descargar y corregir el xlsx)."""
+    try:
+        adjuntos = _pqr_adjuntos_de(id_radicacion)
+    except (ValueError, SQLAlchemyError) as exc:
+        raise HTTPException(status_code=503, detail=f"Error consultando afa_adjuntosrad: {type(exc).__name__}: {exc}")
+    elegido = next((a for a in adjuntos if a["id_adjunto"] == id_adjunto), None)
+    if elegido is None:
+        raise HTTPException(status_code=404, detail=f"El adjunto {id_adjunto} no pertenece a la radicacion {id_radicacion}.")
+    if not elegido["existe"]:
+        raise HTTPException(
+            status_code=404,
+            detail=f"El archivo no esta en el repositorio: {elegido['path_bd']} (resuelto a {elegido['path_local'] or 'ruta no resoluble'}).",
+        )
+    contenido = Path(elegido["path_local"]).read_bytes()
+    return Response(
+        content=contenido,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": _pqr_content_disposition(elegido["nombre_original"]),
+            "X-Nombre-Original": _pqr_header_safe(elegido["nombre_original"]),
+        },
+    )
+
+
+@router.get("/legacy/pqr/pendientes/{id_radicacion}/zip")
+def legacy_pqr_adjuntos_zip(id_radicacion: int) -> Response:
+    """Todos los adjuntos de la radicacion en un zip -el "descargar todos" de la bandeja-.
+
+    Los que falten fisicamente no rompen la descarga: se listan en un FALTANTES.txt
+    dentro del zip, para que el operador vea que no los recibio y por que.
+    """
+    try:
+        adjuntos = _pqr_adjuntos_de(id_radicacion)
+    except (ValueError, SQLAlchemyError) as exc:
+        raise HTTPException(status_code=503, detail=f"Error consultando afa_adjuntosrad: {type(exc).__name__}: {exc}")
+    if not adjuntos:
+        raise HTTPException(status_code=404, detail=f"La radicacion {id_radicacion} no tiene adjuntos registrados.")
+
+    buffer = io.BytesIO()
+    usados: dict[str, int] = {}
+    faltantes: list[str] = []
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for adj in adjuntos:
+            if not adj["existe"]:
+                faltantes.append(f"{adj['id_adjunto']}\t{adj['nombre_original']}\t{adj['path_bd']}")
+                continue
+            # Dos adjuntos de la misma radicacion pueden traer el mismo nombre_original
+            # (viven en carpetas uuid distintas en el repositorio, pero el zip es plano).
+            nombre = adj["nombre_original"] or f"adjunto-{adj['id_adjunto']}"
+            if nombre in usados:
+                usados[nombre] += 1
+                tallo = Path(nombre)
+                nombre = f"{tallo.stem}-{usados[nombre]}{tallo.suffix}"
+            else:
+                usados[nombre] = 0
+            zf.write(adj["path_local"], arcname=nombre)
+        if faltantes:
+            zf.writestr(
+                "FALTANTES.txt",
+                "Adjuntos registrados en afa_adjuntosrad que NO estan en el repositorio.\n"
+                "id_adjunto\tnombre_original\tpath en BD\n" + "\n".join(faltantes) + "\n",
+            )
+    buffer.seek(0)
+    return Response(
+        content=buffer.read(),
+        media_type="application/zip",
+        headers={"Content-Disposition": _pqr_content_disposition(f"radicacion-{id_radicacion}.zip")},
+    )
 
 
 @router.post("/legacy/lote/next-reproceso")
@@ -7558,6 +7954,87 @@ def legacy_flatfile_archive_plano(payload: dict[str, Any]) -> dict[str, Any]:
     except OSError as exc:
         raise HTTPException(status_code=503, detail=f"Error guardando plano en archivo: {type(exc).__name__}: {exc}")
     return {"ok": True, "path": str(dest), "lote_folder": lote_folder, "date": date_str}
+
+
+def _carpeta_archivo_del_lote(lote: str) -> tuple[Path, str, str]:
+    """Carpeta REAL donde quedaron archivados los documentos de un lote.
+
+    Se deriva del `pi` guardado en brempresasarp/bkempresasarp -la ruta UNC de exhibicion
+    \\10.17.0.125\<ndisco>\<YYYYMMDD>\Afa\<lote>\<archivo>-, no de datetime.now(): el
+    plano se descarga muchas veces y a menudo dias despues de aprobar, asi que tomar la
+    fecha de hoy lo dejaria en una carpeta vacia al lado de los documentos, no junto a
+    ellos. Solo si el lote no tiene ningun `pi` se cae a la fecha de hoy.
+
+    Devuelve (carpeta, fecha, origen) -origen dice de donde salio la fecha, para poder
+    reportarlo-.
+    """
+    lote_digits = _only_digits(lote)
+    lote_folder = f"{int(lote_digits):08d}" if lote_digits else as_text(lote).strip().zfill(8)
+    fecha = ""
+    for alias, tabla in (("ybr", "brempresasarp"), ("wimg004", "bkempresasarp")):
+        try:
+            with get_engine_by_alias(alias).begin() as conn:
+                filas = conn.execute(
+                    text(f"SELECT pi FROM {tabla} WHERE lt = :lote AND pi IS NOT NULL AND btrim(pi) <> '' LIMIT 1"),
+                    {"lote": lote_digits or lote},
+                ).mappings().all()
+        except (ValueError, SQLAlchemyError):
+            continue
+        if not filas:
+            continue
+        partes = as_text(filas[0].get("pi")).replace("/", "\\").split("\\")
+        # ...\<ndisco>\<YYYYMMDD>\Afa\<lote>\<archivo>: la fecha es el segmento de 8
+        # digitos que antecede a "Afa".
+        for i, parte in enumerate(partes):
+            if parte == "Afa" and i > 0 and re.fullmatch(r"\d{8}", partes[i - 1] or ""):
+                fecha = partes[i - 1]
+                break
+        if fecha:
+            break
+    origen = "pi"
+    if not fecha:
+        fecha = datetime.now().strftime("%Y%m%d")
+        origen = "hoy"
+    return Path(PI_ARCHIVE_MOUNT, fecha, "Afa", lote_folder), fecha, origen
+
+
+@router.post("/legacy/flatfile/guardar-plano-contrato")
+def legacy_flatfile_guardar_plano_contrato(payload: dict[str, Any]) -> dict[str, Any]:
+    """Guarda el plano 926 de UN contrato junto a sus documentos archivados.
+
+    Distinto de /legacy/flatfile/archive-plano, que escribe `<lote>.txt` con el indice de
+    imagenes: este deja `plano_<contrato>.txt` en la misma carpeta. Son dos archivos con
+    proposito distinto y nombre distinto, no se pisan.
+
+    Se escribe en latin-1, igual que la descarga: el plano es de ancho fijo y se lee por
+    posicion de BYTE; en UTF-8 la N con virgulilla ocupa dos y corre todo lo que sigue.
+    """
+    lote = as_text(payload.get("lote")).strip()
+    contrato = _only_digits(as_text(payload.get("contrato")))
+    content = as_text(payload.get("content"))
+    if not lote:
+        raise HTTPException(status_code=400, detail="Campo requerido: lote")
+    if not contrato:
+        raise HTTPException(status_code=400, detail="Campo requerido: contrato")
+    if not content:
+        raise HTTPException(status_code=400, detail="Campo requerido: content")
+
+    dest_dir, fecha, origen_fecha = _carpeta_archivo_del_lote(lote)
+    dest = dest_dir / f"plano_{contrato}.txt"
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(content.encode("latin-1", errors="replace"))
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail=f"Error guardando el plano del contrato: {type(exc).__name__}: {exc}")
+    return {
+        "ok": True,
+        "path": str(dest),
+        "contrato": contrato,
+        "lote": lote,
+        "fecha": fecha,
+        "fecha_origen": origen_fecha,
+        "bytes": dest.stat().st_size,
+    }
 
 
 @router.post("/legacy/flatfile/compare-oracle")

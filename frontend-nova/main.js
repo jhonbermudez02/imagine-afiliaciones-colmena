@@ -20,31 +20,36 @@ const OPERATION_OPTIONS = {
     colima: { key: 'colima', short: 'COLIMA', name: 'AFI Colima', brand: 'AFI Colima · Portal ARL', validation: 'Reglas Colima' },
 };
 
+// [tipo, etiqueta, codigo legacy]. El codigo es el MISMO que archiva el backend:
+// DOC_TYPE_TO_PRIMARY_CODE en backend/app/cases.py, derivado de LEGACY_CODE_TO_TYPE.
+// Aqui solo se muestra -al reclasificar se manda `expected_type` y el backend resuelve
+// el codigo por su cuenta-, pero es lo que el operador usa para buscar, asi que una
+// diferencia con esa tabla le hace elegir a ciegas. Si cambia alla, cambia aqui.
 const REVIEW_TYPE_OPTIONS = [
-    ['formulario_afiliacion', 'Afiliación',        '01'],
-    ['anexo_sedes',           'Sedes ·01',         '01'],
-    ['comision',              'Comisión',           '02'],
-    ['listado_trabajadores',  'Listados',           '03'],
-    ['carta',                 'Carta',              '29'],
-    ['camara_comercio',       'Cámara de comercio', '05'],
-    ['cedula',                'Cédula',             '06'],
-    ['inspector',             'Inspector',          '17'],
-    ['constancia_afiliacion', 'Verificación',       '07'],
-    ['rut',                   'RUT / DIAN',         '08'],
-    ['entrega_documentos',    'Entrega Doc',        '10'],
-    ['soporte_pagos',         'Pagos',              '11'],
-    ['contrato',              'Contrato',           '13'],
-    ['eps',                   'EPS',                '14'],
-    ['afp',                   'AFP',                '15'],
-    ['paz_y_salvo',           'Paz y Salvo',        '16'],
-    ['eps_afp',               'EPS / AFP',          '17'],
-    ['identificacion_peligros','Id. Peligros',      '20'],
-    ['examen_preocupacional', 'Examen Pre-ocup.',   '21'],
-    ['autorizacion',          'Autorización',       '98'],
-    ['beneficiario_final',    'Beneficiario Final', '27'],
-    ['sat',                   'SAT',                '99'],
-    ['retroactivas',          'Retroactivas',       '18'],
-    ['pdf',                   'PDF / Imagen',       '99'],
+    ['formulario_afiliacion',   'Afiliación',         '00'],
+    ['anexo_sedes',             'Sedes ·01',          '01'],
+    ['comision',                'Comisión',           '03'],
+    ['listado_trabajadores',    'Listados',           '02'],
+    ['carta',                   'Carta',              '29'],
+    ['camara_comercio',         'Cámara de comercio', '05'],
+    ['cedula',                  'Cédula',             '06'],
+    ['inspector',               'Inspector',          '17'],
+    ['constancia_afiliacion',   'Verificación',       '07'],
+    ['rut',                     'RUT / DIAN',         '08'],
+    ['entrega_documentos',      'Entrega Doc',        '10'],
+    ['soporte_pagos',           'Pagos',              '11'],
+    ['contrato',                'Contrato',           '12'],
+    ['eps',                     'EPS',                '13'],
+    ['afp',                     'AFP',                '14'],
+    ['paz_y_salvo',             'Paz y Salvo',        '15'],
+    ['eps_afp',                 'EPS / AFP',          '16'],
+    ['identificacion_peligros', 'Id. Peligros',       '19'],
+    ['examen_preocupacional',   'Examen Pre-ocup.',   '20'],
+    ['autorizacion',            'Autorización',       '98'],
+    ['beneficiario_final',      'Beneficiario Final', '27'],
+    ['sat',                     'SAT',                '28'],
+    ['retroactivas',            'Retroactivas',       '18'],
+    ['pdf',                     'PDF / Imagen',       '99'],
 ];
 
 // Debe reflejar DOCUMENT_DISPLAY_PRIORITY de backend/app/cases.py: si las dos listas se
@@ -226,6 +231,23 @@ function getReviewTypeCode(type) {
     const normalizedType = canonicalDocumentType(type);
     const match = REVIEW_TYPE_OPTIONS.find(([v]) => v === normalizedType);
     return match ? match[2] : null;
+}
+
+// Opciones del selector de reclasificación, con el código legacy DELANTE de la etiqueta
+// ("06 · Cédula"). El código va primero por dos razones: la columna de códigos queda
+// alineada al recorrer la lista, y el type-ahead del <select> nativo compara contra el
+// principio del texto, así que teclear "06" salta directo a esa opción.
+// Se ordenan por código, no por nombre: es el orden en el que el operador los busca.
+function reclassifyOptionsWithCode() {
+    return [...REVIEW_TYPE_OPTIONS]
+        .map(([value, label, code]) => {
+            // 'Sedes ·01' ya trae el código pegado en la etiqueta; sin quitarlo quedaría
+            // "01 · Sedes ·01".
+            const limpio = String(label || '').replace(/\s*·\s*\d+\s*$/, '');
+            const cod = code ? String(code).padStart(2, '0') : '--';
+            return { value, text: `${cod} · ${limpio}`, code: cod, label: limpio };
+        })
+        .sort((a, b) => (a.code === b.code ? a.label.localeCompare(b.label, 'es') : a.code.localeCompare(b.code)));
 }
 
 function getReviewTypeLabelWithCode(type, legacyCode) {
@@ -424,7 +446,10 @@ function caseFileUrl(caseId, filename, inline = false) {
 }
 
 function case926Url(caseId) {
-    return caseApiUrl(caseId, '/926');
+    // El perfil viaja para que el backend sepa a quién se le está entregando el plano:
+    // solo la entrega a Colmena mueve afi_rad de 'Indexado' a 'Plano'. Con SSO manda la
+    // cookie firmada y esto se ignora; sin SSO es la única fuente.
+    return caseApiUrl(caseId, '/926', { perfil: readProfile() });
 }
 
 // ── Resolvers de caso ────────────────────────────────────────
@@ -550,20 +575,10 @@ function getAcceptedValidationExceptions(payload) {
            [];
 }
 
-async function acceptValidationException(caseId, blocker) {
-    if (!caseId || !blocker) return false;
-    const shortMsg = String(blocker.message || '').slice(0, 220);
-    // Un solo prompt. Antes venía un segundo para una "observación adicional opcional"
-    // que no se muestra en ninguna vista, y al ser opcional no podía distinguir Cancelar
-    // de dejarlo vacío: prompt() devuelve null al cancelar y `null || ''` lo volvía "",
-    // así que cancelar el segundo diálogo igual guardaba la excepción. Con un solo
-    // prompt, Cancelar (null) aborta de verdad por la guarda de abajo.
-    const reason = prompt(
-        `Justificación para aceptar este hallazgo solo en este contrato:\n\n${shortMsg}`,
-        'Validado manualmente por operador'
-    );
-    if (!reason || !reason.trim()) return false;
-    const tester = readTester();
+// POST puro de UNA excepción, sin diálogos ni refresco. Lo comparten el botón de cada
+// bloqueante y el de aceptar todos; el segundo necesita mandar varias y refrescar una
+// sola vez al final, no una por excepción.
+async function postValidationException(caseId, blocker, reason, operator) {
     await fetchWithRetry(caseApiUrl(caseId, '/validation-exceptions'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -571,11 +586,15 @@ async function acceptValidationException(caseId, blocker) {
             code: blocker.code || 'VALIDATION_ALERT',
             message: blocker.message || '',
             fingerprint: blocker.fingerprint || '',
-            reason: reason.trim(),
-            operator: tester.usuario || tester.name || '',
+            reason: reason,
+            operator: operator || '',
         }),
     });
-    showToast('Excepción guardada. Actualizando validaciones...', 'info', 2500);
+}
+
+// Recalcula el caso y repinta lo que esté a la vista. Se llama UNA vez, después de
+// guardar todas las excepciones.
+async function refreshAfterValidationExceptions(caseId) {
     const payload = await refreshClassifAfterManualChange(caseId);
     if (!payload) return false;
     activeCasePayload = payload;
@@ -596,17 +615,87 @@ async function acceptValidationException(caseId, blocker) {
     const resultCard = document.getElementById('workflowResultCard');
     if (resultCard && resultCard.style.display !== 'none') renderWorkflowResult(payload);
     loadBandeja().catch(() => {});
+    return true;
+}
+
+// Los mismos que muestran botón individual: los hallazgos del XLSX/formulario no se
+// aceptan por excepción, hay que corregir el archivo.
+function acceptableValidationBlockers(records) {
+    return (records || []).filter(b => !isXlsxOrFormularioBlocker(b));
+}
+
+async function acceptAllValidationExceptions(caseId, records, panel) {
+    const aceptables = acceptableValidationBlockers(records);
+    if (!aceptables.length) { showToast('No hay bloqueantes que se puedan aceptar por excepción', 'warn'); return false; }
+    if (!confirm(
+        `Se van a aceptar ${aceptables.length} bloqueante${aceptables.length > 1 ? 's' : ''} para este contrato.\n\n` +
+        `Quedan registrados uno por uno con la misma justificación y el contrato se reprocesa al final.`
+    )) return false;
+    const reason = prompt(
+        `Justificación para aceptar ${aceptables.length} hallazgo${aceptables.length > 1 ? 's' : ''} en este contrato:`,
+        'Validado manualmente por operador'
+    );
+    if (!reason || !reason.trim()) return false;
+
+    const tester = readTester();
+    const operator = tester.usuario || tester.name || '';
+    setValidationExceptionButtonsLoading(panel, null, true);
+    const fallidos = [];
+    try {
+        for (const b of aceptables) {
+            try {
+                await postValidationException(caseId, b, reason.trim(), operator);
+            } catch (e) {
+                fallidos.push(b.message || '');
+            }
+        }
+        const guardados = aceptables.length - fallidos.length;
+        if (!guardados) { showToast('No se pudo guardar ninguna excepción', 'err'); return false; }
+        showToast(`${guardados} excepción${guardados > 1 ? 'es' : ''} guardada${guardados > 1 ? 's' : ''}. Reprocesando...`, 'info', 2500);
+        // Un solo reproceso al final: recalcular el caso por cada excepción sería el
+        // mismo resultado pagado N veces.
+        await refreshAfterValidationExceptions(caseId);
+        if (fallidos.length) showToast(`${fallidos.length} no se pudieron guardar`, 'err', 5000);
+        else showToast('Contrato reprocesado con las excepciones aplicadas.', 'ok', 4500);
+        return true;
+    } finally {
+        setValidationExceptionButtonsLoading(panel, null, false);
+    }
+}
+
+async function acceptValidationException(caseId, blocker) {
+    if (!caseId || !blocker) return false;
+    const shortMsg = String(blocker.message || '').slice(0, 220);
+    // Un solo prompt. Antes venía un segundo para una "observación adicional opcional"
+    // que no se muestra en ninguna vista, y al ser opcional no podía distinguir Cancelar
+    // de dejarlo vacío: prompt() devuelve null al cancelar y `null || ''` lo volvía "",
+    // así que cancelar el segundo diálogo igual guardaba la excepción. Con un solo
+    // prompt, Cancelar (null) aborta de verdad por la guarda de abajo.
+    const reason = prompt(
+        `Justificación para aceptar este hallazgo solo en este contrato:\n\n${shortMsg}`,
+        'Validado manualmente por operador'
+    );
+    if (!reason || !reason.trim()) return false;
+    const tester = readTester();
+    await postValidationException(caseId, blocker, reason.trim(), tester.usuario || tester.name || '');
+    showToast('Excepción guardada. Actualizando validaciones...', 'info', 2500);
+    if (!await refreshAfterValidationExceptions(caseId)) return false;
     showToast('Contrato reprocesado con la excepción aplicada.', 'ok', 4500);
     return true;
 }
 
 function setValidationExceptionButtonsLoading(root, activeButton, loading = true) {
-    const buttons = Array.from((root || document).querySelectorAll('.validation-exception-btn'));
+    // Se incluye el de "Aceptar todos": si queda pulsable mientras se guardan las
+    // excepciones, un segundo clic manda otra tanda sobre bloqueantes que ya se están
+    // aceptando. No lleva la clase .validation-exception-btn a propósito, porque esa
+    // colección recibe el manejador de bloqueante individual.
+    const buttons = Array.from((root || document).querySelectorAll('.validation-exception-btn, .classif-accept-all-btn'));
     buttons.forEach(btn => {
         if (loading) {
             if (!btn.dataset.originalText) btn.dataset.originalText = btn.textContent || 'Aceptar para este contrato';
             btn.disabled = true;
-            btn.textContent = btn === activeButton ? 'Guardando y reprocesando...' : 'Esperando reproceso...';
+            if (btn.classList.contains('classif-accept-all-btn')) btn.textContent = 'Guardando y reprocesando...';
+            else btn.textContent = btn === activeButton ? 'Guardando y reprocesando...' : 'Esperando reproceso...';
         } else {
             btn.disabled = false;
             btn.textContent = btn.dataset.originalText || 'Aceptar para este contrato';
@@ -925,6 +1014,7 @@ function updateMobileNavOptions() {
 const VIEW_META = {
     bandeja:       { title: 'Bandeja de entrada',      breadcrumb: 'Operación · contratos activos' },
     flujo:         { title: 'Nuevo contrato',           breadcrumb: 'Operación · cargar expediente' },
+    pendientes:    { title: 'Pendientes',               breadcrumb: 'Operación · radicadas sin gestionar' },
     clasificacion: { title: 'Clasificación documental', breadcrumb: 'Operación · documentos por revisar' },
     validacion:    { title: 'Validación OCR',           breadcrumb: 'Revisión · comparación de fuentes' },
     visor:         { title: 'Visor documental',         breadcrumb: 'Revisión · documentos adjuntos' },
@@ -971,6 +1061,7 @@ function switchView(viewId) {
     updateTopbarActions(viewId);
 
     if (viewId === 'flujo') resetFlujoView();
+    if (viewId === 'pendientes') loadPendientes();
     if (viewId === 'bandeja') loadBandeja();
     if (viewId === 'produccion') loadProduccion();
     if (viewId === 'busqueda') { doSearch(''); }
@@ -1266,7 +1357,7 @@ function renderCasesTable(cases, tab = 'todos') {
                     <span class="pill pill-neutral">${escapeHtml((item.operation_label || currentOperation().name))}</span>
                     <div class="case-card-actions" role="group">
                         ${readProfile() !== 'colmena' && has926 && approved ? `<button class="btn-primary" data-action="descargar926" data-case="${escapeHtml(id)}" data-file="${escapeHtml(filename)}" type="button">Descargar plano</button>` : ''}
-                        ${readProfile() !== 'colmena' ? `<button class="table-action-link table-action-danger table-action-delete" data-action="eliminar" data-case="${escapeHtml(id)}" data-empresa="${escapeHtml(empresa)}" type="button">Eliminar</button>` : ''}
+                        ${readProfile() !== 'colmena' && !approved ? `<button class="table-action-link table-action-danger table-action-delete" data-action="eliminar" data-case="${escapeHtml(id)}" data-empresa="${escapeHtml(empresa)}" type="button">Eliminar</button>` : ''}
                     </div>
                 </div>
             </div>
@@ -1317,7 +1408,10 @@ async function handleCaseAction(action, caseId, file) {
             // completo (su ciclo termina ahi). Perfil Imagine: solo se descarga, el caso queda.
             if (readProfile() === 'colmena') {
                 try {
-                    const r = await fetch(caseApiUrl(caseId), { method: 'DELETE' });
+                    // cierre_ciclo: un caso aprobado solo se puede borrar por esta via.
+                    // No es una decisión del operador, es el final del recorrido -aquí
+                    // afi_rad ya pasó a 'Plano'-.
+                    const r = await fetch(caseApiUrl(caseId, '', { cierre_ciclo: 'true' }), { method: 'DELETE' });
                     if (!r.ok) throw new Error(`HTTP ${r.status}`);
                     showToast('Caso eliminado tras generar el plano', 'ok');
                     if (currentView === 'reporte') switchView('produccion');
@@ -1346,8 +1440,14 @@ async function handleCaseAction(action, caseId, file) {
         const empresa = document.querySelector(`[data-action="eliminar"][data-case="${caseId}"]`)?.dataset?.empresa || caseId;
         if (!confirm(`¿Eliminar el contrato de ${empresa}?\n\nSe eliminarán todos los archivos adjuntos. No se puede deshacer.`)) return;
         try {
+            // Sin cierre_ciclo a propósito: este es el borrado del operador, y el backend
+            // lo rechaza con 409 si el contrato ya fue aprobado.
             const r = await fetch(caseApiUrl(caseId), { method: 'DELETE' });
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            if (!r.ok) {
+                const err = await r.json().catch(() => ({}));
+                const det = err.detail;
+                throw new Error(typeof det === 'string' ? det : (det?.message || `HTTP ${r.status}`));
+            }
             const card = document.querySelector(`[data-default-case="${caseId}"]`);
             if (card) { card.style.opacity = '0'; card.style.transition = 'opacity 0.3s'; setTimeout(() => card.remove(), 300); }
             allCases = allCases.filter(c => c.id !== caseId);
@@ -1836,7 +1936,12 @@ function renderClassifBlockers(payload) {
     const blockersHtml = `
         ${records.length ? `
             <div class="classif-blockers-box">
-                <div class="classif-blockers-title">Bloqueantes para validar (${records.length})</div>
+                <div class="classif-blockers-title">
+                    <span>Bloqueantes para validar (${records.length})</span>
+                    ${!isApproved && acceptableValidationBlockers(records).length > 1
+                        ? `<button class="btn-secondary classif-accept-all-btn" id="classifAcceptAllBtn" type="button">Aceptar todos (${acceptableValidationBlockers(records).length})</button>`
+                        : ''}
+                </div>
                 ${records.map((b, i) => `
                     <div class="classif-blocker-item">
                         <span class="report-blocker-icon">✗</span>
@@ -1861,6 +1966,14 @@ function renderClassifBlockers(payload) {
     const workspace = panel.querySelector('#classifComisionWorkspace');
     if (workspace) workspace.insertAdjacentHTML('afterend', blockersHtml);
     else panel.insertAdjacentHTML('afterbegin', blockersHtml);
+    panel.querySelector('#classifAcceptAllBtn')?.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        // Se releen los bloqueantes del payload más fresco: entre el pintado y el clic el
+        // operador pudo aceptar uno suelto o reclasificar un documento.
+        const latestPayload = activeCasePayload?.id === payload.id ? activeCasePayload : payload;
+        const latestRecords = getValidationBlockerRecords(latestPayload);
+        await acceptAllValidationExceptions(payload.id, latestRecords.length ? latestRecords : records, panel);
+    });
     panel.querySelectorAll('.validation-exception-btn').forEach(btn => {
         btn.addEventListener('click', async (event) => {
             event.stopPropagation();
@@ -2097,14 +2210,14 @@ function bindComisionManualPanel(item, payload, root = document) {
             if (comisionStatus) {
                 if (invalidAsesores.length) {
                     comisionStatus.style.color = 'var(--c-warn)';
-                    comisionStatus.textContent = `Comisiones guardadas. ${invalidAsesores.length} documento(s) no existen en asesores Colmena; se generó bloqueante aceptable.`;
+                    comisionStatus.textContent = `Comisiones guardadas. ${invalidAsesores.length} documento(s) no existen en las tablas de intermediación de Colmena; se generó bloqueante aceptable.`;
                 } else {
                     comisionStatus.style.color = 'var(--c-ok)';
                     comisionStatus.textContent = `✓ ${rows.length} intermediario(s) guardados y validados`;
                 }
             }
             if (invalidAsesores.length) {
-                showToast('Hay comisiones con documentos no registrados en asesores Colmena. Revisa el bloqueante.', 'warn', 6000);
+                showToast('Hay comisiones con documentos no registrados en las tablas de intermediación de Colmena. Revisa el bloqueante.', 'warn', 6000);
             }
             await refreshClassifAfterComisionChange(payload.id, item.file);
         } catch(e) {
@@ -2584,9 +2697,8 @@ function renderClassifActions(item, payload) {
             <div class="reclassify-form">
                 <select class="field-select" id="reclassifySelect" style="flex:1;min-width:160px">
                     <option value="">— Selecciona nuevo tipo —</option>
-                    ${[...REVIEW_TYPE_OPTIONS]
-                        .sort(([, a], [, b]) => a.localeCompare(b, 'es'))
-                        .map(([v,l]) => `<option value="${v}" ${v===item.type?'selected':''}>${escapeHtml(l)}</option>`)
+                    ${reclassifyOptionsWithCode()
+                        .map(o => `<option value="${escapeHtml(o.value)}" ${o.value===item.type?'selected':''}>${escapeHtml(o.text)}</option>`)
                         .join('')}
                 </select>
                 <select class="field-select" id="anexoSedeSelect" style="flex:1;min-width:180px;${isAnexoSedes ? '' : 'display:none'}">
@@ -5291,7 +5403,7 @@ async function downloadColmenaBatch() {
         const r = await fetchWithRetry(operationApiUrl('/api/926/consolidated'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ case_ids: ids, operation: readOperation() }),
+            body: JSON.stringify({ case_ids: ids, operation: readOperation(), perfil: readProfile() }),
         });
         const blob = await r.blob();
         const disposition = r.headers.get('Content-Disposition') || '';
@@ -5308,7 +5420,7 @@ async function downloadColmenaBatch() {
         const failed = [];
         for (const id of ids) {
             try {
-                const dr = await fetch(caseApiUrl(id), { method: 'DELETE' });
+                const dr = await fetch(caseApiUrl(id, '', { cierre_ciclo: 'true' }), { method: 'DELETE' });
                 if (!dr.ok) throw new Error(`HTTP ${dr.status}`);
             } catch(e) {
                 failed.push(id);
@@ -5436,7 +5548,7 @@ function adminAliasText(value) {
 }
 
 function showTable(name) {
-    ['pila','eps','afp','asesores','smmlv','destinatarios'].forEach(t => {
+    ['pila','eps','afp','smmlv','destinatarios'].forEach(t => {
         const panel = document.getElementById(`tableContent_${t}`);
         const btn = document.getElementById(`tabBtn_${t}`);
         if (panel) panel.style.display = t === name ? '' : 'none';
@@ -5445,32 +5557,55 @@ function showTable(name) {
 }
 window.showTable = showTable;
 
+// Lee una tabla del admin exponiendo el motivo real cuando falla. Antes se hacia
+// r.json() a secas: si el backend devolvia el texto plano "Internal Server Error"
+// (500 sin manejar), el parseo reventaba con «Unexpected token 'I', "Internal S"...»
+// y no se sabia que tabla ni que causa. Ahora se identifica la tabla y se muestra el
+// detail que envia el backend.
+async function fetchAdminTable(ruta, etiqueta) {
+    let r;
+    try {
+        r = await fetch(`${API_URL}/api/admin/tables/${ruta}`);
+    } catch (e) {
+        throw new Error(`${etiqueta}: no hubo respuesta del servidor (${e.message})`);
+    }
+    const cuerpo = await r.text();
+    let datos = null;
+    try { datos = cuerpo ? JSON.parse(cuerpo) : null; } catch (_) { datos = null; }
+    if (!r.ok) {
+        const motivo = (datos && (datos.detail || datos.error)) || cuerpo.trim().slice(0, 200) || `HTTP ${r.status}`;
+        throw new Error(`${etiqueta}: ${motivo}`);
+    }
+    if (datos === null) {
+        throw new Error(`${etiqueta}: el servidor no devolvio JSON (${cuerpo.trim().slice(0, 120)})`);
+    }
+    return datos;
+}
+
 async function loadAdminTables() {
     const el = document.getElementById('adminTablesPanel');
     if (!el) return;
     el.innerHTML = `<div style="font-size:12px;color:var(--c-text-2)">Cargando tablas...</div>`;
 
     try {
-        const [pilaR, epsR, afpR, aseR, smlR, recR] = await Promise.all([
-            fetch(`${API_URL}/api/admin/tables/pila`).then(r=>r.json()),
-            fetch(`${API_URL}/api/admin/tables/eps`).then(r=>r.json()),
-            fetch(`${API_URL}/api/admin/tables/afp`).then(r=>r.json()),
-            fetch(`${API_URL}/api/admin/tables/asesores`).then(r=>r.json()),
-            fetch(`${API_URL}/api/admin/tables/smmlv`).then(r=>r.json()),
-            fetch(`${API_URL}/api/admin/tables/recipients`).then(r=>r.json()),
+        const [pilaR, epsR, afpR, smlR, recR] = await Promise.all([
+            fetchAdminTable('pila', 'PILA'),
+            fetchAdminTable('eps', 'EPS'),
+            fetchAdminTable('afp', 'AFP'),
+            fetchAdminTable('smmlv', 'SMMLV'),
+            fetchAdminTable('recipients', 'Destinatarios'),
         ]);
 
         el.innerHTML = `
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-            ${['pila','eps','afp','asesores','smmlv','destinatarios'].map(t=>`
+            ${['pila','eps','afp','smmlv','destinatarios'].map(t=>`
             <button class="classif-sort-btn ${t==='pila'?'active':''}" onclick="showTable('${t}')" type="button" id="tabBtn_${t}">${
-                t==='pila'?'PILA':t==='eps'?'EPS':t==='afp'?'AFP':t==='asesores'?'Asesores':t==='smmlv'?'SMMLV':'Destinatarios'
+                t==='pila'?'PILA':t==='eps'?'EPS':t==='afp'?'AFP':t==='smmlv'?'SMMLV':'Destinatarios'
             }</button>`).join('')}
         </div>
         <div id="tableContent_pila" class="table-panel"></div>
         <div id="tableContent_eps" class="table-panel"></div>
         <div id="tableContent_afp" class="table-panel" style="display:none"></div>
-        <div id="tableContent_asesores" class="table-panel" style="display:none"></div>
         <div id="tableContent_smmlv" class="table-panel" style="display:none"></div>
         <div id="tableContent_destinatarios" class="table-panel" style="display:none"></div>
         `;
@@ -5491,15 +5626,6 @@ async function loadAdminTables() {
             async (items) => {
                 const r = await fetch(`${API_URL}/api/admin/tables/afp`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
                 return assertAdminSaveOk(r, 'AFP');
-            }
-        );
-
-        // Consultores (tabla plana img004.consultores)
-        renderCatalogTable('asesores', aseR.items || [], ['cedula','nombre'],
-            ['Cédula','Nombre'],
-            async (items) => {
-                const r = await fetch(`${API_URL}/api/admin/tables/asesores`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
-                await assertAdminSaveOk(r, 'Consultores');
             }
         );
 
@@ -5879,6 +6005,8 @@ function init() {
         btn.addEventListener('click', () => switchView(btn.dataset.view));
     });
 
+    initPendientes();
+
     // Colapsar / mostrar el sidebar
     applySidebarCollapsed(localStorage.getItem(SIDEBAR_KEY) === '1');
     document.getElementById('sidebarToggle')?.addEventListener('click', () => {
@@ -5973,3 +6101,609 @@ function init() {
 }
 
 init();
+
+// ── Pendientes por cargar ───────────────────────────────────────
+// Afiliaciones que el portal radicó y nadie ha gestionado (view pqr.afa_pendientes).
+// El expediente se arma con los documentos que ya están en el repositorio legacy, así
+// que aquí no se sube nada: se elige la radicación y el backend hace el resto.
+
+let _pendientes = [];
+let _pendExpandida = null;      // radicación con el panel de documentos abierto
+let _pendBloqExpandida = null;  // radicación con el panel de bloqueantes abierto
+let _pendCorreccion = null;   // { caseId, filename } mientras se elige el Excel corregido
+let _pendAdjuntos = {};       // rad -> inventario de adjuntos, para navegar en el visor
+let _pendVisor = null;        // { rad, items, index } del visor abierto
+let _pendFormBusy = new Set();  // radicaciones con una corrección de Excel en vuelo
+// Radicaciones con carga en vuelo. Mientras estén acá la fila se pinta "Cargando..."
+// y no ofrece ninguna acción: ni volver a cargar, ni "Ver caso" -el expediente existe
+// desde el primer instante, pero hasta que el workflow no termina no hay nada que ver-.
+let _pendCargando = new Set();
+
+// Estados terminales del workflow. Los mismos que espera la carga manual: cualquiera de
+// ellos significa que el backend ya no está trabajando en el caso.
+const PEND_WF_TERMINAL = ['completed', 'stopped_prevalidacion', 'failed', 'analyzed'];
+
+async function esperarWorkflow(caseId) {
+    // El workflow corre encolado en el backend, así que el POST vuelve enseguida y hay
+    // que sondear. Tope de ~6 min: por encima de eso algo se atascó y es mejor devolver
+    // el control al operador que dejar la fila girando para siempre.
+    for (let intento = 0; intento < 180; intento++) {
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+            const r = await fetch(caseApiUrl(caseId));
+            if (!r.ok) continue;
+            const data = await r.json();
+            const wf = data?.analysis?.workflow_run || {};
+            const estado = normalizeText(wf.status || data?.status || '');
+            if (PEND_WF_TERMINAL.includes(estado)) return { estado, data };
+        } catch (_) { /* reintentar: un fallo de red suelto no aborta el sondeo */ }
+    }
+    return { estado: 'timeout', data: null };
+}
+
+function pendItem(idRad) {
+    return _pendientes.find(p => String(p.id_radicacion_sa) === String(idRad)) || null;
+}
+
+async function loadPendientes() {
+    const wrap = document.getElementById('pendientesTableWrap');
+    if (!wrap) return;
+    wrap.innerHTML = '<div class="loading-msg">Cargando pendientes...</div>';
+    try {
+        const r = await fetch(operationApiUrl('/api/pendientes'));
+        if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${r.status}`);
+        }
+        const data = await r.json();
+        _pendientes = data.items || [];
+        renderPendientes();
+        updatePendientesBadge(_pendientes.filter(p => !p.case_id).length);
+    } catch (e) {
+        wrap.innerHTML = `<div class="empty-state">No se pudo leer la bandeja de pendientes.<br><span style="color:var(--c-err)">${escapeHtml(String(e.message || e))}</span></div>`;
+        updatePendientesBadge(0);
+    }
+}
+
+function updatePendientesBadge(n) {
+    const badge = document.getElementById('pendientesBadge');
+    if (!badge) return;
+    badge.textContent = String(n);
+    badge.hidden = !n;
+}
+
+function renderPendientes() {
+    const wrap = document.getElementById('pendientesTableWrap');
+    if (!wrap) return;
+    if (!_pendientes.length) {
+        wrap.innerHTML = '<div class="empty-state">No hay afiliaciones pendientes de gestión</div>';
+        return;
+    }
+
+    const filas = _pendientes.map(p => {
+        const rad = String(p.id_radicacion_sa);
+        const cargando = _pendCargando.has(rad);
+        const cargado = !!p.case_id;
+        const completo = p.tiene_xlsx && p.tiene_pdf;
+        const abierta = _pendExpandida === rad;
+        const bloqAbierta = _pendBloqExpandida === rad;
+        const nBloq = p.bloqueantes_total || 0;
+        // El análisis se detuvo en el Excel: los soportes no se leyeron, así que no hay
+        // expediente que mirar todavía. Se muestran los bloqueantes y nada más.
+        const excelBloqueado = cargado && !!p.excel_bloqueado;
+        // Red de seguridad: si algo repinta la tabla mientras se sube un Excel corregido,
+        // el estado tiene que sobrevivir al repintado.
+        const corrigiendo = _pendFormBusy.has(String(rad));
+
+        // Sin xlsx+pdf la carga no puede prosperar: el backend exige ese mínimo. Se
+        // muestra el motivo en vez de dejar pulsar un botón que va a fallar.
+        let estado;
+        if (corrigiendo) {
+            estado = `<span class="pend-pill pend-pill-load"><span class="pend-spin">⠋</span> Actualizando Excel</span>`;
+        } else if (cargando) {
+            estado = `<span class="pend-pill pend-pill-load"><span class="pend-spin">⠋</span> Cargando</span>`;
+        } else if (cargado && p.case_aprobado) {
+            estado = `<span class="pend-pill pend-pill-ok" title="${escapeHtml(p.case_label || '')}">Aprobado</span>`;
+        } else if (excelBloqueado) {
+            estado = `<span class="pend-pill pend-pill-err" title="El Excel no pasó la validación; los documentos no se procesaron">Excel con errores${nBloq ? ` (${nBloq})` : ''}</span>`;
+        } else if (cargado && nBloq) {
+            estado = `<span class="pend-pill pend-pill-err" title="Tiene ${nBloq} bloqueante(s)">${nBloq} bloqueante${nBloq > 1 ? 's' : ''}</span>`;
+        } else if (cargado) {
+            estado = `<span class="pend-pill pend-pill-ok" title="${escapeHtml(p.case_label || '')}">Sin bloqueantes</span>`;
+        } else if (!completo) {
+            const falta = [!p.tiene_xlsx && 'XLSX', !p.tiene_pdf && 'PDF'].filter(Boolean).join(' y ');
+            estado = `<span class="pend-pill pend-pill-warn" title="Se necesita al menos un XLSX y un PDF">Falta ${escapeHtml(falta)}</span>`;
+        } else if (p.formulario?.reemplazado) {
+            // Se avisa en la fila para que no haya que abrir Documentos para enterarse de
+            // que este contrato se va a cargar con un formulario distinto al del portal.
+            estado = `<span class="pend-pill" title="Se cargará con el formulario corregido: ${escapeHtml(p.formulario.filename || '')}">Sin cargar · formulario corregido</span>`;
+        } else {
+            estado = `<span class="pend-pill">Sin cargar</span>`;
+        }
+
+        const adjTxt = p.adjuntos_presentes === p.adjuntos_total
+            ? `${p.adjuntos_total}`
+            : `<span class="pend-adj-parcial" title="${escapeHtml((p.adjuntos_faltantes || []).join(', '))}">${p.adjuntos_presentes}/${p.adjuntos_total}</span>`;
+
+        return `
+            <tr class="pend-row ${abierta ? 'pend-row-open' : ''}" data-rad="${escapeHtml(rad)}">
+              <td><strong>${escapeHtml(p.contrato || '—')}</strong></td>
+              <td>${escapeHtml(p.nit || '—')}</td>
+              <td class="pend-razon">${escapeHtml(p.razon_social || '—')}</td>
+              <td class="pend-num">${escapeHtml(p.num_trabajadores || '—')}</td>
+              <td class="pend-num">${adjTxt}</td>
+              <td>${estado}</td>
+              <td class="pend-acciones">
+                <button class="pend-btn" data-pend-docs="${escapeHtml(rad)}" type="button"
+                        title="Ver documentos">${abierta ? '▾' : '▸'} Documentos</button>
+                ${cargado ? `<button class="pend-btn ${nBloq ? 'pend-btn-err' : ''}" data-pend-bloq="${escapeHtml(rad)}" type="button"
+                        title="${nBloq ? 'Ver los bloqueantes que impiden aprobar' : 'Sin bloqueantes activos'}">${bloqAbierta ? '▾' : '▸'} Bloqueantes${nBloq ? ` (${nBloq})` : ''}</button>` : ''}
+                <button class="pend-btn" data-pend-zip="${escapeHtml(rad)}" type="button"
+                        title="Descargar todos los documentos en un zip">⤓ Todos</button>
+                ${cargando
+                    ? `<button class="pend-btn pend-btn-primary" type="button" disabled>Cargando...</button>`
+                    : (excelBloqueado
+                        ? ''
+                        : (cargado
+                            ? `<button class="pend-btn pend-btn-link" data-pend-caso="${escapeHtml(p.case_id)}" type="button">Ver caso</button>`
+                            : `<button class="pend-btn pend-btn-primary" data-pend-cargar="${escapeHtml(rad)}" type="button" ${completo && !corrigiendo ? '' : 'disabled'} ${corrigiendo ? 'title="Espera a que termine de subir el Excel corregido"' : ''}>Cargar</button>`))}
+              </td>
+            </tr>
+            ${abierta ? `<tr class="pend-docs-row"><td colspan="7"><div id="pendDocs-${escapeHtml(rad)}" class="pend-docs"><div class="loading-msg">Cargando documentos...</div></div></td></tr>` : ''}
+            ${bloqAbierta ? `<tr class="pend-docs-row"><td colspan="7">${renderBloqueantes(p)}</td></tr>` : ''}
+        `;
+    }).join('');
+
+    wrap.innerHTML = `
+        <div class="pend-table-wrap">
+          <table class="pend-table">
+            <thead>
+              <tr>
+                <th>Contrato</th><th>NIT</th><th>Razón social</th>
+                <th class="pend-num" title="Número de trabajadores declarado en el formulario de radicación">Trabajadores</th>
+                <th class="pend-num" title="Documentos disponibles en el repositorio">Docs</th>
+                <th>Estado</th><th class="pend-acciones">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>${filas}</tbody>
+          </table>
+        </div>
+    `;
+    if (_pendExpandida) renderPendDocs(_pendExpandida);
+}
+
+function renderBloqueantes(p) {
+    // Los mensajes vienen ya resueltos del backend (active_blocker_messages, la misma
+    // función que decide si approve_case deja aprobar), así que esta pantalla no
+    // interpreta nada: solo los muestra.
+    const lista = p.bloqueantes || [];
+    // Mientras el Excel sea el que bloquea no se ofrece abrir el expediente: no hay
+    // clasificación ni documentos que revisar allí, solo confundiría.
+    const excelBloqueado = !!p.excel_bloqueado;
+    const caseId = excelBloqueado ? '' : (p.case_id || '');
+    if (p.case_aprobado) {
+        return `<div class="pend-bloq pend-bloq-ok">Contrato aprobado. No quedan bloqueantes activos.</div>`;
+    }
+    if (!lista.length) {
+        return `<div class="pend-bloq pend-bloq-ok">
+                  Sin bloqueantes activos: el contrato está listo para aprobarse.
+                  ${caseId ? `<button class="pend-btn pend-btn-link" data-pend-caso="${escapeHtml(caseId)}" type="button">Abrir el caso</button>` : ''}
+                </div>`;
+    }
+    return `
+        <div class="pend-bloq">
+          <div class="pend-bloq-head">
+            ${excelBloqueado
+                ? `El Excel no pasó la validación: ${lista.length} error${lista.length > 1 ? 'es' : ''} por corregir`
+                : `${lista.length} bloqueante${lista.length > 1 ? 's' : ''} impiden aprobar este contrato`}
+            ${caseId ? `<button class="pend-btn pend-btn-link" data-pend-caso="${escapeHtml(caseId)}" type="button">Abrir el caso</button>` : ''}
+          </div>
+          ${excelBloqueado ? `<div class="pend-bloq-nota">
+            Los documentos <strong>no se procesaron</strong>: se validan después de que el Excel
+            esté correcto, para no gastar el tiempo de clasificarlos en un contrato que igual
+            hay que devolver.
+          </div>` : ''}
+          <ol class="pend-bloq-list">
+            ${lista.map(m => `<li>${escapeHtml(m)}</li>`).join('')}
+          </ol>
+          <div class="pend-bloq-foot">
+            ${excelBloqueado
+                ? `Descarga el Excel desde <strong>Documentos</strong>, corrígelo y usa
+                   <strong>Cargar corregido</strong>. El original se conserva; al cargar la versión
+                   nueva se validan también los documentos.`
+                : `Si el error está en el Excel: descárgalo desde <strong>Documentos</strong>, corrígelo y
+                   usa <strong>Cargar corregido</strong> — el original se conserva y el expediente se
+                   revalida contra la versión nueva, sin perder el historial.`}
+          </div>
+        </div>
+    `;
+}
+
+async function renderPendDocs(rad) {
+    const cont = document.getElementById(`pendDocs-${rad}`);
+    if (!cont) return;
+    const item = pendItem(rad);
+    try {
+        const r = await fetch(operationApiUrl(`/api/pendientes/${encodeURIComponent(rad)}/adjuntos`));
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        // Se cachea para que el visor pueda pasar de un documento al siguiente sin volver
+        // a pedir el inventario.
+        _pendAdjuntos[rad] = data.items || [];
+        const caseId = item?.case_id || '';
+        // Nombre del Excel ACTIVO del expediente. Tras una corrección ya no se llama como
+        // el que radicó el portal, y la siguiente corrección tiene que apuntar a ESE.
+        const excelActivo = item?.case_excel || '';
+        const yaCorregido = !!(item?.case_excel_corrige_a);
+        // Formulario corregido a nivel de RADICACIÓN: existe antes de que haya expediente
+        // y es el que se usará al cargar. Es otro camino distinto al de corregir el Excel
+        // de un caso ya creado, y no pueden estar activos los dos a la vez.
+        const formReemplazado = !!(item?.formulario?.reemplazado);
+        const ocupado = _pendFormBusy.has(String(rad));
+
+        cont.innerHTML = (data.items || []).map(a => {
+            const nombre = a.nombre_original || `adjunto-${a.id_adjunto}`;
+            const kb = a.size_bytes ? `${(a.size_bytes / 1024).toFixed(0)} KB` : '';
+            // Solo el Excel se corrige. El resto son los documentos que radicó el cliente:
+            // son la evidencia de lo que entregó y no se sustituyen desde aquí.
+            const esExcel = /\.(xlsx|xlsm|xls)$/i.test(nombre);
+            const raiz = nombre.replace(/\.[^.]+$/, '');
+            const correspondeAEste = excelActivo === nombre || excelActivo.startsWith(`${raiz}__corregido`);
+            const puedeCorregir = !!caseId && esExcel && !!excelActivo && correspondeAEste;
+            const motivo = !caseId
+                ? 'Primero hay que cargar la radicación'
+                : (!correspondeAEste ? 'Este Excel no está en el expediente' : 'Sube el Excel corregido: el original se conserva intacto');
+            return `
+                <div class="pend-doc ${a.existe ? '' : 'pend-doc-missing'}">
+                  <span class="pend-doc-name">${escapeHtml(nombre)}</span>
+                  <span class="pend-doc-meta">${escapeHtml(kb)}</span>
+                  ${esExcel && ((yaCorregido && correspondeAEste) || (!caseId && formReemplazado)) ? '<span class="pend-doc-tag">corregido</span>' : ''}
+                  ${a.existe ? `
+                    ${esExcel ? (caseId ? `
+                    <button class="pend-btn" type="button"
+                            data-pend-doc-dl="${escapeHtml(String(a.id_adjunto))}" data-rad="${escapeHtml(rad)}">⤓ Descargar</button>
+                    <button class="pend-btn" type="button" ${puedeCorregir && !ocupado ? '' : 'disabled'}
+                            title="${escapeHtml(motivo)}"
+                            data-pend-doc-rep="${escapeHtml(excelActivo || nombre)}" data-rad="${escapeHtml(rad)}" data-case="${escapeHtml(caseId)}">${ocupado ? '⏳ Revalidando...' : '↻ Cargar corregido'}</button>
+                    ` : `
+                    <button class="pend-btn" type="button"
+                            title="${formReemplazado ? 'Baja el formulario corregido que ya subiste' : 'Baja el formulario que radicó el portal'}"
+                            data-pend-form-dl="${escapeHtml(rad)}">⤓ Descargar</button>
+                    <button class="pend-btn" type="button" ${ocupado ? 'disabled' : ''}
+                            title="Sube el formulario corregido. Se usará al cargar, sin tocar el del repositorio"
+                            data-pend-form-up="${escapeHtml(rad)}">${ocupado ? '⏳ Subiendo...' : '↻ Cargar corregido'}</button>
+                    ${formReemplazado ? `
+                    <button class="pend-btn" type="button" title="Descartar el corregido y volver al que radicó el portal"
+                            data-pend-form-del="${escapeHtml(rad)}">✕ Descartar</button>` : ''}
+                    `) : `
+                    <button class="pend-btn" type="button" title="Ver el documento a pantalla completa"
+                            data-pend-doc-ver="${escapeHtml(String(a.id_adjunto))}" data-rad="${escapeHtml(rad)}">🔍 Ver</button>
+                    `}
+                  ` : `<span class="pend-doc-missing-tag">No está en el repositorio</span>`}
+                </div>
+            `;
+        }).join('') || '<div class="empty-state">Sin documentos</div>';
+    } catch (e) {
+        cont.innerHTML = `<div class="empty-state" style="color:var(--c-err)">${escapeHtml(String(e.message || e))}</div>`;
+    }
+}
+
+// Deja el panel de documentos en "ocupado" mientras se sube y revalida el Excel: el
+// botón que se pulsó dice qué está pasando y el resto se apaga, porque a mitad de una
+// corrección ninguna otra acción sobre esos archivos tiene sentido.
+function setPendDocsBusy(rad, btnActivo, ocupado, texto = '⏳ Cargando...') {
+    const cont = document.getElementById(`pendDocs-${rad}`);
+    const botones = cont ? Array.from(cont.querySelectorAll('button')) : [];
+    if (btnActivo && !botones.includes(btnActivo)) botones.push(btnActivo);
+    // También el "Cargar" de la fila: entre que se borra el formulario anterior y se
+    // escribe el nuevo hay un instante sin ninguno, y cargar justo ahí armaría el
+    // expediente con el Excel del portal sin que nadie se entere.
+    const cargar = document.querySelector(`[data-pend-cargar="${rad}"]`);
+    if (cargar && !botones.includes(cargar)) botones.push(cargar);
+    botones.forEach(b => {
+        if (ocupado) {
+            if (b.dataset.textoPrevio === undefined) b.dataset.textoPrevio = b.textContent;
+            if (b.dataset.deshabilitadoPrevio === undefined) b.dataset.deshabilitadoPrevio = b.disabled ? '1' : '';
+            b.disabled = true;
+            if (b === btnActivo) b.textContent = texto;
+        } else {
+            if (b.dataset.textoPrevio !== undefined) b.textContent = b.dataset.textoPrevio;
+            b.disabled = b.dataset.deshabilitadoPrevio === '1';
+            delete b.dataset.textoPrevio;
+            delete b.dataset.deshabilitadoPrevio;
+        }
+    });
+}
+
+// ── Visor de documentos de la bandeja ────────────────────────
+// El objetivo es ver el documento, no bajarlo: ocupa la ventana completa y solo deja
+// alrededor lo mínimo para saber qué se está viendo y pasar al siguiente.
+const PEND_VISIBLE_RE = /\.(pdf|png|jpe?g|gif|webp|bmp|tiff?)$/i;
+
+function pendAdjuntoUrl(rad, idAdjunto, inline = true) {
+    return operationApiUrl(
+        `/api/pendientes/${encodeURIComponent(rad)}/adjuntos/${encodeURIComponent(idAdjunto)}/descargar`,
+        inline ? { inline: '1' } : {},
+    );
+}
+
+function abrirVisorPendiente(rad, idAdjunto) {
+    const todos = _pendAdjuntos[rad] || [];
+    const items = todos.filter(a => a.existe && PEND_VISIBLE_RE.test(a.nombre_original || ''));
+    if (!items.length) { showToast('No hay documentos para ver en esta radicación', 'warn'); return; }
+    const index = Math.max(0, items.findIndex(a => String(a.id_adjunto) === String(idAdjunto)));
+    _pendVisor = { rad, items, index };
+
+    let overlay = document.getElementById('pendVisorOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'pendVisorOverlay';
+        overlay.tabIndex = 0;
+        overlay.className = 'pend-visor';
+        overlay.innerHTML = `
+            <div class="pend-visor-bar">
+              <button class="pend-visor-nav" id="pendVisorPrev" type="button" title="Anterior (←)">‹</button>
+              <span class="pend-visor-name" id="pendVisorName"></span>
+              <span class="pend-visor-count" id="pendVisorCount"></span>
+              <button class="pend-visor-nav" id="pendVisorNext" type="button" title="Siguiente (→)">›</button>
+              <button class="pend-visor-close" id="pendVisorClose" type="button" title="Cerrar (Esc)">✕</button>
+            </div>
+            <div class="pend-visor-frame" id="pendVisorFrame"></div>
+        `;
+        document.body.appendChild(overlay);
+        overlay.querySelector('#pendVisorClose').addEventListener('click', cerrarVisorPendiente);
+        overlay.querySelector('#pendVisorPrev').addEventListener('click', () => navVisorPendiente(-1));
+        overlay.querySelector('#pendVisorNext').addEventListener('click', () => navVisorPendiente(1));
+        overlay.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Escape') cerrarVisorPendiente();
+            else if (ev.key === 'ArrowLeft') navVisorPendiente(-1);
+            else if (ev.key === 'ArrowRight') navVisorPendiente(1);
+        });
+        // Clic en el fondo -no en la barra ni en el documento- cierra.
+        overlay.addEventListener('click', (ev) => { if (ev.target === overlay) cerrarVisorPendiente(); });
+    }
+    overlay.classList.add('open');
+    renderVisorPendiente();
+    overlay.focus();
+}
+
+function renderVisorPendiente() {
+    if (!_pendVisor) return;
+    const { rad, items, index } = _pendVisor;
+    const a = items[index];
+    if (!a) return;
+    const nombre = a.nombre_original || `adjunto-${a.id_adjunto}`;
+    const url = pendAdjuntoUrl(rad, a.id_adjunto);
+    document.getElementById('pendVisorName').textContent = nombre;
+    document.getElementById('pendVisorCount').textContent = `${index + 1} / ${items.length}`;
+    const frame = document.getElementById('pendVisorFrame');
+    // #view=FitH: el PDF entra ajustado al ancho, que es como se lee un formulario.
+    frame.innerHTML = /\.pdf$/i.test(nombre)
+        ? `<iframe src="${escapeHtml(url)}#view=FitH" title="${escapeHtml(nombre)}"></iframe>`
+        : `<img src="${escapeHtml(url)}" alt="${escapeHtml(nombre)}">`;
+    const soloUno = items.length < 2;
+    document.getElementById('pendVisorPrev').disabled = soloUno;
+    document.getElementById('pendVisorNext').disabled = soloUno;
+}
+
+function navVisorPendiente(paso) {
+    if (!_pendVisor || _pendVisor.items.length < 2) return;
+    const n = _pendVisor.items.length;
+    _pendVisor.index = (_pendVisor.index + paso + n) % n;
+    renderVisorPendiente();
+}
+
+function cerrarVisorPendiente() {
+    const overlay = document.getElementById('pendVisorOverlay');
+    if (overlay) {
+        overlay.classList.remove('open');
+        // Se vacía el iframe: un PDF grande sigue ocupando memoria si se deja cargado.
+        const frame = document.getElementById('pendVisorFrame');
+        if (frame) frame.innerHTML = '';
+    }
+    _pendVisor = null;
+}
+
+async function cargarPendiente(rad) {
+    const item = pendItem(rad);
+    const etiqueta = item ? `${item.razon_social || ''} · contrato ${item.contrato || rad}` : `Radicación ${rad}`;
+    const fd = new FormData();
+    fd.append('operation', readOperation());
+    if (item?.razon_social) fd.append('label', item.razon_social);
+
+    const r = await fetch(operationApiUrl(`/api/pendientes/${encodeURIComponent(rad)}/cargar`), {
+        method: 'POST',
+        body: fd,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+        const det = data.detail;
+        const msg = typeof det === 'string' ? det : (det?.message || `HTTP ${r.status}`);
+        throw new Error(msg);
+    }
+    const caseId = data.id || data.case_id;
+    if (!caseId) throw new Error('El backend no devolvió un ID de caso.');
+
+    // Mismo encadenado que la carga manual: crear el expediente y lanzar el workflow.
+    await fetch(caseApiUrl(caseId, '/run-workflow'), { method: 'POST' });
+
+    // Se espera a que termine antes de devolver el control. La fila queda "Cargando..."
+    // todo ese rato: mostrar "Ver caso" antes de tiempo llevaría a un expediente a medio
+    // procesar, sin clasificación ni decisión.
+    const { estado } = await esperarWorkflow(caseId);
+    if (estado === 'timeout') showToast(`${etiqueta}: el proceso sigue en curso, revísalo en la bandeja`, 'warn');
+    else if (estado === 'failed') showToast(`${etiqueta}: el proceso falló`, 'err');
+    else showToast(`${etiqueta} procesado`, 'ok');
+    return { caseId, etiqueta, estado };
+}
+
+// Carga la versión corregida del Excel. NO sobrescribe: el archivo original se queda en
+// el expediente tal como llegó, y el corregido entra como archivo nuevo. `filename` es el
+// Excel activo del caso, o sea a cuál de los dos sustituye como insumo del análisis.
+// Guarda el formulario corregido contra la RADICACIÓN, antes de que exista expediente.
+// El repositorio legacy no se toca: el corregido vive aparte y se puede descartar.
+async function subirFormularioPendiente(rad, file) {
+    const fd = new FormData();
+    fd.append('operation', readOperation());
+    fd.append('upload', file, file.name);
+    const r = await fetch(operationApiUrl(`/api/pendientes/${encodeURIComponent(rad)}/formulario`), { method: 'POST', body: fd });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+        const det = data.detail;
+        throw new Error(typeof det === 'string' ? det : (det?.message || `HTTP ${r.status}`));
+    }
+    return data;
+}
+
+async function reemplazarArchivoCaso(caseId, filename, file) {
+    const fd = new FormData();
+    fd.append('filename', filename);
+    fd.append('operation', readOperation());
+    fd.append('upload', file, file.name);
+    const r = await fetch(caseApiUrl(caseId, '/replace-file'), { method: 'POST', body: fd });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+        const det = data.detail;
+        throw new Error(typeof det === 'string' ? det : (det?.message || `HTTP ${r.status}`));
+    }
+    return data;
+}
+
+function initPendientes() {
+    document.getElementById('pendRefreshBtn')?.addEventListener('click', loadPendientes);
+
+    document.getElementById('pendientesTableWrap')?.addEventListener('click', async (ev) => {
+        const btn = ev.target.closest('button');
+        if (!btn) return;
+
+        if (btn.dataset.pendDocs) {
+            const rad = btn.dataset.pendDocs;
+            _pendExpandida = (_pendExpandida === rad) ? null : rad;
+            renderPendientes();
+            return;
+        }
+        if (btn.dataset.pendBloq) {
+            const rad = btn.dataset.pendBloq;
+            _pendBloqExpandida = (_pendBloqExpandida === rad) ? null : rad;
+            renderPendientes();
+            return;
+        }
+        if (btn.dataset.pendZip) {
+            window.location.href = operationApiUrl(`/api/pendientes/${encodeURIComponent(btn.dataset.pendZip)}/descargar`);
+            return;
+        }
+        if (btn.dataset.pendDocDl) {
+            const rad = btn.dataset.rad;
+            window.location.href = operationApiUrl(`/api/pendientes/${encodeURIComponent(rad)}/adjuntos/${encodeURIComponent(btn.dataset.pendDocDl)}/descargar`);
+            return;
+        }
+        if (btn.dataset.pendCaso) {
+            const caseId = btn.dataset.pendCaso;
+            // Mismo encadenado que usa el resto de la app para abrir un contrato
+            // (ver el manejador de action==='reporte'). La carga del reporte se pide
+            // EXPLÍCITAMENTE: switchView solo repinta el sidebar, y ese sí decide por su
+            // cuenta si recarga o no comparando reporteContent.dataset.caseId. Si esa
+            // comparación no entra -o falla el fetch del sidebar-, el panel se queda con
+            // el contrato que se estaba viendo antes, que es justo el síntoma de abrir
+            // una radicación y ver otra.
+            activeCaseId = caseId;
+            activeCasePayload = null;   // el payload viejo es de otro contrato
+            switchView('reporte');
+            await loadActiveCaseFull(caseId);
+            loadReporteForCase(caseId);
+            return;
+        }
+        if (btn.dataset.pendCargar) {
+            const rad = btn.dataset.pendCargar;
+            _pendCargando.add(rad);
+            renderPendientes();
+            try {
+                await cargarPendiente(rad);
+                // Recién procesado, lo primero que el operador quiere ver es si quedó
+                // bloqueado y por qué: se abre ese panel sin que tenga que buscarlo.
+                _pendBloqExpandida = rad;
+            } catch (e) {
+                showToast(String(e.message || e), 'err');
+            } finally {
+                _pendCargando.delete(rad);
+                await loadPendientes();
+            }
+            return;
+        }
+        if (btn.dataset.pendDocVer) {
+            abrirVisorPendiente(btn.dataset.rad, btn.dataset.pendDocVer);
+            return;
+        }
+        if (btn.dataset.pendFormDl) {
+            // Trae el vigente: el corregido si ya se subió uno, si no el del portal. Así
+            // una segunda corrección parte de la primera.
+            window.location.href = operationApiUrl(`/api/pendientes/${encodeURIComponent(btn.dataset.pendFormDl)}/formulario`);
+            return;
+        }
+        if (btn.dataset.pendFormUp) {
+            _pendCorreccion = { rad: btn.dataset.pendFormUp, btn };
+            const input = document.getElementById('pendReplaceInput');
+            if (input) { input.value = ''; input.click(); }
+            return;
+        }
+        if (btn.dataset.pendFormDel) {
+            const rad = btn.dataset.pendFormDel;
+            if (!confirm('¿Descartar el formulario corregido?\n\nAl cargar se usará el que radicó el portal.')) return;
+            try {
+                const r = await fetch(operationApiUrl(`/api/pendientes/${encodeURIComponent(rad)}/formulario`), { method: 'DELETE' });
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                showToast('Formulario corregido descartado', 'ok');
+                await loadPendientes();
+            } catch (e) {
+                showToast(String(e.message || e), 'err');
+            }
+            return;
+        }
+        if (btn.dataset.pendDocRep) {
+            _pendCorreccion = { caseId: btn.dataset.case, filename: btn.dataset.pendDocRep, rad: btn.dataset.rad || _pendExpandida || '', btn };
+            const input = document.getElementById('pendReplaceInput');
+            if (input) { input.value = ''; input.click(); }
+        }
+    });
+
+    document.getElementById('pendReplaceInput')?.addEventListener('change', async (ev) => {
+        const file = ev.target.files?.[0];
+        const ctx = _pendCorreccion;
+        _pendCorreccion = null;
+        if (!file || !ctx) return;
+        const esCaso = !ctx.rad || !!ctx.caseId;
+        // Reemplazar el Excel de un caso reanaliza el expediente entero -OCR y
+        // clasificación de todos los soportes-, así que puede tardar bastante. Sin aviso,
+        // la pantalla se ve congelada y el operador vuelve a pulsar.
+        const texto = esCaso ? '⏳ Revalidando...' : '⏳ Subiendo...';
+        if (ctx.rad) _pendFormBusy.add(String(ctx.rad));
+        // Sin renderPendientes() aquí a propósito: repintaría la tabla y con ella el panel
+        // de documentos, borrando el estado que se acaba de marcar.
+        setPendDocsBusy(ctx.rad, ctx.btn, true, texto);
+        showToast(esCaso ? 'Cargando el Excel corregido y revalidando el expediente...' : 'Subiendo el formulario corregido...', 'info');
+        try {
+            if (!esCaso) {
+                // Todavía no hay expediente: el corregido se guarda contra la radicación y
+                // entra en juego cuando se pulse Cargar. Nada que revalidar aún.
+                await subirFormularioPendiente(ctx.rad, file);
+                showToast('Formulario corregido guardado. Se usará al cargar el contrato.', 'ok');
+            } else {
+                // /replace-file ya reanaliza el caso por dentro. NO se lanza run-workflow: ese
+                // es el que, al completar, cierra la gestión en pqr_colmena.afa_trazabilidad e
+                // inserta una fila nueva. Revalidar tras una corrección no debe mover la
+                // trazabilidad.
+                await reemplazarArchivoCaso(ctx.caseId, ctx.filename, file);
+                showToast('Excel corregido cargado y revalidado', 'ok');
+            }
+        } catch (e) {
+            showToast(String(e.message || e), 'err');
+        } finally {
+            // Se limpia SIEMPRE, también si falló: si no, los botones quedan apagados y
+            // el operador tiene que recargar la página para reintentar.
+            if (ctx.rad) _pendFormBusy.delete(String(ctx.rad));
+            setPendDocsBusy(ctx.rad, ctx.btn, false);
+            // loadPendientes -> renderPendientes ya repinta el panel de documentos abierto.
+            await loadPendientes();
+        }
+    });
+}

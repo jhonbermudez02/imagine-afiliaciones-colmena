@@ -892,12 +892,22 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
   border-color: #b8dfc8;
 }
 .classif-blockers-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
   font-size: 12px;
   font-weight: 700;
   color: var(--c-err);
   margin-bottom: 6px;
 }
 .classif-blockers-title.ok { color: var(--c-ok); }
+.classif-accept-all-btn {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
 .classif-blocker-item {
   display: flex;
   align-items: flex-start;
@@ -1955,14 +1965,30 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
   border: 1px solid var(--c-border); background: var(--c-bg);
   color: var(--c-text-2); cursor: pointer; width: 42px;
 }
+/* El orden se teclea, no se pulsa: sin las flechas del spinner el campo queda todo
+   para el número, que es lo que hay que leer de un vistazo en una lista larga. */
 .doc-order-input {
-  height: 22px;
+  width: 44px;
+  height: 30px;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 2px 4px;
   text-align: center;
+  color: var(--c-text);
+  cursor: text;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.doc-order-input::-webkit-outer-spin-button,
+.doc-order-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 .doc-order-input:focus {
   outline: 1px solid var(--c-blue);
   border-color: var(--c-blue);
 }
+.doc-order-input:disabled { color: var(--c-text-3); cursor: default; }
 @keyframes slideIn {
   from { opacity: 0; transform: translateX(20px); }
   to   { opacity: 1; transform: translateX(0); }
@@ -2446,4 +2472,228 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
   .classif-blocker-item {
     padding: 6px 0;
   }
+}
+
+/* ── Pendientes por cargar ─────────────────────────────────── */
+.nav-badge {
+  margin-left: auto;
+  background: var(--c-brand);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 9px;
+  min-width: 16px;
+  text-align: center;
+}
+.pend-head-actions { display: flex; align-items: center; gap: 8px; }
+.pend-table-wrap { overflow-x: auto; }
+.pend-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pend-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--c-text-3);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--c-border);
+  white-space: nowrap;
+}
+.pend-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--c-border);
+  vertical-align: middle;
+}
+.pend-table tr:last-child td { border-bottom: none; }
+.pend-row:hover td { background: var(--c-surface-2); }
+.pend-row-open td { background: var(--c-brand-light); }
+.pend-num { text-align: right; white-space: nowrap; }
+.pend-razon { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pend-acciones { white-space: nowrap; text-align: right; }
+.pend-adj-parcial { color: var(--c-warn); font-weight: 600; cursor: help; }
+
+.pend-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--c-surface-2);
+  color: var(--c-text-2);
+  white-space: nowrap;
+}
+.pend-pill-ok   { background: var(--c-ok-bg);   color: var(--c-ok); }
+.pend-pill-warn { background: var(--c-warn-bg); color: var(--c-warn); }
+
+.pend-btn {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border-md);
+  border-radius: var(--radius);
+  padding: 4px 9px;
+  font-size: 12px;
+  font-family: var(--font);
+  color: var(--c-text);
+  cursor: pointer;
+  margin-left: 4px;
+}
+.pend-btn:hover:not(:disabled) { background: var(--c-surface-2); border-color: var(--c-brand); }
+.pend-btn:disabled { opacity: .45; cursor: not-allowed; }
+.pend-btn-primary { background: var(--c-brand); border-color: var(--c-brand); color: #fff; font-weight: 600; }
+.pend-btn-primary:hover:not(:disabled) { background: var(--c-brand-dark); border-color: var(--c-brand-dark); }
+.pend-btn-link { color: var(--c-blue); border-color: transparent; }
+
+.pend-docs-row td { background: var(--c-surface-2); padding: 0; }
+.pend-docs { padding: 8px 12px 12px 46px; display: flex; flex-direction: column; gap: 6px; }
+.pend-doc {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+}
+.pend-doc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.pend-doc-meta { font-size: 11px; color: var(--c-text-3); white-space: nowrap; }
+.pend-doc-missing { opacity: .7; border-style: dashed; }
+.pend-doc-missing-tag { font-size: 11px; color: var(--c-err); white-space: nowrap; }
+/* Visor de documentos de la bandeja: el documento ocupa todo lo que da la ventana.
+   La barra es una franja fina arriba; debajo, el frame se lleva el resto del alto. */
+.pend-visor {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: none;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.92);
+  outline: none;
+}
+.pend-visor.open { display: flex; }
+.pend-visor-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  color: #fff;
+}
+.pend-visor-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+}
+.pend-visor-count { font-size: 12px; opacity: 0.7; white-space: nowrap; }
+.pend-visor-nav,
+.pend-visor-close {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 2px 12px;
+  font-size: 18px;
+  line-height: 1.4;
+}
+.pend-visor-close { font-size: 14px; padding: 4px 10px; }
+.pend-visor-nav:disabled { opacity: 0.25; cursor: default; }
+.pend-visor-nav:not(:disabled):hover,
+.pend-visor-close:hover { background: rgba(255, 255, 255, 0.14); }
+.pend-visor-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px 8px;
+}
+.pend-visor-frame iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: 4px;
+  background: #fff;
+}
+.pend-visor-frame img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+  background: #fff;
+}
+@media (max-width: 600px) {
+  .pend-visor-bar { gap: 6px; padding: 6px 8px; }
+  .pend-visor-name { font-size: 12px; }
+  .pend-visor-frame { padding: 0 4px 4px; }
+}
+.pend-doc-tag { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--c-ok); border: 1px solid var(--c-ok); border-radius: 3px; padding: 1px 5px; white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .pend-razon { max-width: 140px; }
+  .pend-docs { padding-left: 16px; }
+}
+
+/* Estado en vuelo de una carga desde la bandeja de pendientes */
+.pend-pill-load { background: var(--c-info-bg); color: var(--c-info); }
+.pend-spin { display: inline-block; animation: pend-spin-rot 1s steps(8) infinite; }
+@keyframes pend-spin-rot { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .pend-spin { animation: none; }
+}
+
+/* Panel de bloqueantes de la bandeja de pendientes */
+.pend-pill-err { background: var(--c-err-bg); color: var(--c-err); }
+.pend-btn-err { border-color: var(--c-err); color: var(--c-err); }
+.pend-bloq {
+  margin: 8px 12px 12px 16px;
+  padding: 12px 14px;
+  background: var(--c-err-bg);
+  border: 1px solid var(--c-err);
+  border-radius: var(--radius);
+}
+.pend-bloq-ok {
+  background: var(--c-ok-bg);
+  border-color: var(--c-ok);
+  color: var(--c-ok);
+  font-size: 13px;
+}
+.pend-bloq-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-err);
+  margin-bottom: 8px;
+}
+.pend-bloq-nota {
+  font-size: 12px;
+  color: var(--c-text-2);
+  background: var(--c-err-bg);
+  border-left: 3px solid var(--c-err);
+  border-radius: 0 4px 4px 0;
+  padding: 7px 10px;
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+.pend-bloq-list {
+  margin: 0 0 10px;
+  padding-left: 22px;
+  font-size: 13px;
+  color: var(--c-text);
+  line-height: 1.6;
+}
+.pend-bloq-list li { margin-bottom: 4px; }
+.pend-bloq-foot {
+  font-size: 12px;
+  color: var(--c-text-2);
+  border-top: 1px solid var(--c-border);
+  padding-top: 8px;
+  line-height: 1.5;
 }
