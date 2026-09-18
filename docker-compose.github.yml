@@ -51,6 +51,33 @@ services:
     networks:
       - imagine_net
 
+  # SQL Server LOCAL, suplente del servidor real mientras no haya acceso a el.
+  # Misma logica que imagine_compat_db: una reproduccion para trabajar en local, NO un
+  # destino de despliegue. Cuando llegue la conexion real solo cambia
+  # DB_ALIAS_SR03EPSDB_URL; el codigo no se entera porque todo pasa por el alias.
+  # La imagen de Microsoft trae licencia Developer (gratuita para desarrollo y pruebas).
+  imagine_sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: imagine_sqlserver
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${SQLSERVER_SA_PASSWORD:-Imagine_Local_2026}
+      MSSQL_PID: Developer
+    ports:
+      # 1434 en el host para no chocar con un SQL Server instalado en la maquina.
+      - "1434:1433"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    volumes:
+      - imagine_sqlserver_data:/var/opt/mssql
+    networks:
+      - imagine_net
+
   imagine_compat_backend:
     build:
       context: ./compat-backend
@@ -67,6 +94,12 @@ services:
       DB_ALIAS_WIMG004_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/img004
       DB_ALIAS_YBR_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/br
       DB_ALIAS_PQR_URL: postgresql+psycopg2://${COMPAT_POSTGRES_USER:-escobar}:${COMPAT_POSTGRES_PASSWORD:-escobar}@imagine_compat_db:5432/pqr_colmena
+      # SQL Server. El ALIAS se llama SR03EPSDB (servidor SR03) pero la BASE es EPSDB.
+      # Apunta al contenedor local; para el servidor real basta con cambiar
+      # host, base y credenciales aqui (o via .env). TrustServerCertificate=yes porque el
+      # contenedor usa un certificado autofirmado -y el Driver 18 cifra por omision-;
+      # contra el servidor real, quitalo si su certificado es de una CA de confianza.
+      DB_ALIAS_SR03EPSDB_URL: ${DB_ALIAS_SR03EPSDB_URL:-mssql+pyodbc://sa:${SQLSERVER_SA_PASSWORD:-Imagine_Local_2026}@imagine_sqlserver:1433/EPSDB?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes}
       AFILIACIONES_ENGINE_STATE_PATH: /tmp/afiliaciones_engine_state.json
       AI_RAG_BACKEND: postgres
       AI_RAG_DB_ALIAS: temporal
@@ -146,6 +179,7 @@ services:
 volumes:
   imagine_postgres_data:
   imagine_compat_postgres_data:
+  imagine_sqlserver_data:
 
 networks:
   imagine_net:

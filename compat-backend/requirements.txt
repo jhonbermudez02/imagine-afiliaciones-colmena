@@ -4,6 +4,8 @@ pydantic==2.9.2
 sqlalchemy==2.0.35
 alembic==1.13.3
 psycopg2-binary==2.9.9
+# SQL Server via SQLAlchemy (mssql+pyodbc). Necesita msodbcsql18, que instala el Dockerfile.
+pyodbc==5.2.0
 python-multipart==0.0.9
 zeep==4.3.1
 eval-type-backport==0.2.0

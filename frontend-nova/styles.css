@@ -2697,3 +2697,53 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
   padding-top: 8px;
   line-height: 1.5;
 }
+
+/* ── Planos por lote ─────────────────────────────────────────
+   Reusa .pend-table / .pend-pill / .pend-btn: es la misma clase de tabla operativa
+   que Pendientes y no tiene por que verse distinta. */
+.planos-busqueda {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.planos-input, .planos-select {
+  font: inherit;
+  font-size: 13px;
+  color: var(--c-text);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border-md);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+.planos-input { min-width: 240px; flex: 1 1 240px; max-width: 340px; }
+.planos-input:focus, .planos-select:focus {
+  outline: none;
+  border-color: var(--c-brand);
+}
+.planos-nota {
+  font-size: 12px;
+  color: var(--c-text-2);
+  background: var(--c-info-bg);
+  border-left: 3px solid var(--c-info);
+  border-radius: 0 4px 4px 0;
+  padding: 9px 12px;
+  margin-bottom: 12px;
+  line-height: 1.55;
+}
+.planos-nota code {
+  font-size: 11px;
+  background: var(--c-surface);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+.planos-pie {
+  font-size: 11px;
+  color: var(--c-text-3);
+  padding: 8px 2px 0;
+}
+@media (max-width: 720px) {
+  .planos-input { min-width: 0; max-width: none; width: 100%; }
+  .planos-busqueda > * { flex: 1 1 100%; }
+}

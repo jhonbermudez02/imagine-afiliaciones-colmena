@@ -3881,6 +3881,149 @@ def _marcar_afi_rad_plano(payload: Dict[str, Any], perfil: str = "") -> Dict[str
     return _afi_rad_set_estado(contrato, "plano", datetime.now().strftime("%Y%m%d"))
 
 
+def _legacy_get(path: str, params: Dict[str, Any], timeout: float = 60.0) -> Dict[str, Any]:
+    base_url = str(settings.legacy_backend_url or "").strip().rstrip("/")
+    if not base_url:
+        raise HTTPException(status_code=503, detail="legacy_backend_url no configurado.")
+    try:
+        resp = httpx.get(f"{base_url}/{path}", params=params, timeout=timeout)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"No pude consultar el legado: {type(exc).__name__}: {exc}")
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=_texto_error_legacy(resp))
+    return resp.json()
+
+
+def _texto_error_legacy(resp: Any) -> str:
+    try:
+        cuerpo = resp.json()
+    except Exception:
+        return (resp.text or "")[:400]
+    detalle = cuerpo.get("detail") if isinstance(cuerpo, dict) else cuerpo
+    return detalle if isinstance(detalle, str) else json.dumps(detalle, ensure_ascii=False)[:400]
+
+
+@app.get("/api/plano/lotes")
+async def plano_lotes(
+    contrato: str = Query(default=""),
+    lote: str = Query(default=""),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    """Busca un contrato o un lote en las tablas legado.
+
+    Las tablas son compartidas entre servidores; data/cases/ no lo es. Por eso aqui se
+    encuentra un contrato aprobado desde OTRO servidor, que en esta maquina no tiene
+    expediente.
+
+    Exige contrato o lote a proposito: en produccion brempresasarp tiene miles de filas
+    y un listado completo no es util ni sano para el navegador.
+    """
+    contrato_digits = only_digits(contrato)
+    lote_digits = only_digits(lote)
+    if not contrato_digits and not lote_digits:
+        raise HTTPException(status_code=400, detail="Indica un número de contrato o de lote para buscar.")
+    return _legacy_get(
+        "legacy/db/lotes-archivados",
+        {"contrato": contrato_digits, "lote": lote_digits, "limit": limit},
+    )
+
+
+@app.get("/api/plano/por-lote", response_class=PlainTextResponse)
+async def plano_por_lote(
+    http_request: Request,
+    lote: str = Query(default=""),
+    perfil: str = Query(default=""),
+    archivar: bool = Query(default=False),
+    marcar_plano: bool = Query(default=False),
+    reentrega: bool = Query(default=True),
+):
+    """Genera el plano 926 de un lote SIN necesidad del expediente local.
+
+    El plano nunca salio del caso: se arma leyendo brempresasarp/brafiliadosarp, que son
+    compartidas. Del expediente solo se usaba el numero de lote. Por eso un contrato
+    aprobado en otro servidor se puede regenerar aqui pasando su lote.
+
+    Aplica los MISMOS overrides de descarga que /api/cases/{id}/926 (ARL 23->10, etc.):
+    llamar directo a legacy/flatfile/build del compat devuelve el plano crudo, sin
+    parchar, y ese archivo no es el que se le entrega a Colmena.
+
+    `archivar` y `marcar_plano` son explicitos y no se infieren del perfil: esto es una
+    regeneracion manual sobre contratos ya cerrados, y quien la ejecuta decide si ademas
+    quiere dejar el .txt en el repositorio o mover afi_rad.
+    """
+    lote_digits = only_digits(lote)
+    if not lote_digits:
+        raise HTTPException(status_code=400, detail="Parametro requerido: lote")
+
+    info = _legacy_get("legacy/db/lote-info", {"lote": lote_digits})
+    contrato = only_digits(info.get("contrato") or "")
+
+    generado = generate_legacy_flatfile_926_http(lote=lote_digits)
+    if not generado.get("ok") or not generado.get("content"):
+        raise HTTPException(
+            status_code=502,
+            detail=f"No pude generar el plano del lote {lote_digits}: {generado.get('error') or 'sin contenido'}",
+        )
+    final = _apply_926_download_overrides(generado.get("content", ""))
+
+    perfil_efectivo = _perfil_efectivo(http_request, perfil)
+    resultado_archivo: Dict[str, Any] = {}
+    if archivar:
+        if not contrato:
+            resultado_archivo = {"ok": False, "reason": "el lote no tiene contrato en brempresasarp"}
+        else:
+            try:
+                resultado_archivo = _legacy_post(
+                    "legacy/flatfile/guardar-plano-contrato",
+                    {"lote": lote_digits, "contrato": contrato, "content": final},
+                    timeout=30.0,
+                )
+            except Exception as exc:
+                logger.error("No pude archivar el plano del lote %s: %s", lote_digits, exc)
+                resultado_archivo = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    fecha_plano = datetime.now().strftime("%Y%m%d")
+    afi_rad: Dict[str, Any] = {}
+    if marcar_plano:
+        if not contrato:
+            afi_rad = {"ok": False, "reason": "el lote no tiene contrato en brempresasarp"}
+        else:
+            # reentrega=true por omision: esta vista existe para entregar contratos que
+            # pueden venir de otro servidor o ya haberse entregado antes, y ahi hay que
+            # poder repetir la entrega y refrescar la fecha. Lo que NO hace es saltarse la
+            # guarda: solo 'Indexado' y 'Plano' se actualizan. Un contrato en cualquier
+            # otro estado se deja como esta y se reporta, no se le inventa el recorrido.
+            afi_rad = _afi_rad_set_estado(contrato, "plano", fecha_plano, reentrega=reentrega)
+
+    respuesta = _plano_926_response(final, filename=f"BkCargue_{lote_digits.zfill(12)}.txt")
+    respuesta.headers["X-Plano-Lote"] = lote_digits
+    respuesta.headers["X-Plano-Contrato"] = contrato or "-"
+    respuesta.headers["X-Plano-Perfil"] = perfil_efectivo or "-"
+    respuesta.headers["X-Plano-Archivado"] = str(bool(resultado_archivo.get("ok"))).lower() if archivar else "no-solicitado"
+    if resultado_archivo.get("path"):
+        respuesta.headers["X-Plano-Path"] = str(resultado_archivo["path"])
+    # La transicion de afi_rad exige estado previo 'Indexado'; si el contrato ya estaba en
+    # 'Plano' (por ejemplo porque se entrego desde el otro servidor) el UPDATE afecta 0
+    # filas. Eso NO es un fallo, pero la UI tiene que poder decirlo, asi que "matched" y
+    # la fecha viajan en la respuesta en vez de perderse en el log.
+    if marcar_plano:
+        respuesta.headers["X-Plano-Afirad"] = "ok" if afi_rad.get("ok") else "error"
+        respuesta.headers["X-Plano-Afirad-Matched"] = str(int(afi_rad.get("matched") or 0))
+        respuesta.headers["X-Plano-Fecha"] = fecha_plano
+        respuesta.headers["X-Plano-Afirad-Anterior"] = str(afi_rad.get("estado_anterior") or "")
+        respuesta.headers["X-Plano-Afirad-Existe"] = str(bool(afi_rad.get("existe_en_afi_rad"))).lower()
+        if afi_rad.get("reason") or afi_rad.get("error"):
+            respuesta.headers["X-Plano-Afirad-Detalle"] = str(afi_rad.get("reason") or afi_rad.get("error"))[:180]
+    else:
+        respuesta.headers["X-Plano-Afirad"] = "no-solicitado"
+    respuesta.headers["Access-Control-Expose-Headers"] = (
+        "Content-Disposition, X-Plano-Lote, X-Plano-Contrato, X-Plano-Perfil, "
+        "X-Plano-Archivado, X-Plano-Path, X-Plano-Afirad, X-Plano-Afirad-Matched, "
+        "X-Plano-Fecha, X-Plano-Afirad-Detalle, X-Plano-Afirad-Anterior, "
+        "X-Plano-Afirad-Existe"
+    )
+    return respuesta
+
+
 @app.get("/api/cases/{case_id}/926", response_class=PlainTextResponse)
 async def case_926(case_id: str, http_request: Request, perfil: str = Query(default="")):
     perfil_efectivo = _perfil_efectivo(http_request, perfil)

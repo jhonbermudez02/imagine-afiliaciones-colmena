@@ -1402,6 +1402,96 @@ def _validate_comisiones_asesores_en_tabla(comisiones: List[Dict[str, Any]], fil
     return invalid
 
 
+# ── Contratos previos del mismo NIT en Apolo (EPSDB.TabCon) ─────────────
+# Regla legado: antes de radicar se consulta si el NIT ya tiene OTRO contrato.
+#   SELECT connumcon, aficaucod FROM TabCon
+#    WHERE connumide = '<nit>' AND connumcon <> '<contrato>'
+# Si hay resultados no se detiene el flujo: se levanta un bloqueante ACEPTABLE, porque
+# un NIT con varios contratos es legítimo en algunos casos (sucursales, reingresos) y
+# quien radica es quien decide.
+_TABCON_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+def _consultar_contratos_previos_apolo(nit: str, contrato: str) -> Dict[str, Any]:
+    """Consulta TabCon vía compat-backend. Devuelve {"items", "loaded"}.
+
+    Un fallo NO se cachea ni bloquea: si SQL Server o el compat están caídos se
+    devuelve loaded=False y la validación se salta. Los aciertos sí se cachean por
+    (nit, contrato) porque el prechequeo se recalcula en cada refresco del caso.
+    """
+    nit_digits = only_digits(nit)
+    contrato_digits = only_digits(contrato)
+    if not nit_digits or not contrato_digits:
+        return {"items": [], "loaded": False}
+    llave = f"{nit_digits}|{contrato_digits}"
+    if llave in _TABCON_CACHE:
+        return _TABCON_CACHE[llave]
+    try:
+        base_url = str(settings.legacy_backend_url or "").strip().rstrip("/")
+        if not base_url:
+            return {"items": [], "loaded": False}
+        resp = httpx.get(
+            f"{base_url}/legacy/db/tabcon/contratos-por-nit",
+            params={"nit": nit_digits, "contrato": contrato_digits},
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        crudos = resp.json().get("items", [])
+    except Exception:
+        return {"items": [], "loaded": False}
+    items: List[Dict[str, str]] = []
+    vistos: set[str] = set()
+    for fila in crudos:
+        if not isinstance(fila, dict):
+            continue
+        numero = normalize_text(fila.get("connumcon")).strip()
+        if not numero:
+            continue
+        # Red de seguridad: si TabCon guarda el contrato en curso con relleno o ceros a
+        # la izquierda, el <> de SQL no lo excluye. Comparar por solo-dígitos evita
+        # reportar el propio contrato como si fuera ajeno.
+        if only_digits(numero) == contrato_digits:
+            continue
+        if numero in vistos:
+            continue
+        vistos.add(numero)
+        items.append({"connumcon": numero, "aficaucod": normalize_text(fila.get("aficaucod")).strip()})
+    resultado = {"items": items, "loaded": True}
+    _TABCON_CACHE[llave] = resultado
+    return resultado
+
+
+def _validate_contratos_previos_apolo(nit: str, contrato: str) -> Optional[Dict[str, Any]]:
+    consulta = _consultar_contratos_previos_apolo(nit, contrato)
+    if not consulta.get("loaded"):
+        return None
+    items = consulta.get("items") or []
+    if not items:
+        return None
+    detalle = ", ".join(
+        f"{item['connumcon']}" + (f" (causal {item['aficaucod']})" if item.get("aficaucod") else "")
+        for item in items[:10]
+    )
+    restantes = len(items) - 10
+    if restantes > 0:
+        detalle = f"{detalle} y {restantes} mas"
+    plural = "contratos" if len(items) > 1 else "contrato"
+    return {
+        "code": "CONTRATO_EXISTENTE_MISMO_NIT",
+        "status": "ALERTA",
+        "severity": "blocker",
+        "can_accept_exception": True,
+        "message": (
+            f"El NIT {only_digits(nit)} ya tiene otro(s) {plural} en Apolo: {detalle}. "
+            f"Verificar antes de radicar el contrato {only_digits(contrato)}."
+        ),
+        "nit": only_digits(nit),
+        "contrato": only_digits(contrato),
+        "contratos_previos": items[:10],
+        "total_contratos_previos": len(items),
+    }
+
+
 def _pct_text(value: Any) -> str:
     """Texto de un porcentaje sin perder el 0 numérico.
 
@@ -5897,7 +5987,17 @@ def _extract_worker_records_from_rows(rows: List[tuple[Any, ...]]) -> tuple[List
     header_index = -1
     headers: List[str] = []
     best_score = -1
-    for idx, row in enumerate(rows[:50]):
+    # Hasta donde se busca el encabezado de trabajadores. Antes eran las primeras 50 filas,
+    # con la idea de que los trabajadores arrancan alrededor de la fila 39. Pero esa fila
+    # NO es fija: el bloque de centros de trabajo empieza en la 24 y crece una fila por
+    # centro, asi que un contrato con muchos centros empuja el encabezado hacia abajo. Con
+    # 24 centros queda en la fila 56, fuera de la ventana; el lector entonces se quedaba
+    # con el encabezado de CENTROS DE TRABAJO (fila 23), que tambien trae documento y
+    # nombre -los del responsable de la sede- y por eso pasaba el filtro. Resultado: cada
+    # centro se validaba como si fuera un trabajador y reventaba en bloqueantes de campos
+    # que un centro no tiene (sexo, zona, modalidad, jornada, tipo de trabajador...).
+    MAX_FILAS_BUSQUEDA_ENCABEZADO = 600
+    for idx, row in enumerate(rows[:MAX_FILAS_BUSQUEDA_ENCABEZADO]):
         values = [normalize_text(cell) for cell in row[:80]]
         normalized = [_header_key(cell) for cell in values if cell]
         has_document = any(
@@ -5932,6 +6032,13 @@ def _extract_worker_records_from_rows(rows: List[tuple[Any, ...]]) -> tuple[List
                 best_score = score
                 header_index = idx
                 headers = [_header_key(cell) for cell in values]
+            # Corte temprano: con 4 o mas marcadores propios de trabajador (eps, pension,
+            # tipo de salario, tipo de trabajador...) esto es la tabla de trabajadores sin
+            # ambiguedad -ninguna otra tabla de la hoja los tiene-. Se para aqui para no
+            # recorrer las cientos de filas de trabajadores que vienen debajo, y para no
+            # arriesgarse con el bloque de totales del final, que tambien parece encabezado.
+            if worker_markers >= 4:
+                break
 
     if header_index >= 0 and headers and header_index + 1 < len(rows):
         sub_values = [normalize_text(cell) for cell in rows[header_index + 1][: len(headers)]]
@@ -7469,6 +7576,25 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
             }
         )
         next_actions.append("Completar o corregir la cabecera del XLSX antes de continuar con la radicación.")
+
+    # Cruce contra Apolo: ¿el NIT ya tiene otro contrato? Solo depende del XLSX (NIT y
+    # número de contrato), por eso vive en el prechequeo y se ve desde la primera
+    # validación, antes de procesar los soportes.
+    contrato_precheck = only_digits(
+        flat_pairs.get("numerocontrato")
+        or profile.get("numero_contrato")
+        or profile.get("numero_radicacion")
+        or form_fields.get("numero_radicacion", "")
+        or ""
+    )
+    contratos_previos = _validate_contratos_previos_apolo(
+        only_digits(profile.get("nit", "")) or employer_document, contrato_precheck
+    )
+    if contratos_previos:
+        rejection_reasons.append(contratos_previos)
+        next_actions.append(
+            "Revisar en Apolo los contratos ya existentes para este NIT antes de radicar."
+        )
 
     responsable_sede_documento = only_digits(form_fields.get("responsable_sede_principal_numero_documento", ""))
     if not responsable_sede_documento:
@@ -9657,13 +9783,63 @@ def _map_naturaleza_to_tipoempresa_compat(naturaleza: str) -> str:
     return ""
 
 
+def _legacy_detalle_error(response: "httpx.Response") -> str:
+    """Motivo legible del cuerpo de una respuesta de error del compat-backend.
+
+    El compat envuelve todo error en {"ok": false, "error": {"type", "detail"},
+    "request_id"}, y para las validaciones ese `detail` es a su vez un dict con
+    {"message", "errors": [...]} que dice EXACTAMENTE que fila y que campo fallaron.
+    raise_for_status() tira todo eso a la basura y deja solo "Client error '400 Bad
+    Request' for url ...", con lo que no hay nada que diagnosticar. Aqui se desenvuelve.
+
+    El request_id se conserva: es lo que permite encontrar la peticion en los logs del
+    compat cuando el mensaje no alcanza.
+    """
+    try:
+        cuerpo = response.json()
+    except ValueError:
+        return (response.text or "").strip()[:600]
+    if not isinstance(cuerpo, dict):
+        return str(cuerpo)[:900]
+
+    request_id = str(cuerpo.get("request_id") or "").strip()
+    detalle = cuerpo.get("error", cuerpo)
+    if isinstance(detalle, dict) and "detail" in detalle:
+        detalle = detalle.get("detail")
+
+    if isinstance(detalle, dict):
+        mensaje = str(detalle.get("message") or detalle.get("error") or "").strip()
+        errores = detalle.get("errors")
+        if isinstance(errores, list) and errores:
+            # Se listan varios: un solo error rara vez explica el problema, y el operador
+            # necesita ver el patron (todas las filas, o solo una) para saber que corregir.
+            listado = "; ".join(str(e) for e in errores[:12])
+            restantes = len(errores) - 12
+            if restantes > 0:
+                listado = f"{listado}; (+{restantes} mas)"
+            texto = f"{mensaje} {listado}".strip() if mensaje else listado
+        else:
+            texto = mensaje or str(detalle)
+    else:
+        texto = str(detalle)
+
+    texto = texto[:900]
+    return f"{texto} [request_id={request_id}]" if request_id else texto
+
+
 def _legacy_post(path: str, payload: Dict[str, Any], timeout: float = 120.0) -> Dict[str, Any]:
     base_url = str(settings.legacy_backend_url or "").strip().rstrip("/")
     if not base_url:
         raise RuntimeError("legacy_backend_url no configurado.")
     url = f"{base_url}/{path.lstrip('/')}"
     response = httpx.post(url, json=payload, timeout=timeout)
-    response.raise_for_status()
+    if response.status_code >= 400:
+        # No se usa raise_for_status(): su mensaje omite el cuerpo, que es justo donde el
+        # compat explica el motivo. Sin esto, un 400 de validacion llega al operador como
+        # "400 Bad Request" a secas y no hay forma de saber que corregir.
+        raise RuntimeError(
+            f"{path.lstrip('/')} respondio {response.status_code}: {_legacy_detalle_error(response)}"
+        )
     return response.json()
 
 
@@ -9831,13 +10007,19 @@ def _contrato_para_afi_rad(payload: Dict[str, Any]) -> str:
     )
 
 
-def _afi_rad_set_estado(contrato: str, accion: str, fecha: str = "") -> Dict[str, Any]:
+def _afi_rad_set_estado(contrato: str, accion: str, fecha: str = "", reentrega: bool = False) -> Dict[str, Any]:
     """Mueve wimg004.afi_rad al estado indicado para un contrato.
 
     Nunca inserta: las filas de afi_rad las crea el modulo externo de radicacion. Que
     el UPDATE no encuentre fila no es un fallo del caso (en desarrollo afi_rad viene
     vacia), asi que esta funcion no propaga excepciones: reporta y sigue. El estado de
     afi_rad es un efecto lateral sobre un sistema vecino, no puede tumbar el flujo.
+
+    `reentrega` solo aplica a la accion "plano" y NO quita la guarda de estado previo:
+    la amplia de 'Indexado' a 'Indexado' o 'Plano'. Sirve para volver a entregar un
+    contrato ya entregado -otro servidor, una correccion- y refrescarle la fecha.
+    Cualquier otro estado se deja intacto: un contrato que no llego a 'Indexado' no esta
+    listo para entregarse y saltarlo a 'Plano' le inventaria un recorrido que no ocurrio.
     """
     contrato_digits = only_digits(contrato)
     if not contrato_digits:
@@ -9845,7 +10027,7 @@ def _afi_rad_set_estado(contrato: str, accion: str, fecha: str = "") -> Dict[str
     try:
         return _legacy_post(
             "legacy/afi-rad/estado",
-            {"contrato": contrato_digits, "accion": accion, "fecha": fecha},
+            {"contrato": contrato_digits, "accion": accion, "fecha": fecha, "reentrega": bool(reentrega)},
             timeout=30.0,
         )
     except Exception as exc:

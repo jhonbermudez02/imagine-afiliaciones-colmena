@@ -66,6 +66,9 @@
           <span class="nav-dot"></span>Pendientes
           <span class="nav-badge" id="pendientesBadge" hidden>0</span>
         </button>
+        <button class="nav-item" data-view="planos" type="button">
+          <span class="nav-dot"></span>Planos
+        </button>
       </div>
 
       <div class="nav-group" id="navColmena" style="display:none">
@@ -113,6 +116,7 @@
       <select class="mobile-view-select" id="mobileViewSelect" aria-label="Cambiar vista">
         <option value="bandeja">Bandeja</option>
         <option value="pendientes">Pendientes</option>
+        <option value="planos">Planos</option>
         <option value="produccion">Producción</option>
         <option value="busqueda">Búsqueda</option>
         <option value="admin">Admin</option>
@@ -203,6 +207,38 @@
           </div>
           <div id="pendientesTableWrap">
             <div class="loading-msg">Cargando pendientes...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PLANOS POR LOTE -->
+      <section class="view" id="view-planos">
+        <div class="section-card">
+          <div class="section-card-head">
+            <div class="section-title">Planos por contrato</div>
+          </div>
+          <form class="planos-busqueda" id="planosForm">
+            <input class="planos-input" id="planosQuery" type="search" inputmode="numeric"
+                   placeholder="Número de contrato" aria-label="Número de contrato o lote"
+                   autocomplete="off">
+            <select class="planos-select" id="planosCampo" aria-label="Buscar por">
+              <option value="contrato">Contrato</option>
+              <option value="lote">Lote</option>
+            </select>
+            <button class="pend-btn pend-btn-primary" id="planosBuscarBtn" type="submit">Buscar</button>
+          </form>
+          <div class="planos-nota">
+            Se busca en las tablas legado, que son compartidas entre servidores, no en el
+            expediente local: aquí se encuentra también un contrato aprobado desde otro
+            servidor, que en esta máquina no tiene caso.
+            <strong>Descargar hace la entrega completa</strong>: archiva
+            <code>plano_&lt;contrato&gt;.txt</code> junto a los documentos del lote y deja
+            <code>afi_rad</code> en <em>Plano</em> con la fecha de hoy. El estado solo se
+            actualiza si viene de <em>Indexado</em> o de <em>Plano</em>; en cualquier otro
+            estado el plano se descarga igual, pero <code>afi_rad</code> se deja intacto.
+          </div>
+          <div id="planosTableWrap">
+            <div class="empty-state">Escribe un número de contrato y pulsa Buscar</div>
           </div>
         </div>
       </section>

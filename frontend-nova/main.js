@@ -491,6 +491,9 @@ function isXlsxOrFormularioBlocker(b) {
         'CAMARA_',
         'EMPRESA_MATCH',
         'CONTRATO_MATCH',
+        // Cruce contra Apolo (TabCon): el NIT ya tiene otro contrato. No es un error del
+        // XLSX, es informacion de un sistema vecino, y quien radica decide si sigue.
+        'CONTRATO_EXISTENTE_',
         'AUTORIZACION_',
         'MISSING_REQUIRED_DOCUMENTS',
         'DOCUMENTS_',
@@ -1015,6 +1018,7 @@ const VIEW_META = {
     bandeja:       { title: 'Bandeja de entrada',      breadcrumb: 'Operación · contratos activos' },
     flujo:         { title: 'Nuevo contrato',           breadcrumb: 'Operación · cargar expediente' },
     pendientes:    { title: 'Pendientes',               breadcrumb: 'Operación · radicadas sin gestionar' },
+    planos:        { title: 'Planos por contrato',      breadcrumb: 'Operación · entrega de plano sin expediente' },
     clasificacion: { title: 'Clasificación documental', breadcrumb: 'Operación · documentos por revisar' },
     validacion:    { title: 'Validación OCR',           breadcrumb: 'Revisión · comparación de fuentes' },
     visor:         { title: 'Visor documental',         breadcrumb: 'Revisión · documentos adjuntos' },
@@ -6006,6 +6010,7 @@ function init() {
     });
 
     initPendientes();
+    initPlanos();
 
     // Colapsar / mostrar el sidebar
     applySidebarCollapsed(localStorage.getItem(SIDEBAR_KEY) === '1');
@@ -6567,6 +6572,191 @@ async function reemplazarArchivoCaso(caseId, filename, file) {
         throw new Error(typeof det === 'string' ? det : (det?.message || `HTTP ${r.status}`));
     }
     return data;
+}
+
+// ── PLANOS POR CONTRATO ──────────────────────────────────────
+// El plano se arma leyendo las tablas legado (brempresasarp/brafiliadosarp), que son
+// COMPARTIDAS entre servidores; el expediente (data/cases/) es local a cada uno. Por eso
+// esta vista busca en la base y no en la bandeja: es la unica forma de entregar el plano
+// de un contrato que se aprobo en otro servidor.
+//
+// Es una BUSQUEDA, no un listado: en produccion hay miles de contratos.
+//
+// Descargar aqui es una ENTREGA, igual que la de Colmena: archiva el .txt junto a los
+// documentos del lote y deja afi_rad en 'Plano' con la fecha del dia.
+let _planos = [];
+let _planosUltimaBusqueda = null;
+const _planosBusy = new Set();
+
+async function buscarPlanos() {
+    const wrap = document.getElementById('planosTableWrap');
+    const input = document.getElementById('planosQuery');
+    const campo = document.getElementById('planosCampo');
+    if (!wrap || !input) return;
+
+    const valor = (input.value || '').replace(/\D+/g, '');
+    const porLote = (campo?.value || 'contrato') === 'lote';
+    if (!valor) {
+        _planos = [];
+        _planosUltimaBusqueda = null;
+        wrap.innerHTML = '<div class="empty-state">Escribe un número de contrato y pulsa Buscar</div>';
+        return;
+    }
+
+    _planosUltimaBusqueda = { valor, porLote };
+    wrap.innerHTML = '<div class="loading-msg">Buscando...</div>';
+    try {
+        const r = await fetch(operationApiUrl('/api/plano/lotes', porLote ? { lote: valor } : { contrato: valor }));
+        if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${r.status}`);
+        }
+        const data = await r.json();
+        _planos = data.items || [];
+        renderPlanos();
+    } catch (e) {
+        _planos = [];
+        wrap.innerHTML = `<div class="empty-state">No se pudo buscar.<br><span style="color:var(--c-err)">${escapeHtml(String(e.message || e))}</span></div>`;
+    }
+}
+
+function fechaLegible(yyyymmdd) {
+    const t = String(yyyymmdd || '');
+    if (!/^\d{8}$/.test(t)) return t || '—';
+    return `${t.slice(6, 8)}/${t.slice(4, 6)}/${t.slice(0, 4)}`;
+}
+
+function renderPlanos() {
+    const wrap = document.getElementById('planosTableWrap');
+    if (!wrap) return;
+    const q = _planosUltimaBusqueda;
+    if (!_planos.length) {
+        const etiqueta = q ? `${q.porLote ? 'lote' : 'contrato'} ${escapeHtml(q.valor)}` : '';
+        wrap.innerHTML = `<div class="empty-state">No hay ningún lote para el ${etiqueta} en las tablas legado</div>`;
+        return;
+    }
+
+    const filas = _planos.map(p => {
+        const lote = String(p.lote || '');
+        const ocupado = _planosBusy.has(lote);
+        const entregado = !!p.plano_existe;
+        const estado = entregado
+            ? `<span class="pend-pill pend-pill-ok" title="${escapeHtml(p.carpeta || '')}">Entregado</span>`
+            : `<span class="pend-pill">Sin entregar</span>`;
+        return `
+            <tr>
+              <td><strong>${escapeHtml(lote)}</strong></td>
+              <td>${escapeHtml(p.contrato || '—')}</td>
+              <td class="pend-razon">${escapeHtml(p.empresa || '—')}</td>
+              <td>${escapeHtml(fechaLegible(p.fecha))}</td>
+              <td>${estado}</td>
+              <td class="pend-acciones">
+                <button class="pend-btn pend-btn-primary" data-plano-lote="${escapeHtml(lote)}" type="button"
+                        ${ocupado ? 'disabled' : ''}
+                        title="Genera el plano, lo archiva junto a los documentos y deja afi_rad en Plano">
+                  ${ocupado ? '<span class="pend-spin">⠋</span> Entregando...' : '⤓ Descargar y entregar'}
+                </button>
+              </td>
+            </tr>
+        `;
+    }).join('');
+
+    // Un contrato puede haber pasado por varios lotes (reprocesos). Se muestran todos y
+    // el operador elige: normalmente el mas reciente, que es el primero de la lista.
+    const aviso = _planos.length > 1
+        ? `<div class="planos-pie">Este contrato aparece en ${_planos.length} lotes. El más reciente es el ${escapeHtml(String(_planos[0].lote))}.</div>`
+        : '';
+
+    wrap.innerHTML = `
+        <div class="pend-table-wrap">
+          <table class="pend-table">
+            <thead>
+              <tr>
+                <th>Lote</th><th>Contrato</th><th>Empresa</th>
+                <th title="Fecha de la carpeta donde quedaron archivados los documentos">Archivado</th>
+                <th title="Si ya existe plano_&lt;contrato&gt;.txt en la carpeta del lote">Plano</th>
+                <th class="pend-acciones">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>${filas}</tbody>
+          </table>
+        </div>
+        ${aviso}
+    `;
+}
+
+async function descargarPlanoLote(lote) {
+    if (!lote || _planosBusy.has(lote)) return;
+    _planosBusy.add(lote);
+    renderPlanos();
+    try {
+        // archivar + marcar_plano: esta vista hace la entrega completa, la misma que
+        // dispara la descarga de Colmena. No se infiere del perfil justamente porque
+        // quien la usa es Imagine.
+        const r = await fetchWithRetry(operationApiUrl('/api/plano/por-lote', {
+            lote, perfil: readProfile(), archivar: 'true', marcar_plano: 'true',
+        }));
+        const blob = await r.blob();
+        const disposition = r.headers.get('Content-Disposition') || '';
+        const nombre = disposition.match(/filename="?([^"]+)"?/i)?.[1] || `BkCargue_${lote}.txt`;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = nombre;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+
+        const contrato = r.headers.get('X-Plano-Contrato') || '';
+        const archivado = r.headers.get('X-Plano-Archivado') === 'true';
+        const existe = r.headers.get('X-Plano-Afirad-Existe') === 'true';
+        const anterior = r.headers.get('X-Plano-Afirad-Anterior') || '';
+        const matched = parseInt(r.headers.get('X-Plano-Afirad-Matched') || '0', 10);
+        const fecha = r.headers.get('X-Plano-Fecha') || '';
+
+        const partes = [`Plano del contrato ${contrato} descargado`];
+        partes.push(archivado ? 'archivado en el repositorio' : 'NO se pudo archivar');
+        let avisoEstado = false;
+        if (!existe) {
+            // Sin fila en afi_rad no hay nada que actualizar: esas filas las crea el
+            // modulo externo de radicacion, este flujo nunca inserta.
+            partes.push('sin registro en afi_rad');
+        } else if (matched > 0) {
+            partes.push(anterior && anterior !== 'Plano'
+                ? `afi_rad ${anterior} → Plano (${fechaLegible(fecha)})`
+                : `afi_rad Plano (${fechaLegible(fecha)})`);
+        } else {
+            // Solo 'Indexado' y 'Plano' se actualizan. Nombrar el estado en el que quedo
+            // es lo unico que le permite al operador entender por que no se movio.
+            partes.push(`afi_rad sin cambios: está en ${anterior || 'otro estado'}`);
+            avisoEstado = true;
+        }
+        showToast(partes.join(' · '), (archivado && !avisoEstado) ? 'ok' : 'warn', 8000);
+
+        const fila = _planos.find(p => String(p.lote) === String(lote));
+        if (fila) fila.plano_existe = archivado || fila.plano_existe;
+    } catch (e) {
+        console.error('descargarPlanoLote:', e);
+        showToast('No se pudo entregar el plano: ' + (e.message || e), 'err');
+    } finally {
+        _planosBusy.delete(lote);
+        renderPlanos();
+    }
+}
+
+function initPlanos() {
+    document.getElementById('planosForm')?.addEventListener('submit', (ev) => {
+        ev.preventDefault();
+        buscarPlanos();
+    });
+    document.getElementById('planosCampo')?.addEventListener('change', () => {
+        const input = document.getElementById('planosQuery');
+        if (input) input.placeholder = document.getElementById('planosCampo').value === 'lote'
+            ? 'Número de lote' : 'Número de contrato';
+        if (_planosUltimaBusqueda) buscarPlanos();
+    });
+    document.getElementById('planosTableWrap')?.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('button[data-plano-lote]');
+        if (btn) descargarPlanoLote(btn.dataset.planoLote);
+    });
 }
 
 function initPendientes() {

@@ -6842,6 +6842,57 @@ def legacy_db_intermediarios_get() -> dict[str, Any]:
     return {"ok": True, "items": items}
 
 
+@router.get("/legacy/db/tabcon/contratos-por-nit")
+def legacy_db_tabcon_contratos_por_nit(nit: str = "", contrato: str = "") -> dict[str, Any]:
+    """Otros contratos del mismo NIT en Apolo (EPSDB.dbo.TabCon, SQL Server).
+
+    Replica la consulta legado tal cual:
+
+        SELECT connumcon, aficaucod FROM TabCon
+         WHERE connumide = '<nit>' AND connumcon <> '<contrato>'
+
+    Si devuelve filas, esa empresa ya tiene contrato(s) distintos al que se esta
+    radicando y hay que revisarlo antes de continuar. LTRIM/RTRIM porque las columnas
+    son varchar de ancho fijo en el origen y traen relleno.
+
+    Un fallo de la conexion sale como 503: el consumidor (nova) lo trata como
+    "no se pudo consultar" y NO inventa hallazgos. Un sistema vecino caido no puede
+    convertirse en un bloqueante.
+    """
+    nit_text = _only_digits(nit)
+    contrato_text = as_text(contrato).strip()
+    if not nit_text:
+        raise HTTPException(status_code=400, detail="Parametro requerido: nit")
+    try:
+        rows = fetch_all_by_alias(
+            "SR03EPSDB",
+            "SELECT ConNumCon, AfiCauCod FROM dbo.TabCon "
+            "WHERE LTRIM(RTRIM(ConNumIde)) = :nit "
+            "AND LTRIM(RTRIM(ConNumCon)) <> :contrato "
+            "ORDER BY ConNumCon",
+            {"nit": nit_text, "contrato": contrato_text},
+        )
+    except (ValueError, SQLAlchemyError, NoSuchTableError) as exc:
+        raise HTTPException(
+            status_code=503, detail=f"Error leyendo TabCon: {type(exc).__name__}: {exc}"
+        )
+    items = [
+        {
+            "connumcon": as_text(row.get("ConNumCon")).strip(),
+            "aficaucod": as_text(row.get("AfiCauCod")).strip(),
+        }
+        for row in rows
+        if as_text(row.get("ConNumCon")).strip()
+    ]
+    return {
+        "ok": True,
+        "nit": nit_text,
+        "contrato": contrato_text,
+        "count": len(items),
+        "items": items,
+    }
+
+
 @router.post("/legacy/db/consultores")
 def legacy_db_consultores_save(payload: dict[str, Any]) -> dict[str, Any]:
     """Reemplaza el contenido completo de img004.consultores (misma semantica que el
@@ -7048,18 +7099,51 @@ def legacy_afi_rad_estado(payload: dict[str, Any]) -> dict[str, Any]:
         params = {"fecha": fecha, "contrato": contrato}
     else:
         fecha = _only_digits(payload.get("fecha"))[:8] or datetime.now().strftime("%Y%m%d")
+        # La guarda de estado previo NUNCA se quita: un contrato que no llego a
+        # 'Indexado' no esta listo para entregarse, y saltarlo a 'Plano' le inventaria un
+        # recorrido que no ocurrio. Lo unico que hace reentrega=true es ADMITIR ADEMAS el
+        # estado 'Plano', para poder volver a entregar un contrato ya entregado -otro
+        # servidor, una correccion- y refrescarle la fecha. Cualquier otro estado
+        # ('Radicada', devoluciones, lo que sea) se deja intacto y el UPDATE afecta 0
+        # filas, que es la respuesta correcta y se reporta en "matched".
+        estados_ok = "('Indexado','Plano')" if bool(payload.get("reentrega")) else "('Indexado')"
         sql = (
             "UPDATE afi_rad SET afi_rad_estado='Plano', afi_rad_fechaplano=:fecha "
-            "WHERE afi_rad_contrato=:contrato AND afi_rad_estado='Indexado'"
+            f"WHERE afi_rad_contrato=:contrato AND afi_rad_estado IN {estados_ok}"
         )
         params = {"fecha": fecha, "contrato": contrato}
+
+    # El estado previo se lee ANTES del update para poder reportarlo: cuando el UPDATE no
+    # toca nada, el operador necesita ver en que estado esta el contrato para entender por
+    # que -si no, un "0 filas" no se distingue de un fallo.
+    estado_anterior = ""
+    try:
+        previas = fetch_all_by_alias(
+            "wimg004",
+            "SELECT afi_rad_estado FROM afi_rad WHERE afi_rad_contrato = :contrato LIMIT 1",
+            {"contrato": contrato},
+        )
+        if previas:
+            estado_anterior = as_text(previas[0].get("afi_rad_estado")).strip()
+    except (ValueError, SQLAlchemyError):
+        estado_anterior = ""
 
     try:
         matched = execute_by_alias("wimg004", sql, params)
     except (ValueError, SQLAlchemyError) as exc:
         raise HTTPException(status_code=503, detail=f"Error actualizando afi_rad: {type(exc).__name__}: {exc}")
 
-    return {"ok": True, "accion": accion, "contrato": contrato, "fecha": fecha, "matched": int(matched or 0)}
+    return {
+        "ok": True,
+        "accion": accion,
+        "contrato": contrato,
+        "fecha": fecha,
+        "matched": int(matched or 0),
+        "estado_anterior": estado_anterior,
+        "reentrega": bool(payload.get("reentrega")) and accion == "plano",
+        "estados_actualizables": ["Indexado", "Plano"] if payload.get("reentrega") else ["Indexado"],
+        "existe_en_afi_rad": bool(estado_anterior),
+    }
 
 
 @router.post("/legacy/pqr/trazabilidad/cierre")
@@ -7996,6 +8080,134 @@ def _carpeta_archivo_del_lote(lote: str) -> tuple[Path, str, str]:
         fecha = datetime.now().strftime("%Y%m%d")
         origen = "hoy"
     return Path(PI_ARCHIVE_MOUNT, fecha, "Afa", lote_folder), fecha, origen
+
+
+def _fecha_de_pi(pi_texto: str) -> str:
+    """Fecha (YYYYMMDD) de una ruta `pi`: ...\\<ndisco>\\<YYYYMMDD>\\Afa\\<lote>\\<archivo>."""
+    partes = as_text(pi_texto).replace("/", "\\").split("\\")
+    for i, parte in enumerate(partes):
+        if parte == "Afa" and i > 0 and re.fullmatch(r"\d{8}", partes[i - 1] or ""):
+            return partes[i - 1]
+    return ""
+
+
+@router.get("/legacy/db/lote-info")
+def legacy_db_lote_info(lote: str = "") -> dict[str, Any]:
+    """Datos minimos de un lote ya archivado: contrato, empresa y carpeta del repositorio.
+
+    Existe para poder regenerar y archivar el plano de un contrato SIN tener el caso en
+    disco: el expediente (data/cases/) es local a cada servidor, pero las tablas legado
+    son compartidas, y el plano se arma desde ellas. Con el lote basta.
+    """
+    lote_digits = _only_digits(lote)
+    if not lote_digits:
+        raise HTTPException(status_code=400, detail="Parametro requerido: lote")
+    fila: dict[str, Any] = {}
+    origen_tabla = ""
+    for alias, tabla in (("ybr", "brempresasarp"), ("wimg004", "bkempresasarp")):
+        try:
+            filas = fetch_all_by_alias(
+                alias,
+                f"SELECT f01, f51, pi, tp FROM {tabla} WHERE lt = :lote "
+                "ORDER BY CASE WHEN tp = 'P' THEN 0 ELSE 1 END LIMIT 1",
+                {"lote": lote_digits},
+            )
+        except (ValueError, SQLAlchemyError, NoSuchTableError):
+            continue
+        if filas:
+            fila = dict(filas[0])
+            origen_tabla = tabla
+            break
+    if not fila:
+        raise HTTPException(status_code=404, detail=f"El lote {lote_digits} no existe en brempresasarp/bkempresasarp.")
+
+    carpeta, fecha, origen_fecha = _carpeta_archivo_del_lote(lote_digits)
+    contrato = _only_digits(as_text(fila.get("f01")))
+    plano = carpeta / f"plano_{contrato}.txt" if contrato else None
+    return {
+        "ok": True,
+        "lote": lote_digits,
+        "contrato": contrato,
+        "empresa": as_text(fila.get("f51")).strip(),
+        "tabla": origen_tabla,
+        "fecha": fecha,
+        "fecha_origen": origen_fecha,
+        "carpeta": str(carpeta),
+        "carpeta_existe": carpeta.is_dir(),
+        "plano_path": str(plano) if plano else "",
+        "plano_existe": bool(plano and plano.is_file()),
+    }
+
+
+@router.get("/legacy/db/lotes-archivados")
+def legacy_db_lotes_archivados(contrato: str = "", lote: str = "", limit: int = 50) -> dict[str, Any]:
+    """Busca lotes en las tablas legado por contrato o por lote.
+
+    Es una BUSQUEDA, no un listado: en produccion brempresasarp tiene miles de
+    contratos y devolverlos todos no le sirve a nadie -ni al navegador-. Hay que
+    pedir explicitamente cual se quiere.
+
+    Un mismo contrato puede aparecer en varios lotes (reprocesos, correcciones), asi
+    que la busqueda por contrato devuelve todas sus apariciones, de la mas reciente a
+    la mas antigua.
+    """
+    contrato_digits = _only_digits(contrato)
+    lote_digits = _only_digits(lote)
+    if not contrato_digits and not lote_digits:
+        raise HTTPException(
+            status_code=400,
+            detail="Indica 'contrato' o 'lote': esta busqueda no devuelve el catalogo completo.",
+        )
+    limite = max(1, min(int(limit or 50), 200))
+    condiciones = ["tp = 'P'"]
+    params: dict[str, Any] = {"limite": limite}
+    if contrato_digits:
+        condiciones.append("f01 = :contrato")
+        params["contrato"] = contrato_digits
+    if lote_digits:
+        condiciones.append("lt = :lote")
+        params["lote"] = lote_digits
+    try:
+        filas = fetch_all_by_alias(
+            "ybr",
+            "SELECT lt, MIN(f01) AS f01, MIN(f51) AS f51, MIN(pi) AS pi "
+            f"FROM brempresasarp WHERE {' AND '.join(condiciones)} "
+            "GROUP BY lt ORDER BY lt DESC LIMIT :limite",
+            params,
+        )
+    except (ValueError, SQLAlchemyError, NoSuchTableError) as exc:
+        raise HTTPException(
+            status_code=503, detail=f"Error leyendo brempresasarp: {type(exc).__name__}: {exc}"
+        )
+    items = []
+    for fila in filas:
+        # Nombres propios: reusar lote_digits/contrato aqui pisaba los de la busqueda y
+        # el eco de "busqueda" salia con el ultimo lote recorrido en vez de lo pedido.
+        fila_lote = _only_digits(as_text(fila.get("lt")))
+        fila_contrato = _only_digits(as_text(fila.get("f01")))
+        fecha = _fecha_de_pi(as_text(fila.get("pi")))
+        carpeta = (
+            Path(PI_ARCHIVE_MOUNT, fecha, "Afa", f"{int(fila_lote):08d}")
+            if fecha and fila_lote
+            else None
+        )
+        plano = carpeta / f"plano_{fila_contrato}.txt" if carpeta and fila_contrato else None
+        items.append(
+            {
+                "lote": fila_lote,
+                "contrato": fila_contrato,
+                "empresa": as_text(fila.get("f51")).strip(),
+                "fecha": fecha,
+                "carpeta": str(carpeta) if carpeta else "",
+                "plano_existe": bool(plano and plano.is_file()),
+            }
+        )
+    return {
+        "ok": True,
+        "count": len(items),
+        "busqueda": {"contrato": contrato_digits, "lote": lote_digits},
+        "items": items,
+    }
 
 
 @router.post("/legacy/flatfile/guardar-plano-contrato")
