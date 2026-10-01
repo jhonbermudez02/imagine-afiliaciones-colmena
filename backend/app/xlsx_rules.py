@@ -237,6 +237,26 @@ def _append_required_cell_validation(
         )
 
 
+# Tipos de documento del empleador que admiten hasta 15 caracteres en lugar de 12.
+# PE = Permiso Especial de Permanencia; su numero es mas largo que un NIT o una cedula.
+TIPOS_DOCUMENTO_EMPLEADOR_LARGOS = {"PE"}
+MAX_DOCUMENTO_EMPLEADOR = 12
+MAX_DOCUMENTO_EMPLEADOR_LARGO = 15
+
+
+def max_longitud_documento_empleador(form_fields: Dict[str, Any]) -> int:
+    """Tope de longitud del documento del empleador segun su tipo (celda V16).
+
+    Vive aqui -y no inline- porque la misma regla se aplica en dos sitios: la validacion
+    de la celda AG16 y el poblado de profile["nit"] en cases.py. Si solo se relaja uno,
+    el contrato cambia un bloqueante por otro ("nit vacio" en vez de "longitud invalida").
+    """
+    tipo = normalize_text((form_fields or {}).get("empleador_tipo_documento", "")).strip().upper()
+    if tipo in TIPOS_DOCUMENTO_EMPLEADOR_LARGOS or "PERMISO" in tipo:
+        return MAX_DOCUMENTO_EMPLEADOR_LARGO
+    return MAX_DOCUMENTO_EMPLEADOR
+
+
 def _append_cell_length_validation(
     blockers: List[Dict[str, Any]],
     form_cell_values: Dict[str, Any],
@@ -1395,12 +1415,16 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
         max_length=40,
         code_prefix="XLSX_COMMON_REQUIRED_CELL",
     )
+    # El tope del documento del empleador (AG16) depende del TIPO de documento (V16): un
+    # PE -Permiso Especial de Permanencia- llega a 15 caracteres, mientras un NIT o una
+    # cedula se quedan en 12. Con el tope fijo en 12, todo empleador identificado con PE
+    # quedaba bloqueado por longitud aunque el dato fuera correcto.
     _append_cell_length_validation(
         blockers,
         form_cell_values,
         "empleador_numero_documento_nit",
         min_length=6,
-        max_length=12,
+        max_length=max_longitud_documento_empleador(form_fields),
         code_prefix="XLSX_COMMON_REQUIRED_CELL",
     )
     _append_digits_length_validation(

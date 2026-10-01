@@ -3474,10 +3474,11 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
             return 1
         return 1 if txt == "1" else 0
 
-    def _is_aprendiz_worker(row: dict[str, Any]) -> bool:
-        tipo_txt = as_text(row.get("tipo_trabajador_text")).strip().upper()
-        cargo_txt = as_text(row.get("cargo")).strip().upper()
-        return ("APREND" in tipo_txt) or ("APREND" in cargo_txt)
+    def _is_estudiante_worker(row: dict[str, Any]) -> bool:
+        # Regla de negocio: va a wdestudiantes SOLO quien tenga 23 en "Código del tipo de
+        # trabajador" (columna AG del XLSX). Aprendices (19) y demás van a wd/afiliadosarp;
+        # no se infiere por texto del tipo ni del cargo.
+        return as_text(row.get("tipoafiliadocotizante")).strip() == "23"
 
     def _is_independiente_worker(row: dict[str, Any]) -> bool:
         tipo_txt = as_text(row.get("tipo_trabajador_text")).strip().upper()
@@ -4128,7 +4129,7 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
             telefono_norm = telefono_raw if len(telefono_raw) == 7 else "0"
             celular_norm = celular_raw if len(celular_raw) == 10 else "0"
             direccion_norm = as_text(wr.get("direccionresidencia")).replace("#", "").replace("-", "")
-            if _is_aprendiz_worker(wr):
+            if _is_estudiante_worker(wr):
                 wdest.append(
                     {
                         "sr": worker_sr,
@@ -5667,6 +5668,12 @@ def _parse_trabajadores_from_sede_clean(
         pn = _clean_token(parts[6]).upper() if len(parts) > 6 else ""
         sn = _clean_token(parts[7]).upper() if len(parts) > 7 else ""
         if sexo_idx == 13:
+            # Layout clean desde XLSX: primer apellido = H:I combinadas (idx 4-5) y segundo
+            # apellido = J:K (idx 6-7). La celda oculta bajo la combinación (idx 5) puede
+            # traer una copia del primer apellido; no debe tomarse como segundo apellido.
+            ap2 = _clean_token(parts[6]).upper() if len(parts) > 6 else ""
+            if ap2 == "NULL":
+                ap2 = ""
             pn = _clean_token(parts[8]).upper() if len(parts) > 8 else pn
             sn = _clean_token(parts[9]).upper() if len(parts) > 9 else sn
 

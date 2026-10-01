@@ -1546,6 +1546,16 @@ class LegacyCompatEngine:
         return mapping.get(v, "A")
 
     @staticmethod
+    def _ct_key(value: Any) -> str:
+        # brwdestudiantes/brwdindependientes guardan codigo_ct como numeric ("000002" -> 2),
+        # mientras brcentrot/brafiliadosarp lo guardan como texto con ceros. Se compara
+        # siempre rellenado a 6 para que el trabajador no se descarte del plano.
+        txt = as_text(value).strip()
+        if txt.endswith(".0"):
+            txt = txt[:-2]
+        return txt.zfill(6) if txt.isdigit() else txt
+
+    @staticmethod
     def _subtipo_afiliado_code(value: Any) -> str:
         v = as_text(value).strip().upper()
         v = unicodedata.normalize("NFD", v)
@@ -1861,11 +1871,11 @@ class LegacyCompatEngine:
                     )
                     lines.append(self._line_926(line5_ct))
 
-                    ct_code = as_text(ct.get("codigoct")).strip()
+                    ct_code = self._ct_key(ct.get("codigoct"))
                     for wd in wd_by_sr.get(sr, []):
                         if as_text(wd.get("f28")).strip() in ("", "0"):
                             continue
-                        if as_text(wd.get("f30")).strip() != ct_code:
+                        if self._ct_key(wd.get("f30")) != ct_code:
                             continue
                         n1 = self._vb_text(wd.get("f33"), 20).strip().split(" ", 1)
                         nom1 = n1[0] if n1 else ""
@@ -1934,7 +1944,7 @@ class LegacyCompatEngine:
                             lines.append(self._line_926(prefix + "".join(marks)))
 
                     for ws in ws_by_sr.get(sr, []):
-                        if as_text(ws.get("codigo_ct")).strip() != ct_code or as_text(ws.get("documento")).strip() in ("", "0"):
+                        if self._ct_key(ws.get("codigo_ct")) != ct_code or as_text(ws.get("documento")).strip() in ("", "0"):
                             continue
                         line3s = (
                             "3"
@@ -1992,7 +2002,7 @@ class LegacyCompatEngine:
                         lines.append(self._line_926(line3s))
 
                     for wi in wi_by_sr.get(sr, []):
-                        if as_text(wi.get("codigo_ct")).strip() != ct_code or as_text(wi.get("documento")).strip() in ("", "0"):
+                        if self._ct_key(wi.get("codigo_ct")) != ct_code or as_text(wi.get("documento")).strip() in ("", "0"):
                             continue
                         line3i = (
                             "3"

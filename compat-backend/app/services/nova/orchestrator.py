@@ -6290,12 +6290,30 @@ class NovaOrchestrator:
         if not sheet_names:
             return {"ok": False, "message": "Excel sin hojas."}
 
+        # La hoja principal se busca en TRES pasadas, y el orden importa. La plantilla
+        # real trae una hoja "Instructivo Formulario Afili." ANTES del formulario, y esa
+        # tambien contiene "formulario" y "afili": con una sola pasada laxa ganaba el
+        # instructivo, el clean salia de ahi -con contenido, pero sin ninguna de las
+        # etiquetas que busca el parser- y la importacion del empleador fallaba con los
+        # doce campos vacios a la vez.
         main_sheet = ""
-        for sh in sheet_names:
-            n = _norm(sh)
-            if "formulario" in n and "afili" in n:
+        for sh in sheet_names:                                  # 1) nombre exacto
+            if _norm(sh) == "formulario de afiliacion":
                 main_sheet = sh
                 break
+        if not main_sheet:
+            for sh in sheet_names:                              # 2) "formulario de afili..."
+                if "formulario de afili" in _norm(sh):
+                    main_sheet = sh
+                    break
+        if not main_sheet:
+            for sh in sheet_names:                              # 3) laxa, sin instructivo/indice
+                n = _norm(sh)
+                if "instructivo" in n or "indice" in n:
+                    continue
+                if "formulario" in n and "afili" in n:
+                    main_sheet = sh
+                    break
         if not main_sheet:
             main_sheet = sheet_names[0]
 

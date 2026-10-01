@@ -31,7 +31,7 @@ from pypdf import PdfReader, PdfWriter
 from .config import settings
 from .legacy_bridge import generate_legacy_flatfile_926, generate_legacy_flatfile_926_http
 from .qdrant_guard import collection_matches_current_embeddings, ensure_current_vector_collection
-from .xlsx_rules import _format_date_value, _parse_date_value, _resolve_smmlv_value, run_xlsx_primary_validations, run_xlsx_secondary_validations
+from .xlsx_rules import _format_date_value, _parse_date_value, _resolve_smmlv_value, max_longitud_documento_empleador, run_xlsx_primary_validations, run_xlsx_secondary_validations
 
 logger = logging.getLogger(__name__)
 
@@ -6744,7 +6744,10 @@ def _read_xlsx(path: Path) -> Dict[str, Any]:
     rep_doc = only_digits(contract_fields.get("doc_representante", ""))
     if company_name and len(company_name) >= 5:
         profile["empresa"] = profile["empresa"] or company_name
-    if 8 <= len(nit_value) <= 12:
+    # El tope depende del tipo de documento del empleador (V16): un PE llega a 15.
+    # Con el 12 fijo, un empleador con PE dejaba profile["nit"] vacio y el caso
+    # cambiaba el bloqueante de longitud por "El XLSX no trae completos... nit".
+    if 8 <= len(nit_value) <= max_longitud_documento_empleador(form_fields):
         profile["nit"] = profile["nit"] or nit_value
         profile["documento_empleador"] = profile["documento_empleador"] or nit_value
     if rep_name and len(rep_name) >= 5:
@@ -6813,12 +6816,31 @@ def _generate_clean_from_workbook(workbook: Any, excel_filename: str, expected_s
     if not sheet_names:
         return {"ok": False, "message": "Excel sin hojas."}
 
+    # Tres pasadas, y el orden importa: la plantilla real trae una hoja
+    # "Instructivo Formulario Afili." ANTES del formulario, y tambien contiene
+    # "formulario" y "afili". Con una sola pasada laxa ganaba el instructivo y el
+    # contrato_clean salia de ahi: con contenido -por eso no entraba el respaldo
+    # sintetico- pero sin ninguna de las etiquetas que busca el parser del compat.
+    # Debe coincidir con la seleccion del orchestrator del compat, que es la ruta
+    # primaria; esta solo corre como respaldo.
     main_sheet = ""
-    for name in sheet_names:
-        norm_name = _norm(name)
-        if "formulario" in norm_name and "afili" in norm_name:
+    for name in sheet_names:                                # 1) nombre exacto
+        if _norm(name) == "formulario de afiliacion":
             main_sheet = name
             break
+    if not main_sheet:
+        for name in sheet_names:                            # 2) "formulario de afili..."
+            if "formulario de afili" in _norm(name):
+                main_sheet = name
+                break
+    if not main_sheet:
+        for name in sheet_names:                            # 3) laxa, sin instructivo/indice
+            norm_name = _norm(name)
+            if "instructivo" in norm_name or "indice" in norm_name:
+                continue
+            if "formulario" in norm_name and "afili" in norm_name:
+                main_sheet = name
+                break
     if not main_sheet:
         main_sheet = sheet_names[0]
 
@@ -7054,7 +7076,7 @@ def _enrich_xlsx_profile_from_clean(
     worker_sheet_counts = dict((xlsx_profile or {}).get("worker_sheet_counts") or {})
     form_fields = dict((xlsx_profile or {}).get("form_fields") or {})
     seeded_employer_nit = _normalize_company_nit(profile.get("documento_empleador") or profile.get("nit", ""), docs)
-    if 8 <= len(seeded_employer_nit) <= 12:
+    if 8 <= len(seeded_employer_nit) <= max_longitud_documento_empleador(form_fields):
         profile["documento_empleador"] = seeded_employer_nit
         profile["nit"] = seeded_employer_nit
     contrato_clean = _ensure_tipoempresa_in_contrato_clean(
@@ -7112,10 +7134,10 @@ def _enrich_xlsx_profile_from_clean(
     if company_name and len(company_name) >= 5:
         profile["empresa"] = company_name
     employer_document_hint = _normalize_company_nit(profile.get("documento_empleador", ""), docs)
-    if 8 <= len(employer_document_hint) <= 12:
+    if 8 <= len(employer_document_hint) <= max_longitud_documento_empleador(form_fields):
         profile["nit"] = employer_document_hint
         profile["documento_empleador"] = employer_document_hint
-    elif 8 <= len(nit_value) <= 12:
+    elif 8 <= len(nit_value) <= max_longitud_documento_empleador(form_fields):
         profile["nit"] = nit_value
         profile["documento_empleador"] = profile.get("documento_empleador") or nit_value
     if rep_name and len(rep_name) >= 5:
@@ -7238,6 +7260,9 @@ def _enrich_xlsx_profile_from_clean(
 
 def _finalize_profile_from_docs(xlsx_profile: Dict[str, Any], docs: List[Dict[str, Any]]) -> Dict[str, Any]:
     profile = dict((xlsx_profile or {}).get("profile") or {})
+    # Necesario para el tope de longitud del documento del empleador, que depende de su
+    # tipo (V16): un PE llega a 15 caracteres y el resto se queda en 12.
+    form_fields = dict((xlsx_profile or {}).get("form_fields") or {})
     cedula_doc = next((doc for doc in docs if doc.get("document_type") == "cedula"), None)
     employer_document_hint = _normalize_company_nit(profile.get("documento_empleador", ""), docs)
 
@@ -7298,7 +7323,7 @@ def _finalize_profile_from_docs(xlsx_profile: Dict[str, Any], docs: List[Dict[st
             if any(token in preview for token in ["nit", "identificacion", "identificación", "razon social", "razón social", "pagada ni"]):
                 weight += 1
             nit_votes[digits] = nit_votes.get(digits, 0) + weight
-    if 8 <= len(employer_document_hint) <= 12:
+    if 8 <= len(employer_document_hint) <= max_longitud_documento_empleador(form_fields):
         profile["nit"] = employer_document_hint
     elif nit_votes:
         best_nit = sorted(nit_votes.items(), key=lambda item: (item[1], len(item[0])), reverse=True)[0][0]
@@ -7306,7 +7331,7 @@ def _finalize_profile_from_docs(xlsx_profile: Dict[str, Any], docs: List[Dict[st
         if not current_nit or current_nit not in nit_votes or nit_votes.get(best_nit, 0) > nit_votes.get(current_nit, 0):
             profile["nit"] = _normalize_company_nit(best_nit, docs)
     normalized_profile_nit = _normalize_company_nit(profile.get("nit", ""), docs)
-    if 8 <= len(normalized_profile_nit) <= 12:
+    if 8 <= len(normalized_profile_nit) <= max_longitud_documento_empleador(form_fields):
         profile["nit"] = normalized_profile_nit
         profile["documento_empleador"] = employer_document_hint or normalized_profile_nit
 
@@ -7896,10 +7921,13 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
                 "RC": 10,
                 "CE": 7,
                 "PT": 15,
+                # PE (Permiso Especial de Permanencia) es longitud MAXIMA, no exacta: el
+                # numero no viene zero-padded y los hay mas cortos de 15. Estaba en
+                # doc_exact_lengths y rechazaba cualquier PE que no midiera 15 justos.
+                "PE": 15,
             }
             doc_exact_lengths = {
                 "SC": 9,
-                "PE": 15,
             }
             if doc_type in doc_max_lengths and len(row_document) > doc_max_lengths[doc_type]:
                 row_errors.append({
@@ -10693,6 +10721,35 @@ def _build_independientes_clean(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]:
     return {"filename": "independientes_clean_auto.txt", "content": "\n".join(lines) + "\n", "lines": 1}
 
 
+def _worker_count_parity_926(analysis: Dict[str, Any], content_926: str) -> Dict[str, Any]:
+    """Compara los trabajadores del XLSX contra las lineas tipo 3 del plano 926.
+
+    Linea 3: pos 0 = '3', pos 1 = tipo documento, pos 2-16 = documento (15, con ceros).
+    """
+    records = ((analysis.get("xlsx_profile") or {}).get("records") or [])
+    excel_docs = [
+        only_digits(r.get("numero_de_identificacion") or r.get("_raw_numero_de_identificacion") or "").lstrip("0")
+        for r in records
+        if isinstance(r, dict)
+    ]
+    excel_docs = [d for d in excel_docs if d]
+    plano_docs = {
+        only_digits(line[2:17]).lstrip("0")
+        for line in content_926.splitlines()
+        if line.startswith("3")
+    }
+    plano_docs.discard("")
+    plano_count = sum(1 for line in content_926.splitlines() if line.startswith("3"))
+    faltantes = [d for d in excel_docs if d not in plano_docs]
+    return {
+        # Sin trabajadores en el XLSX (ej. independientes por otra ruta) no hay contra que comparar.
+        "ok": not excel_docs or (not faltantes and plano_count >= len(excel_docs)),
+        "excel": len(excel_docs),
+        "plano": plano_count,
+        "faltantes": faltantes,
+    }
+
+
 def _workflow_step(
     name: str,
     title: str,
@@ -10928,7 +10985,9 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
         analysis.setdefault("xlsx_profile", {}).setdefault("profile", {})
         if company_name and len(company_name) >= 5:
             analysis["xlsx_profile"]["profile"]["empresa"] = profile.get("empresa") or company_name
-        if 8 <= len(nit_value) <= 12:
+        if 8 <= len(nit_value) <= max_longitud_documento_empleador(
+            (analysis.get("xlsx_profile") or {}).get("form_fields") or {}
+        ):
             employer_document_hint = only_digits(profile.get("documento_empleador") or nit_value)
             analysis["xlsx_profile"]["profile"]["nit"] = employer_document_hint or nit_value
             analysis["xlsx_profile"]["profile"]["documento_empleador"] = employer_document_hint or nit_value
@@ -11420,13 +11479,26 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
         except Exception as exc:
             logger.error("No pude archivar el índice de imágenes en disco para el caso %s: %s", case_id, exc)
             _plano_archive = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        # Control de paridad: cada trabajador del XLSX debe salir como una linea tipo 3 en
+        # el 926. Un trabajador puede quedar en BD y aun asi no salir en el plano (ej.
+        # codigo_ct que no calza con el centro), y eso no lo detecta ningun otro paso.
+        _conteo_926 = _worker_count_parity_926(analysis, str(generated_926.get("content") or ""))
+        output_926["worker_parity"] = _conteo_926
+        _gen926_status = "ok" if _conteo_926["ok"] else "warning"
+        _gen926_detail = f"Archivo 926 generado para lote {lote}."
+        if not _conteo_926["ok"]:
+            _gen926_detail += (
+                f" ATENCIÓN: el Excel tiene {_conteo_926['excel']} trabajador(es) y el plano"
+                f" {_conteo_926['plano']}. Faltan en el plano: {', '.join(_conteo_926['faltantes']) or 's/d'}."
+            )
+            logger.warning("Caso %s lote %s: %s", case_id, lote, _gen926_detail)
         timeline.append(
             _workflow_step(
                 "generacion_926",
                 "Generación 926",
-                "ok",
-                f"Archivo 926 generado para lote {lote}.",
-                {"filename": generated_926.get("filename"), "archived": _plano_archive},
+                _gen926_status,
+                _gen926_detail,
+                {"filename": generated_926.get("filename"), "archived": _plano_archive, "worker_parity": _conteo_926},
                 duration_ms=int((perf_counter() - gen926_started) * 1000),
             )
         )
