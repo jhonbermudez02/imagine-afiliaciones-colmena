@@ -244,6 +244,18 @@ MAX_DOCUMENTO_EMPLEADOR = 12
 MAX_DOCUMENTO_EMPLEADOR_LARGO = 15
 
 
+def max_longitud_documento_persona(tipo_documento: Any) -> int:
+    """Tope de longitud de un numero de documento segun su tipo.
+
+    Misma regla que para el empleador, pero aplicable a cualquier persona: el tipo llega
+    suelto (la celda de tipo de documento de la fila) en vez de dentro de form_fields.
+    """
+    tipo = normalize_text(tipo_documento).strip().upper()
+    if tipo in TIPOS_DOCUMENTO_EMPLEADOR_LARGOS or "PERMISO" in tipo:
+        return MAX_DOCUMENTO_EMPLEADOR_LARGO
+    return MAX_DOCUMENTO_EMPLEADOR
+
+
 def max_longitud_documento_empleador(form_fields: Dict[str, Any]) -> int:
     """Tope de longitud del documento del empleador segun su tipo (celda V16).
 
@@ -251,10 +263,7 @@ def max_longitud_documento_empleador(form_fields: Dict[str, Any]) -> int:
     de la celda AG16 y el poblado de profile["nit"] en cases.py. Si solo se relaja uno,
     el contrato cambia un bloqueante por otro ("nit vacio" en vez de "longitud invalida").
     """
-    tipo = normalize_text((form_fields or {}).get("empleador_tipo_documento", "")).strip().upper()
-    if tipo in TIPOS_DOCUMENTO_EMPLEADOR_LARGOS or "PERMISO" in tipo:
-        return MAX_DOCUMENTO_EMPLEADOR_LARGO
-    return MAX_DOCUMENTO_EMPLEADOR
+    return max_longitud_documento_persona((form_fields or {}).get("empleador_tipo_documento", ""))
 
 
 def _append_cell_length_validation(
@@ -1621,7 +1630,14 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
     for sheet_name in sede_sheet_names:
         for row_values in list(sede_center_rows.get(sheet_name) or []):
             total_center_rows += 1
+            # Mismo criterio que en la fila de trabajador: el responsable del centro puede
+            # estar identificado con PE, y ahi el documento llega a 15 caracteres.
+            max_doc_resp = max_longitud_documento_persona(
+                _center_cell_info(row_values, "responsable_tipo_documento").get("value")
+            )
             for field, require_numeric, require_email, min_length, max_length in center_required_fields:
+                if field == "responsable_numero_identificacion":
+                    max_length = max_doc_resp
                 _append_center_cell_validation(
                     blockers,
                     sheet_name,
@@ -1787,7 +1803,15 @@ def run_xlsx_primary_validations(xlsx_profile: Dict[str, Any]) -> Dict[str, Any]
         sheet_salary = 0
         total_structured_worker_rows += len(sheet_worker_rows)
         for row_values in sheet_worker_rows:
+            # El tope del documento depende del tipo de ESTA fila: un trabajador con PE
+            # llega a 15 caracteres y el resto se queda en 12. Con el 12 fijo, cualquier
+            # trabajador identificado con PE quedaba bloqueado por longitud.
+            max_doc_fila = max_longitud_documento_persona(
+                _worker_cell_info(row_values, "tipo_documento").get("value")
+            )
             for field, require_numeric, require_email, min_length, max_length in worker_required_fields:
+                if field == "numero_identificacion":
+                    max_length = max_doc_fila
                 _append_worker_cell_validation(
                     blockers,
                     sheet_name,
