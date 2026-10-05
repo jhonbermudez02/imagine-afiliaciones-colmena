@@ -208,6 +208,10 @@ class CaseDocumentWorkspaceRequest(BaseModel):
     target_position: Optional[int] = None
 
 
+class CaseFilesBulkDeleteRequest(BaseModel):
+    filenames: List[str]
+
+
 class Consolidated926Request(BaseModel):
     case_ids: List[str]
     operation: Optional[str] = "colima"
@@ -4099,6 +4103,130 @@ async def case_file(case_id: str, filename: str, download_name: str = Query(defa
 
 
 
+# El formulario del contrato nunca se borra: todo el expediente -perfil, validaciones,
+# plano- se deriva de el, asi que quitarlo deja el caso inservible. El borrado individual
+# nunca lo ofrecio desde la interfaz; en el masivo la guarda va en el servidor, porque un
+# "seleccionar todo" lo incluiria.
+SUFIJOS_FORMULARIO_PROTEGIDO = {".xlsx", ".xlsm", ".xls"}
+
+
+def _es_formulario_protegido(filename: str) -> bool:
+    return Path(str(filename or "")).suffix.lower() in SUFIJOS_FORMULARIO_PROTEGIDO
+
+
+def _purgar_referencias_archivos(payload: Dict[str, Any], nombres: set) -> None:
+    """Saca de case.json toda referencia a los archivos ya borrados del disco.
+
+    Es la misma poda que hacia delete_case_file en linea. Esta extraida para que el
+    borrado individual y el masivo compartan una sola implementacion: si manana aparece
+    otro sitio del analisis que liste archivos, se agrega aqui y los dos quedan al dia.
+    """
+    nombres = {str(n) for n in nombres if n}
+    if not nombres:
+        return
+    payload["files"] = [
+        item for item in (payload.get("files") or [])
+        if str(item.get("filename") or item.get("file") or "") not in nombres
+    ]
+    analysis = payload.setdefault("analysis", {})
+    if not isinstance(analysis, dict):
+        return
+    documents = analysis.get("documents")
+    if isinstance(documents, list):
+        analysis["documents"] = [
+            item for item in documents
+            if str(item.get("filename") or "") not in nombres
+        ]
+    checklist = analysis.get("checklist")
+    if isinstance(checklist, dict):
+        summary = []
+        for group in checklist.get("received_summary") or []:
+            if not isinstance(group, dict):
+                continue
+            group = dict(group)
+            files = [item for item in (group.get("files") or []) if str(item or "") not in nombres]
+            if not files:
+                continue
+            group["files"] = files
+            group["count"] = len(files)
+            summary.append(group)
+        checklist["received_summary"] = summary
+    workspace = analysis.get("document_workspace")
+    if isinstance(workspace, dict):
+        workspace["order"] = [item for item in (workspace.get("order") or []) if str(item or "") not in nombres]
+        workspace["removed_files"] = [
+            item for item in (workspace.get("removed_files") or []) if str(item or "") not in nombres
+        ]
+
+
+@app.post("/api/cases/{case_id}/files/bulk-delete")
+async def bulk_delete_case_files(case_id: str, request: CaseFilesBulkDeleteRequest):
+    """Borra varios adjuntos de un contrato en una sola operacion.
+
+    Se hace en un unico ciclo load/save a proposito. Repetir el borrado individual N
+    veces reescribe case.json N veces, y dos peticiones que se cruzan pueden resucitar
+    un archivo ya borrado, porque la segunda guarda un payload que leyo antes de que la
+    primera terminara.
+    """
+    try:
+        payload = load_case(case_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Caso no encontrado.") from exc
+    if is_case_manually_approved(payload):
+        raise HTTPException(status_code=409, detail="El contrato ya está aprobado y no permite edición documental.")
+
+    pedidos = [str(n or "").strip() for n in (request.filenames or [])]
+    pedidos = [n for n in pedidos if n]
+    if not pedidos:
+        raise HTTPException(status_code=400, detail="No se recibió ningún archivo para eliminar.")
+
+    borrados: List[str] = []
+    protegidos: List[str] = []
+    no_encontrados: List[str] = []
+    fallidos: List[Dict[str, str]] = []
+    vistos: set = set()
+
+    for nombre in pedidos:
+        if nombre in vistos:
+            continue
+        vistos.add(nombre)
+        if _es_formulario_protegido(nombre):
+            protegidos.append(nombre)
+            continue
+        try:
+            path = get_case_file_path(case_id, nombre)
+        except (FileNotFoundError, HTTPException):
+            no_encontrados.append(nombre)
+            continue
+        try:
+            path.unlink()
+            borrados.append(path.name)
+        except FileNotFoundError:
+            # Ya no estaba en disco: igual hay que limpiar su rastro en case.json.
+            no_encontrados.append(nombre)
+            borrados.append(Path(nombre).name)
+        except Exception as exc:  # noqa: BLE001
+            fallidos.append({"filename": nombre, "error": str(exc)})
+
+    if borrados:
+        try:
+            _purgar_referencias_archivos(payload, set(borrados))
+            payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+            save_case(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
+
+    return {
+        "ok": not fallidos,
+        "solicitados": len(vistos),
+        "eliminados": borrados,
+        "protegidos": protegidos,
+        "no_encontrados": no_encontrados,
+        "fallidos": fallidos,
+        "case": payload,
+    }
+
+
 @app.delete("/api/cases/{case_id}/files/{filename:path}")
 async def delete_case_file(case_id: str, filename: str):
     try:
@@ -4113,36 +4241,7 @@ async def delete_case_file(case_id: str, filename: str):
     try:
         path.unlink()
         target_name = path.name
-        payload["files"] = [
-            item for item in (payload.get("files") or [])
-            if str(item.get("filename") or item.get("file") or "") != target_name
-        ]
-        analysis = payload.setdefault("analysis", {})
-        if isinstance(analysis, dict):
-            documents = analysis.get("documents")
-            if isinstance(documents, list):
-                analysis["documents"] = [
-                    item for item in documents
-                    if str(item.get("filename") or "") != target_name
-                ]
-            checklist = analysis.get("checklist")
-            if isinstance(checklist, dict):
-                summary = []
-                for group in checklist.get("received_summary") or []:
-                    if not isinstance(group, dict):
-                        continue
-                    group = dict(group)
-                    files = [item for item in (group.get("files") or []) if str(item or "") != target_name]
-                    if not files:
-                        continue
-                    group["files"] = files
-                    group["count"] = len(files)
-                    summary.append(group)
-                checklist["received_summary"] = summary
-            workspace = analysis.get("document_workspace")
-            if isinstance(workspace, dict):
-                workspace["order"] = [item for item in (workspace.get("order") or []) if str(item or "") != target_name]
-                workspace["removed_files"] = [item for item in (workspace.get("removed_files") or []) if str(item or "") != target_name]
+        _purgar_referencias_archivos(payload, {target_name})
         payload["updated_at"] = datetime.now(timezone.utc).isoformat()
         save_case(payload)
         return {"ok": True, "deleted": target_name, "case": payload}

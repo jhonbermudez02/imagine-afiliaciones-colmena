@@ -447,6 +447,13 @@ def normalize_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+# Tipos de documento validos para una persona (trabajador, responsable de sede o de centro
+# de trabajo). Fuente unica: estaba repetido como literal en dos sitios.
+TIPOS_DOCUMENTO_PERSONA: frozenset = frozenset(
+    {"CC", "CE", "CD", "SC", "PE", "PT", "RC", "TI", "NI", "PPT", "PEP", "PA", "AS"}
+)
+
+
 def normalize_haystack(value: Any) -> str:
     text = normalize_text(value).lower()
     text = unicodedata.normalize("NFKD", text)
@@ -5849,7 +5856,19 @@ def _read_pdf(path: Path) -> Dict[str, Any]:
             "pages_processed": max(extracted_pages, len(text_parts)),
         }
 
-    images = convert_from_path(str(path), first_page=1, last_page=2, dpi=200)
+    try:
+        images = convert_from_path(str(path), first_page=1, last_page=2, dpi=200)
+    except Exception:
+        # Mismo criterio que los otros dos convert_from_path de esta funcion, que ya
+        # estaban protegidos: un PDF que poppler no puede abrir -ilegible, truncado, o que
+        # ya no esta en el disco- devuelve texto vacio y lo reporta quien llama.
+        #
+        # Sin esta guarda un solo archivo faltante abortaba analyze_case COMPLETO: la
+        # excepcion sube por el executor.map que procesa los documentos en paralelo y se
+        # lleva el analisis entero. Era el "Unable to get page count. I/O Error: Couldn't
+        # open file ... No such file or directory" al recargar un Excel en Pendientes: el
+        # Excel quedaba guardado y el reanalisis moria por otro documento del expediente.
+        images = []
     ocr_parts = [normalize_text(_ocr_best_text_from_image(image)) for image in images]
     joined_ocr = "\n".join(part for part in ocr_parts if part)
     if joined_ocr and not _text_quality_is_low(joined_ocr):
@@ -6151,7 +6170,7 @@ def _extract_worker_records_from_rows(rows: List[tuple[Any, ...]]) -> tuple[List
             if normalize_haystack(document_value) in {"total", "total_centros_de_trabajo"}:
                 break
             if document_value or name_value:
-                if doc_digits and len(doc_digits) >= 5 and doc_type in {"CC", "CE", "CD", "SC", "PE", "PT", "RC", "TI", "NI", "PPT", "PEP", "PA", "AS"}:
+                if doc_digits and len(doc_digits) >= 5 and doc_type in TIPOS_DOCUMENTO_PERSONA:
                     record["_raw_numero_de_identificacion"] = normalize_text(document_value)
                     record["numero_de_identificacion"] = doc_digits
                     if not record.get("fecha_de_nacimiento"):
@@ -6174,6 +6193,28 @@ def _extract_worker_records_from_rows(rows: List[tuple[Any, ...]]) -> tuple[List
 
 
 
+# Encabezados que marcan el final del bloque "B. INFORMACION DE LOS CENTROS DE TRABAJO"
+# dentro de la hoja "Sede XX - Trabajadores": lo que sigue es la seccion C, la tabla de
+# trabajadores. Hacen falta porque el unico corte que habia era la fila "Total centros de
+# trabajo", y hay formularios que llegan sin ella.
+FIN_BLOQUE_CENTROS_TRABAJO = (
+    "informacion de los trabajadores",
+    "datos de afiliacion y contacto del trabajador",
+    "numero de trabajadores",
+)
+
+# Tope defensivo de filas de centros por sede: si una plantilla llegara sin el encabezado
+# de la seccion C, esto evita recorrer miles de filas de trabajadores.
+MAX_CENTROS_TRABAJO_POR_SEDE = 400
+
+
+def _fin_bloque_centros_trabajo(valor: Any) -> bool:
+    texto = normalize_haystack(valor)
+    if not texto:
+        return False
+    return any(marca in texto for marca in FIN_BLOQUE_CENTROS_TRABAJO)
+
+
 def _extract_sede_info_from_sheet(sheet_obj: Any, sede_num: int) -> Dict[str, Any]:
     """Extrae datos de la sede y centros de trabajo desde la hoja de trabajadores."""
     def sv(row, col):
@@ -6183,14 +6224,31 @@ def _extract_sede_info_from_sheet(sheet_obj: Any, sede_num: int) -> Dict[str, An
         except Exception:
             return ""
     prefix = f"sede_{sede_num:02d}" if sede_num > 1 else "sede_principal"
-    # Extraer centros de trabajo desde fila 24 en adelante
+    # Los centros de trabajo arrancan en la fila 24, pero el bloque NO tiene largo fijo:
+    # crece una fila por centro. Cerrar la lectura en una fila fija (antes, la 59) falla por
+    # los dos lados: con muchos centros se pierden los ultimos, y con pocos la ventana se
+    # mete en la seccion "C. INFORMACION DE LOS TRABAJADORES" que viene debajo. Lo segundo
+    # es lo que hacia dano: la fila de un trabajador trae consecutivo en D y codigo de
+    # centro en E, la misma forma que un centro, asi que el primer trabajador entraba como
+    # centro de trabajo fantasma, con su tipo de documento de "nombre" y su dia de
+    # nacimiento de "municipio". Se recorre hasta el final de la hoja y se corta en el
+    # encabezado de la seccion siguiente.
+    tope = min(int(getattr(sheet_obj, "max_row", 0) or 0), 24 + MAX_CENTROS_TRABAJO_POR_SEDE)
     centros = []
-    for r in range(24, 60):
+    for r in range(24, max(tope, 24) + 1):
         num_ct = sv(r, 4)
         cod_ct = sv(r, 5)
         nom_ct = sv(r, 6)
         # Parar si encontramos "Total centros de trabajo"
         if "total" in nom_ct.lower() or "total" in num_ct.lower():
+            break
+        # Empieza la seccion C (tabla de trabajadores): el bloque de centros se acabo.
+        if _fin_bloque_centros_trabajo(num_ct) or _fin_bloque_centros_trabajo(nom_ct):
+            break
+        # Un centro de trabajo no se llama "CC" ni "PE": en una fila de la tabla de
+        # trabajadores esa columna es el tipo de documento. Es la misma regla con la que el
+        # compat separa las dos tablas al leer el clean (_parse_trabajadores_from_sede_clean).
+        if nom_ct.strip().upper() in TIPOS_DOCUMENTO_PERSONA:
             break
         if not num_ct or not num_ct.strip() or not num_ct.isdigit():
             continue
@@ -7847,7 +7905,7 @@ def _build_precheck_summary(xlsx_profile: Dict[str, Any], docs: List[Dict[str, A
     valid_jornadas = {"UNICA", "TURNOS", "ROTATIVA"}
     valid_zonas = {"U", "R"}
     valid_sexos = {"M", "F", "T", "NB", "O"}
-    valid_tipo_documento = {"CC", "CE", "CD", "SC", "PE", "PT", "RC", "TI", "NI", "PPT", "PEP", "PA", "AS"}
+    valid_tipo_documento = set(TIPOS_DOCUMENTO_PERSONA)
     valid_tipo_trabajador = {"DEPENDIENTE", "INDEPENDIENTE", "ESTUDIANTE", "PENSIONADO", "APRENDIZ", "COOPERADO", "SERVICIODOMESTICO", "SERVICIODOMÉSTICO"}
     valid_tipo_salario = {"FIJO", "VARIABLE", "INTEGRAL"}
     today = datetime.now()
@@ -11682,8 +11740,9 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
 
     def _process_document(file_entry: Dict[str, Any]) -> Dict[str, Any]:
         _doc_started = perf_counter()
-        path = Path(file_entry["stored_path"])
+        path = Path(str(file_entry.get("stored_path") or ""))
         suffix = path.suffix.lower()
+        archivo_ausente = False
         cached_doc = previous_docs_by_filename.get(path.name)
         cached_size = (cached_doc or {}).get("_ocr_cache_size_bytes")
         current_size = file_entry.get("size_bytes")
@@ -11711,6 +11770,20 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
                 "used_ocr": bool(cached_doc.get("used_ocr")),
                 "pages_processed": cached_doc.get("pages_processed", 0),
             }
+        elif not path.exists():
+            # Referencia colgada: case.json lista el archivo pero no esta en el disco.
+            # La entrada NO se borra a proposito: puede ser una indisponibilidad temporal
+            # del almacenamiento y no un archivo perdido para siempre, y en este proyecto
+            # el repositorio de imagenes vive en un montaje de red. Se reporta y el
+            # analisis sigue con los demas documentos, igual que ya hace
+            # _explode_case_pdfs con un PDF ilegible.
+            logger.warning(
+                "analyze_case doc=%s archivo ausente en disco, se omite del analisis: %s",
+                path.name,
+                path,
+            )
+            archivo_ausente = True
+            result = {"text": "", "used_ocr": False, "pages_processed": 0}
         elif suffix == ".pdf":
             result = _read_pdf(path)
         elif suffix in {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}:
@@ -11757,6 +11830,11 @@ def analyze_case(case_id: str, preserve_manual_approval: bool = False) -> Dict[s
             "ocr_quality_score": ocr_quality_score,
             "_ocr_cache_size_bytes": file_entry.get("size_bytes"),
         }
+        if archivo_ausente:
+            # Queda marcado para que la vista y quien revise el caso sepan que este
+            # soporte no se leyo porque no esta, y no por una mala clasificacion.
+            doc["archivo_ausente"] = True
+            doc["lectura_error"] = "El archivo no esta en el expediente (referencia sin archivo en disco)."
         _apply_auto_entrega_comision_metadata(doc, file_entry)
         logger.info(
             "analyze_case doc=%s pages=%s used_ocr=%s ocr_ms=%d total_ms=%d",

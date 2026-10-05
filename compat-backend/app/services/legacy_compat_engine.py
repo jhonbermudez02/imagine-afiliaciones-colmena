@@ -11,6 +11,13 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Set
 from urllib.parse import parse_qs, urlparse
 
+try:  # pragma: no cover - nova lo carga por importlib, fuera del paquete del compat
+    from app.core.documentos import TIPOS_DOCUMENTO_TRABAJADOR
+except Exception:  # noqa: BLE001
+    TIPOS_DOCUMENTO_TRABAJADOR = frozenset(
+        {"CC", "CD", "CE", "NI", "PA", "PE", "PT", "RC", "SC", "TI"}
+    )
+
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
 STATIC_DIR = ROOT / "frontend"
@@ -397,7 +404,7 @@ class LegacyCompatEngine:
         def _parse_doc_name_from_pipe(tokens: List[str]) -> Optional[Dict[str, str]]:
             # Layout esperado en trabajadores:
             # idx2=tipodoc, idx3=documento, idx4..idx7=apellidos/nombres
-            if len(tokens) >= 8 and tokens[2].upper() in {"CC", "CE", "TI", "RC", "PA", "PT", "SC", "CD"}:
+            if len(tokens) >= 8 and tokens[2].upper() in TIPOS_DOCUMENTO_TRABAJADOR:
                 doc = as_text(tokens[3]).strip()
                 names = [as_text(x).strip() for x in tokens[4:8] if as_text(x).strip().upper() not in {"", "NULL"}]
                 if doc != "" and names:

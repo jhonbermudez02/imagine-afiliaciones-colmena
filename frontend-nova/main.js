@@ -2429,6 +2429,74 @@ function getManualReviewEntry(manualReview, kind, file) {
     return (Array.isArray(manualReview.reviews) ? manualReview.reviews : []).find(r => r.file === file) || null;
 }
 
+// Borrado masivo de adjuntos. El flujo pedido es "marcar todos y desmarcar los que se
+// conservan", de ahi que el control maestro este arriba de la lista. Arranca DESMARCADO a
+// proposito: nadie quiere abrir la vista y encontrar 40 documentos ya marcados para borrar.
+//
+// Va en una sola peticion, no en un DELETE por archivo: cada borrado individual reescribe
+// case.json completo, asi que N llamadas en paralelo se pisan entre si y pueden resucitar
+// un archivo ya borrado.
+function initBulkDocDelete(listEl, headerEl, payload) {
+    const master = headerEl?.querySelector('#docBulkAll');
+    const btn = headerEl?.querySelector('#btnDocBulkDelete');
+    const label = headerEl?.querySelector('#docBulkCount');
+    if (!master || !btn || !label) return;
+
+    const casillas = () => Array.from(listEl.querySelectorAll('.doc-select'));
+    const marcadas = () => casillas().filter(c => c.checked);
+
+    function refrescar() {
+        const total = casillas().length;
+        const n = marcadas().length;
+        label.textContent = n ? `${n} de ${total} marcados` : `${total} se pueden eliminar`;
+        btn.disabled = n === 0;
+        btn.textContent = n ? `Eliminar ${n}` : 'Eliminar seleccionados';
+        master.checked = n > 0 && n === total;
+        master.indeterminate = n > 0 && n < total;
+    }
+
+    master.addEventListener('change', () => {
+        casillas().forEach(c => { c.checked = master.checked; });
+        refrescar();
+    });
+    casillas().forEach(c => c.addEventListener('change', refrescar));
+
+    btn.addEventListener('click', async () => {
+        const nombres = marcadas().map(c => c.dataset.file).filter(Boolean);
+        if (!nombres.length || !payload?.id) return;
+        const muestra = nombres.slice(0, 12).map(n => `• ${n}`).join('\n');
+        const resto = nombres.length > 12 ? `\n… y ${nombres.length - 12} más` : '';
+        if (!confirm(`¿Eliminar ${nombres.length} documento(s)?\n\n${muestra}${resto}\n\nSe eliminan permanentemente del expediente. No se puede deshacer.`)) return;
+        btn.disabled = true;
+        btn.textContent = 'Eliminando…';
+        try {
+            // attempts=1: es una operación destructiva, no se reintenta sola.
+            const r = await fetchWithRetry(caseApiUrl(payload.id, '/files/bulk-delete'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filenames: nombres }),
+            }, 1);
+            const data = await r.json().catch(() => ({}));
+            const eliminados = (data.eliminados || []).length;
+            showToast(`${eliminados} documento(s) eliminado(s)`, eliminados ? 'ok' : 'warn');
+            if ((data.protegidos || []).length) {
+                showToast(`El formulario no se elimina: ${data.protegidos.join(', ')}`, 'warn');
+            }
+            (data.fallidos || []).forEach(f => showToast(`No se pudo eliminar ${f.filename}: ${f.error}`, 'err'));
+            const preview = document.getElementById('classifPreviewBody');
+            if (preview) preview.innerHTML = '<div class="empty-state">Selecciona un documento</div>';
+            const actions = document.getElementById('classifPreviewActions');
+            if (actions) actions.innerHTML = '';
+            await loadClassifForCase(payload.id);
+        } catch (e) {
+            showToast('No se pudo eliminar: ' + e.message, 'err');
+            refrescar();
+        }
+    });
+
+    refrescar();
+}
+
 function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
     const el = document.getElementById('classifDocList');
     const preview = document.getElementById('classifPreviewBody');
@@ -2439,6 +2507,10 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
         el.innerHTML = '<div class="empty-state">No hay documentos en este contrato</div>';
         return;
     }
+
+    // Documentos que se pueden eliminar: el formulario (xlsx) queda fuera porque todo el
+    // expediente se deriva de el, y un contrato aprobado es de solo lectura.
+    const eliminables = isApproved ? [] : items.filter(it => it.kind !== 'xlsx');
 
     // Header con conteo y acciones de la lista
     const headerEl = el.previousElementSibling;
@@ -2455,6 +2527,14 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
             <button class="classif-sort-btn" id="btnGalleryMode" type="button" style="margin-left:auto;color:var(--c-blue)">🖼 Galería</button>
             <button class="classif-back-btn" id="btnBackToCaseInfo" type="button">← Volver a información</button>
         </div>
+        ${eliminables.length ? `
+        <div class="doc-bulk-bar">
+            <label class="doc-bulk-all" title="Marca todos y luego desmarca los que quieres conservar">
+                <input type="checkbox" id="docBulkAll"> Seleccionar todos
+            </label>
+            <span class="doc-bulk-count" id="docBulkCount"></span>
+            <button class="doc-bulk-del" id="btnDocBulkDelete" type="button" disabled>Eliminar seleccionados</button>
+        </div>` : ''}
     `;
     el.parentElement?.insertBefore(header, el);
 
@@ -2467,12 +2547,14 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
 
     el.innerHTML = items.map((item, i) => {
         const isRag = item.codeSource === 'rag_classification';
+        const puedeEliminar = !isApproved && item.kind !== 'xlsx';
         const canDuplicate = item.kind !== 'xlsx' && canonicalDocumentType(item.type) === 'entrega_documentos';
         const sedeLabel = canonicalDocumentType(item.type) === 'anexo_sedes' && item.sedeKey
             ? (buildSedeOptions(payload).find(s => s.key === item.sedeKey)?.label || item.sedeKey)
             : '';
         return `
         <div class="doc-item" data-index="${i}" data-file="${escapeHtml(item.file)}">
+            ${puedeEliminar ? `<input class="doc-select" type="checkbox" data-file="${escapeHtml(item.file)}" title="Marcar para eliminar" aria-label="Marcar ${escapeHtml(item.label)} para eliminar">` : ''}
             <span class="doc-item-order">
                 <input class="doc-order-input" data-file="${escapeHtml(item.file)}" type="number" min="1" max="${items.length}" value="${i + 1}" title="${isApproved ? 'Contrato aprobado: orden bloqueado' : 'Cambiar orden'}" aria-label="Orden del documento" ${isApproved ? 'disabled' : ''}>
             </span>
@@ -2490,6 +2572,7 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
     el.querySelectorAll('.doc-item').forEach(el => {
         el.addEventListener('click', async (e) => {
             if (e.target.classList.contains('doc-order-input')) return;
+            if (e.target.classList.contains('doc-select')) return; // marcar no es seleccionar
             if (e.target.classList.contains('doc-action-btn')) return; // manejar por separado
             el.closest('.doc-list')?.querySelectorAll('.doc-item').forEach(d => d.classList.remove('active'));
             el.classList.add('active');
@@ -2527,6 +2610,9 @@ function renderClassifDocList(payload, sortBy = 'default', sortDir = 1) {
             }
         });
     });
+
+    // Barra de borrado masivo
+    initBulkDocDelete(el, header, payload);
 
     // Botón Duplicar
     el.querySelectorAll('.doc-duplicate-btn').forEach(btn => {

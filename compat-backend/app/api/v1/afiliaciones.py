@@ -24,6 +24,7 @@ try:
 except Exception:  # pragma: no cover - fallback defensivo
     load_workbook = None
 
+from app.core.documentos import TIPOS_DOCUMENTO_TRABAJADOR
 from app.core.db import (
     execute_by_alias,
     execute_many_by_alias,
@@ -711,7 +712,7 @@ def _sede_salary_totals_from_xlsx(excel_bytes: bytes) -> dict[str, Any]:
     details: list[dict[str, Any]] = []
     sede_pat = re.compile(r"sede\s*0*(\d+)", re.IGNORECASE)
     sum_pat = re.compile(r"SUM\(\s*S(\d+)\s*:\s*S(\d+)\s*\)", re.IGNORECASE)
-    docs = {"CC", "CE", "TI", "RC", "PA", "PT", "SC", "CD", "NI"}
+    docs = set(TIPOS_DOCUMENTO_TRABAJADOR)
 
     # openpyxl en modo read_only NO indexa las celdas: cada ws.cell(r, c) vuelve a parsear el
     # XML de la hoja desde el principio, asi que el costo por llamada crece con el numero de
@@ -1023,7 +1024,7 @@ def _excel_contract_executive_summary(excel_bytes: bytes) -> dict[str, Any]:
     except Exception as exc:
         return {"ok": False, "error": f"No fue posible leer el Excel: {type(exc).__name__}: {exc}"}
 
-    docs = {"CC", "CE", "TI", "RC", "PA", "PT", "SC", "CD", "NI"}
+    docs = set(TIPOS_DOCUMENTO_TRABAJADOR)
     worker_sheets = [sh for sh in wb.sheetnames if ("sede" in sh.lower() and "trabajador" in sh.lower())]
     if not worker_sheets:
         return {
@@ -5563,7 +5564,7 @@ def _parse_trabajadores_from_sede_clean(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     rows: list[dict[str, Any]] = []
     sanitize_warnings: list[dict[str, Any]] = []
-    doc_types = {"CC", "CE", "TI", "RC", "PA", "PT", "SC", "CD", "NI"}
+    doc_types = set(TIPOS_DOCUMENTO_TRABAJADOR)
     ct_meta_by_code: dict[str, dict[str, str]] = {}
 
     def _part(parts: list[str], idx: int) -> str:

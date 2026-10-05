@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from app.core.documentos import TIPOS_DOCUMENTO_TRABAJADOR
 from app.core.db import execute_by_alias, fetch_all_by_alias
 from app.core.observability import get_logger
 from app.services.nova.database.db_tools_service import DbToolsService
@@ -5361,7 +5362,7 @@ class NovaOrchestrator:
             return []
 
         out: list[str] = []
-        doc_types = {"CC", "CE", "TI", "RC", "PA", "PT", "SC", "CD", "NI"}
+        doc_types = set(TIPOS_DOCUMENTO_TRABAJADOR)
         for sh in wb.sheetnames:
             ws = wb[sh]
             max_row = int(ws.max_row or 0)
@@ -6215,7 +6216,7 @@ class NovaOrchestrator:
         def _expected_stats_from_sheet(ws: Any) -> dict[str, int]:
             # Fuente de verdad por hoja: filas de trabajadores (doc/id) y salario.
             # En los XLSX de contrato actuales: doc=col 6, id=col 7, salario=col 19.
-            docs = {"CC", "CE", "TI", "RC", "PA", "PT", "SC", "CD", "NI"}
+            docs = set(TIPOS_DOCUMENTO_TRABAJADOR)
             afiliados = 0
             salarios = 0
             max_scan = int(ws.max_row or 0)
@@ -6231,7 +6232,7 @@ class NovaOrchestrator:
             return {"afiliados": afiliados, "salarios": salarios}
 
         def _analyze_worker_sheet(ws: Any, sheet_name: str) -> dict[str, Any]:
-            docs = {"CC", "CE", "TI", "RC", "PA", "PT", "SC", "CD", "NI"}
+            docs = set(TIPOS_DOCUMENTO_TRABAJADOR)
             lines: list[str] = []
             expected_afiliados = 0
             expected_salarios = 0
@@ -6271,7 +6272,7 @@ class NovaOrchestrator:
             }
 
         def _generated_stats_from_lines(lines: list[str]) -> dict[str, int]:
-            docs = {"CC", "CE", "TI", "RC", "PA", "PT", "SC", "CD", "NI"}
+            docs = set(TIPOS_DOCUMENTO_TRABAJADOR)
             afiliados = 0
             salarios = 0
             for ln in lines:
@@ -6635,7 +6636,7 @@ class NovaOrchestrator:
         if len(parts) >= 7:
             td = (parts[5] or "").strip().upper()
             doc = re.sub(r"\D+", "", parts[6] or "")
-            valid_td = {"CC", "CE", "TI", "RC", "PA", "PT", "SC", "CD", "NI"}
+            valid_td = set(TIPOS_DOCUMENTO_TRABAJADOR)
             if td in valid_td and bool(re.fullmatch(r"\d{6,15}", doc)):
                 return True
         if "true" in nln or "false" in nln:

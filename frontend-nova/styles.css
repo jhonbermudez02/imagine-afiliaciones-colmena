@@ -1099,6 +1099,47 @@ table.cases-table tr:hover td { background: var(--c-surface-2); }
 .doc-duplicate-btn { color: var(--c-blue); }
 .doc-duplicate-btn:hover { background: var(--c-info-bg); }
 
+/* Seleccion masiva de documentos */
+.doc-select {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--c-err);
+}
+.doc-bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 4px 0 2px;
+  border-top: 1px solid var(--c-border);
+}
+.doc-bulk-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--c-text);
+}
+.doc-bulk-all input { width: 14px; height: 14px; margin: 0; cursor: pointer; }
+.doc-bulk-count { color: var(--c-text-2); }
+.doc-bulk-del {
+  margin-left: auto;
+  padding: 3px 10px;
+  font-size: 11px;
+  border: 0.5px solid var(--c-err);
+  border-radius: 3px;
+  background: var(--c-bg-2);
+  color: var(--c-err);
+  cursor: pointer;
+  transition: all 0.1s;
+}
+.doc-bulk-del:hover:not(:disabled) { background: var(--c-err); color: #fff; }
+.doc-bulk-del:disabled { opacity: 0.45; cursor: default; border-color: var(--c-border); color: var(--c-text-2); }
+
 /* ============================================================ DOC FRAME (VISOR) */
 .doc-frame {
   min-height: 100%;
