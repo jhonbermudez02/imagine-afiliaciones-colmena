@@ -1970,7 +1970,11 @@ class LegacyCompatEngine:
                             + self._vb_num(ws.get("eps"), 5)
                             + self._vb_num(ws.get("afp"), 5)
                             + "I"
-                            + self._vb_num(0, 25)
+                            # Numero de contrato independiente: posicion 164, longitud 25.
+                            # Lo reserva _reservar_cont_independiente al armar la fila del
+                            # estudiante (contra img004.independientes_apolo). Si no se pudo
+                            # obtener llega vacio y _vb_num deja los 25 ceros de antes.
+                            + self._vb_num(ws.get("cont_independiente"), 25)
                             + self._vb_num(ws.get("tipo_contrato"), 1)
                             + "2"
                             + self._vb_num(ws.get("codigo_actividad"), 7)
@@ -2005,6 +2009,12 @@ class LegacyCompatEngine:
                             + " " * 4
                             + "00000"
                             + ("1" if self._catalog_normalize("tipo_salario", ws.get("tipo_salario"), default="VARIABLE") == "FIJO" else "2")
+                            # Posicion 639, longitud 1: "Tipo Afiliacion SAT". Misma fuente
+                            # y mismo criterio que el registro del dependiente (f49 de la
+                            # fila P; 1=Traslado, 2=Afiliacion): "T" traslado, "A" afiliacion.
+                            # El registro del estudiante cierra en la 638 con tipo_salario,
+                            # asi que este campo es el caracter siguiente.
+                            + ("T" if as_text(p_row.get("f49")).strip() == "1" else "A")
                         )
                         lines.append(self._line_926(line3s))
 

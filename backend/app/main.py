@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from .cases import (
     _afi_rad_set_estado,
     _case_lote_and_contract,
+    find_idtramite_by_lote,
     _legacy_post,
     _contrato_para_afi_rad,
     analyze_case,
@@ -3962,7 +3963,13 @@ async def plano_por_lote(
     info = _legacy_get("legacy/db/lote-info", {"lote": lote_digits})
     contrato = only_digits(info.get("contrato") or "")
 
-    generado = generate_legacy_flatfile_926_http(lote=lote_digits)
+    # El idtramite no viaja en la URL: este endpoint existe justo para regenerar sin
+    # expediente. Se busca entre los casos locales por lote y, si no esta, se regenera
+    # igual -solo que el numero de contrato del estudiante saldra en ceros, porque
+    # independientes_apolo no tiene columna de lote para resolverlo de otra forma-.
+    generado = generate_legacy_flatfile_926_http(
+        lote=lote_digits, idtramite=find_idtramite_by_lote(lote_digits)
+    )
     if not generado.get("ok") or not generado.get("content"):
         raise HTTPException(
             status_code=502,
@@ -4049,7 +4056,9 @@ async def case_926(case_id: str, http_request: Request, perfil: str = Query(defa
     # case-id de texto (ver _case_lote_and_contract).
     lote = _case_lote_and_contract(payload).get("lote", "")
     if lote:
-        fresh = generate_legacy_flatfile_926_http(lote=lote)
+        fresh = generate_legacy_flatfile_926_http(
+            lote=lote, idtramite=only_digits(payload.get("idtramite") or "")
+        )
         if fresh.get("ok") and fresh.get("content"):
             _marcar_afi_rad_plano(payload, perfil_efectivo)
             # Se archiva EXACTAMENTE lo que se entrega, con los overrides ya aplicados:

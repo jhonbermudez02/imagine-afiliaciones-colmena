@@ -2853,6 +2853,34 @@ def _clone_case_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [dict(item) for item in rows]
 
 
+def find_idtramite_by_lote(lote: str) -> str:
+    """Busca en los expedientes locales el idtramite de un lote numerico.
+
+    independientes_apolo se indexa por idtramite y no tiene columna de lote, asi que la
+    unica forma de saber cual reserva pertenece a una entrega es el propio expediente.
+    /api/plano/por-lote existe para regenerar SIN expediente, asi que esto es de mejor
+    esfuerzo: si el caso no esta en este servidor devuelve "" y la regeneracion sigue como
+    siempre, solo que el numero de contrato del estudiante saldra en ceros.
+    """
+    # _canonical_numeric_value y no only_digits: el caso guarda el lote con relleno a 12
+    # digitos ("000000000148") y la URL lo trae pelado ("148"). Comparar las cadenas tal
+    # cual nunca coincidia.
+    objetivo = _canonical_numeric_value(lote)
+    if not objetivo:
+        return ""
+    for path in sorted(get_cases_root().glob("*/case.json"), reverse=True):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if _canonical_numeric_value(payload.get("lote_usuario") or "") != objetivo:
+            continue
+        idtramite = only_digits(payload.get("idtramite") or "")
+        if idtramite:
+            return idtramite
+    return ""
+
+
 def list_cases(include_all: bool = False, operation: Optional[str] = None) -> List[Dict[str, Any]]:
     operation_key = normalize_operation(operation) if operation is not None else ""
     cache_key = (bool(include_all), operation_key or "*")
@@ -6430,6 +6458,25 @@ def _extract_form_fields_from_sheet(sheet: Any) -> Dict[str, str]:
     tipo_persona_au13 = cleaned_sheet_value(13, 47)
     tipo_persona = tipo_persona_au13 or ("Jurídica" if normalize_haystack(empleador_tipo_documento) == "ni" else "Natural")
 
+    # Las cuatro casillas del representante legal (fila 17: J/U/AG/AQ). Se exponen por
+    # separado porque rep_legal_nombre_completo NO sirve para recuperarlas: el join de
+    # abajo descarta las casillas vacias, asi que "GARCIA / (vacio) / LUZ / (vacio)" se
+    # vuelve "GARCIA LUZ" y quien lo parta por posicion lee LUZ como segundo apellido,
+    # dejando los nombres vacios en el plano. Mismo problema -y misma solucion- que el
+    # responsable de sede, que ya viaja en componentes separados.
+    def rep_legal_casilla(col: int) -> str:
+        valor = _sheet_value(sheet, 17, col)
+        # La plantilla deja el rotulo "Segundo nombre" escrito en la casilla cuando esta
+        # sin diligenciar; no es un nombre.
+        if normalize_haystack(valor) == "segundo nombre":
+            return ""
+        return valor
+
+    rep_legal_ap1 = rep_legal_casilla(10)
+    rep_legal_ap2 = rep_legal_casilla(21)
+    rep_legal_n1 = rep_legal_casilla(33)
+    rep_legal_n2 = rep_legal_casilla(43)
+
     return {
         "fecha_radicacion": _sheet_value(sheet, 7, 7),
         "fecha_inicio_cobertura": _sheet_value(sheet, 7, 12),
@@ -6446,6 +6493,10 @@ def _extract_form_fields_from_sheet(sheet: Any) -> Dict[str, str]:
             ]
             if value and normalize_haystack(value) != "segundo nombre"
         ).strip(),
+        "rep_legal_primer_apellido": rep_legal_ap1,
+        "rep_legal_segundo_apellido": rep_legal_ap2,
+        "rep_legal_primer_nombre": rep_legal_n1,
+        "rep_legal_segundo_nombre": rep_legal_n2,
         "rep_legal_numero_documento": only_digits(_sheet_value(sheet, 18, 16)),
         "rep_legal_tipo_documento": _sheet_value(sheet, 18, 8),
         "rep_legal_correo": _clean_contact_value("rep_legal_correo", _sheet_value(sheet, 18, 27)),
@@ -9580,7 +9631,14 @@ def _build_926_output(
     if lote:
         # Insertar datos de comisiones del Entrega Doc antes de generar el plano
         _push_comisiones_to_legacy(lote=lote, docs=docs or [], base="temporal", intermediarios_override=intermediarios_override)
-        legacy_result = generate_legacy_flatfile_926_http(lote=lote)
+        # _build_926_output recibe case_id, no el payload: el idtramite se lee del
+        # expediente. Es el que le permite al compat ubicar la reserva del numero de
+        # contrato del estudiante; si no se puede leer, el plano sale como antes.
+        try:
+            _idt = only_digits((load_case(case_id) or {}).get("idtramite") or "")
+        except Exception:
+            _idt = ""
+        legacy_result = generate_legacy_flatfile_926_http(lote=lote, idtramite=_idt)
         if not legacy_result.get("ok"):
             state_result = generate_legacy_flatfile_926(lote=lote)
             if state_result.get("ok"):
@@ -10442,6 +10500,7 @@ def _legacy_build_926_http(
     strict_validate: bool = True,
     fecha_proceso: str = "",
     lote_usuario: str = "",
+    idtramite: str = "",
 ) -> Dict[str, Any]:
     base_url = str(settings.legacy_backend_url or "").strip().rstrip("/")
     if not base_url:
@@ -10455,6 +10514,10 @@ def _legacy_build_926_http(
             "strict_validate": "true" if strict_validate else "false",
             "fecha_proceso": only_digits(fecha_proceso)[:8],
             "lote_usuario": only_digits(lote_usuario),
+            # El compat lo usa para reponer el numero de contrato independiente del
+            # estudiante (posicion 164) desde img004.independientes_apolo, que es donde
+            # se guarda: la tabla de estudiantes no lleva ese campo.
+            "idtramite": only_digits(idtramite),
         },
         timeout=120.0,
     )
@@ -10514,6 +10577,10 @@ def _form_field_delivery_lines(xlsx_profile: Dict[str, Any]) -> List[str]:
     resp_ap2 = normalize_text(form_fields.get("responsable_sede_principal_segundo_apellido") or "")
     resp_n1 = normalize_text(form_fields.get("responsable_sede_principal_primer_nombre") or "")
     resp_n2 = normalize_text(form_fields.get("responsable_sede_principal_segundo_nombre") or "")
+    rep_ap1 = normalize_text(form_fields.get("rep_legal_primer_apellido") or "")
+    rep_ap2 = normalize_text(form_fields.get("rep_legal_segundo_apellido") or "")
+    rep_n1 = normalize_text(form_fields.get("rep_legal_primer_nombre") or "")
+    rep_n2 = normalize_text(form_fields.get("rep_legal_segundo_nombre") or "")
     resp_td = normalize_text(form_fields.get("responsable_sede_principal_tipo_documento") or "")
     resp_doc = only_digits(form_fields.get("responsable_sede_principal_numero_documento") or "")
     resp_correo = normalize_text(form_fields.get("responsable_sede_principal_correo") or "").lower()
@@ -10545,6 +10612,12 @@ def _form_field_delivery_lines(xlsx_profile: Dict[str, Any]) -> List[str]:
 
     return [
         f"NOVA_TRAMITE|{'TRASLADO' if is_traslado else 'AFILIACION'}",
+        # Componentes del representante legal: el compat los prefiere sobre re-partir el
+        # concatenado (ver _rep_legal_partes / _split_name alla).
+        f"NOVA_REP_APELLIDO1|{rep_ap1}",
+        f"NOVA_REP_APELLIDO2|{rep_ap2}",
+        f"NOVA_REP_NOMBRE1|{rep_n1}",
+        f"NOVA_REP_NOMBRE2|{rep_n2}",
         f"NOVA_RESP_APELLIDO1|{resp_ap1}",
         f"NOVA_RESP_APELLIDO2|{resp_ap2}",
         f"NOVA_RESP_NOMBRE1|{resp_n1}",
@@ -10856,7 +10929,15 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
     xlsx_b64 = base64.b64encode(xlsx_bytes).decode("ascii") if xlsx_bytes else ""
     flat_pairs = ((analysis.get("xlsx_profile") or {}).get("flat_pairs", {}) or {})
     lote = normalize_text(profile.get("lote") or profile.get("idtramite") or "")
-    idtramite = only_digits(profile.get("idtramite") or flat_pairs.get("idtramite") or "")
+    # El idtramite se persiste en el caso (payload["idtramite"]), igual que lote_usuario:
+    # el XLSX casi nunca lo trae, y mas abajo se acuña del reloj. Sin releerlo aqui cada
+    # re-run del flujo nacia con un idtramite nuevo -y "Aprobar contrato" re-ejecuta el
+    # flujo-, asi que un mismo caso quedaba como dos tramites distintos en
+    # proc_servicios_* y el estudiante reservaba DOS numeros de contrato independiente
+    # (el contador avanzaba de 2 en 2).
+    idtramite = only_digits(
+        profile.get("idtramite") or flat_pairs.get("idtramite") or payload.get("idtramite") or ""
+    )
     # El lote del caso se genera desde la secuencia Postgres `lote_reproceso` (mas abajo),
     # NO desde el XLSX. Aqui solo se reutiliza el valor ya persistido en el propio caso para
     # ser idempotente en re-runs; el XLSX (profile/flat_pairs) ya no dicta el lote.
@@ -10903,7 +10984,16 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
     manifest_started = perf_counter()
     manifest = _build_manifest_step(payload, analysis)
     lote = lote or manifest["lote"]
+    idtramite_previo = idtramite
     idtramite = idtramite or str(int(datetime.now().timestamp()))[-8:]
+    if idtramite != idtramite_previo:
+        # Se guarda ANTES de usarlo, no al final del flujo: la importacion a
+        # proc_servicios_* (y con ella la reserva del numero de contrato del
+        # estudiante) ocurre a mitad de camino, asi que si el flujo falla despues de
+        # ese punto y antes del save_case final, el re-run tiene que encontrar el
+        # mismo idtramite para no volver a quemar un numero.
+        payload["idtramite"] = idtramite
+        save_case(payload)
     if not legacy_lote_usuario:
         # El lote sale de la secuencia Postgres `lote_reproceso` (via compat), que ademas
         # registra la fila de control en `lc` — fiel al legacy (nextval + intolc). Solo se
@@ -10925,6 +11015,7 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
         if not legacy_lote_usuario:
             # Respaldo: si el compat/secuencia no responde, no bloquear el flujo.
             legacy_lote_usuario = build_generated_lote_usuario(legacy_fecha_proceso)
+    payload["idtramite"] = idtramite
     payload["lote_usuario"] = legacy_lote_usuario
     payload["fecha_proceso"] = legacy_fecha_proceso
     analysis.setdefault("xlsx_profile", {}).setdefault("profile", {})
@@ -11388,7 +11479,12 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
     # base="ybr": el paso sync_engine escribe con direct_to_archive directo a ybr/wimg004
     # (ya no a temporal), así que el prebuild debe leer la data desde ybr o el chequeo de
     # salarios encuentra 0 filas (Importado=0 en todas las sedes).
-    pre_payload: Dict[str, Any] = {"lote": legacy_lote_usuario, "from_db": True, "base": "ybr"}
+    pre_payload: Dict[str, Any] = {
+        "lote": legacy_lote_usuario,
+        "from_db": True,
+        "base": "ybr",
+        "idtramite": idtramite,
+    }
     if xlsx_b64:
         pre_payload["excel_file_base64"] = xlsx_b64
     try:
@@ -11471,6 +11567,7 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
             "base": base,
             "from_db": True,
             "generate_926_if_missing": False,
+            "idtramite": idtramite,
         }
         if xlsx_b64:
             pre_report_payload["excel_file_base64"] = xlsx_b64
@@ -11512,6 +11609,7 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
             strict_validate=True,
             fecha_proceso=legacy_fecha_proceso,
             lote_usuario=legacy_lote_usuario,
+            idtramite=idtramite,
         )
         output_926 = {
             "available": True,
@@ -11627,6 +11725,7 @@ def run_case_workflow(case_id: str, operator: str = "") -> Dict[str, Any]:
             "base": base,
             "from_db": True,
             "generate_926_if_missing": True,
+            "idtramite": idtramite,
         }
         if xlsx_b64:
             final_report_payload["excel_file_base64"] = xlsx_b64

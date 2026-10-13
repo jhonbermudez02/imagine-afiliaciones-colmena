@@ -16,6 +16,11 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname temporal -f /docker
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname img004 -f /docker-entrypoint-initdb.d/20-img004-schema.sql
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname br -f /docker-entrypoint-initdb.d/30-br-schema.sql
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname temporal -f /docker-entrypoint-initdb.d/40-temporal-proc-servicios-schema.sql
+# Tabla legacy independientes_apolo, contra img004. De ahi sale el "Numero de contrato
+# independiente" del plano (registro 3, posicion 164, longitud 25), que se reserva con
+# max(cont_independiente)+1. En produccion la tabla ya existe y este init no corre alla;
+# aqui se reproduce con su esquema real para poder probar el contador.
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname img004 -f /docker-entrypoint-initdb.d/25-img004-independientes-apolo.sql
 # Catalogos de intermediacion, contra img004. Son los que respaldan la validacion del
 # documento de comisiones: codigo 01 (Consultor) -> consultores, codigo 03
 # (Corredor/Agencia) -> afi_intermediarios. Antes solo se creaban las tablas y quedaban

@@ -55,7 +55,9 @@ def generate_legacy_flatfile_926(lote: str = "") -> Dict[str, Any]:
         return {"available": True, "ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
-def generate_legacy_flatfile_926_http(lote: str, base: str = "ybr", strict_validate: bool = False) -> Dict[str, Any]:
+def generate_legacy_flatfile_926_http(
+    lote: str, base: str = "ybr", strict_validate: bool = False, idtramite: str = ""
+) -> Dict[str, Any]:
     configured_url = str(settings.legacy_backend_url or "").strip().rstrip("/")
     if not configured_url:
         return {"available": False, "ok": False, "error": "legacy_backend_url no configurado."}
@@ -74,6 +76,12 @@ def generate_legacy_flatfile_926_http(lote: str, base: str = "ybr", strict_valid
                     "from_db": "true",
                     "base": base,
                     "strict_validate": "true" if strict_validate else "false",
+                    # Las descargas REGENERAN el plano desde la base, no entregan el
+                    # snapshot del caso. Sin el idtramite el compat no puede saber cual de
+                    # las reservas de independientes_apolo es la de este tramite -una misma
+                    # persona acumula una por cada reproceso- y el numero de contrato del
+                    # estudiante (registro 3, posicion 164) sale en 25 ceros.
+                    "idtramite": str(idtramite or "").strip(),
                 },
                 timeout=120.0,
             )

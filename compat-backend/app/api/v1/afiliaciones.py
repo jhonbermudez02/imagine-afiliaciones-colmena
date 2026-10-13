@@ -1103,10 +1103,11 @@ def _contract_executive_report(
     excel_bytes: Optional[bytes] = None,
     flatfile_926_content: str = "",
     generate_926_if_missing: bool = True,
+    idtramite: str = "",
 ) -> dict[str, Any]:
     sync_info: Optional[dict[str, Any]] = None
     if from_db and lote:
-        sync_info = _sync_engine_from_db(lote=lote, base=base)
+        sync_info = _sync_engine_from_db(lote=lote, base=base, idtramite=idtramite)
 
     wh_rows = _rows_in_lote("wh", lote=lote)
     wd_rows = _rows_in_lote("wd", lote=lote)
@@ -2140,7 +2141,65 @@ def _dispatch_db_m01(params: dict[str, str]) -> Optional[str]:
     return None
 
 
-def _sync_engine_from_db(lote: str, base: str = "temporal", fecha_proceso: str = "", lote_usuario: str = "") -> dict[str, Any]:
+def _cont_independiente_por_trabajador(documentos: list[str], idtramite: Any = "") -> dict[str, str]:
+    """documento -> numero de contrato independiente, desde img004.independientes_apolo.
+
+    El numero NO se guarda en brwdestudiantes/bkwdestudiantes: no esta en su esquema real
+    (68 columnas) y no debe estarlo. Vive en independientes_apolo, que es donde se reserva.
+    Esta busqueda es para la ruta que rearma el estado del motor desde la base -de donde
+    sale el plano que se entrega-: sin ella la posicion 164 del registro 3 saldria en ceros.
+
+    Con idtramite la busqueda es exacta. Sin el solo se repone cuando el documento tiene
+    UNA sola reserva: si tiene varias no se adivina y el campo se deja vacio, porque la
+    misma persona puede estar afiliada en otra empresa -como estudiante o como
+    independiente- y ahi la reserva mas reciente seria la de la OTRA empresa. Tambien hay
+    historia escrita por el Apolo legacy con ese mismo documento. Un numero de contrato
+    equivocado se va al plano sin que nadie lo note; los 25 ceros se ven.
+
+    No se puede desambiguar mejor desde la base: independientes_apolo se indexa por
+    idtramite y no tiene columna de lote.
+    """
+    docs = sorted({_only_digits(d) for d in documentos if _only_digits(d)})
+    if not docs:
+        return {}
+    tram = _only_digits(as_text(idtramite))
+    sql = (
+        "SELECT num_id_trabajador, cont_independiente FROM independientes_apolo "
+        "WHERE num_id_trabajador = ANY(:docs) "
+        "  AND cont_independiente IS NOT NULL AND cont_independiente > 0 "
+    )
+    params: dict[str, Any] = {"docs": docs}
+    if tram:
+        sql += "  AND idtramite = :idtramite "
+        params["idtramite"] = int(tram)
+    sql += "ORDER BY fechainsert"
+    try:
+        filas = fetch_all_by_alias("wimg004", sql, params)
+    except (ValueError, SQLAlchemyError):
+        return {}
+    candidatos: dict[str, set[str]] = {}
+    for fila in filas:
+        doc = _only_digits(fila.get("num_id_trabajador"))
+        num = _cont_independiente_texto(fila.get("cont_independiente"))
+        if doc and num:
+            candidatos.setdefault(doc, set()).add(num)
+    numeros: dict[str, str] = {}
+    for doc, nums in candidatos.items():
+        # Con idtramite la consulta ya acoto a un solo tramite. Sin el, varios numeros
+        # para el mismo documento significan que esa persona tiene mas de una afiliacion
+        # (otra empresa, o historia del Apolo legacy): no se elige ninguno.
+        if len(nums) == 1:
+            numeros[doc] = next(iter(nums))
+    return numeros
+
+
+def _sync_engine_from_db(
+    lote: str,
+    base: str = "temporal",
+    fecha_proceso: str = "",
+    lote_usuario: str = "",
+    idtramite: str = "",
+) -> dict[str, Any]:
     lote = lote.strip()
     base = base.strip() or "temporal"
     if not lote:
@@ -2188,6 +2247,17 @@ def _sync_engine_from_db(lote: str, base: str = "temporal", fecha_proceso: str =
     wddias = q_table("brwddias", "lote", ["sr"])
     wcentrot = q_table("brcentrot", "lote", ["sr"])
     wdest = q_table("brwdestudiantes", "lote", ["sr", "linea"])
+    # La tabla no guarda cont_independiente -ni debe-, asi que el numero se repone desde
+    # independientes_apolo. Sin esto el plano rearmado desde la base sale con la posicion
+    # 164 en ceros, que es justo lo que este campo tiene que llevar.
+    if wdest:
+        numeros_cont = _cont_independiente_por_trabajador(
+            [as_text(fila.get("documento")) for fila in wdest], idtramite=idtramite
+        )
+        for fila in wdest:
+            numero = numeros_cont.get(_only_digits(fila.get("documento")), "")
+            if numero:
+                fila["cont_independiente"] = numero
     wdind = q_table("brwdindependientes", "lote", ["sr", "linea"])
     wdcom = q_table("brwdcomisiones", "lote", ["sr", "linea"])
 
@@ -2547,6 +2617,112 @@ def _server_ndisco(alias: str = "wimg004") -> str:
     return as_text((rows[0] if rows else {}).get("ndisco")).strip().strip("/\\")
 
 
+# Columnas que guardan los componentes del nombre del representante legal.
+COLS_REP_LEGAL = ("repprimerapellido", "repsegundoapellido", "repprimernombre", "repsegundonombre")
+
+# Dias (AQ..AW) y horario (AX..BU) en que se ejecuta la actividad del practicante: 7
+# casillas de dia y 24 franjas horarias en la hoja "Sede XX - Trabajadores", cada una
+# marcada con X. Viajan con estos mismos nombres por toda la cadena -clean, tabla de
+# trabajadores y wdestudiantes- para que no haya que mapear nombres en el camino.
+DIAS_ACTIVIDAD = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo")
+HORAS_ACTIVIDAD = tuple(f"d{i}" for i in range(1, 25))
+COLS_ACTIVIDAD = DIAS_ACTIVIDAD + HORAS_ACTIVIDAD
+
+# Etiqueta de la columna AH del XLSX ("Tipo de trabajador", p.ej. "Estudiantes Decreto 055
+# de 2015"). El parser del clean ya la leia, pero no se guardaba en la tabla, asi que
+# wdestudiantes no tenia de donde sacarla y caia al codigo del subtipo.
+#
+# Etiqueta de la columna T del XLSX ("Tipo de Salario"). El parser la leia desde siempre,
+# pero la dejaba en "tipocontrato" -que es otra columna de la hoja-, asi que tipo_salario
+# nunca se cargaba y los tres registros del plano caian al default "FIJO". Se guarda la
+# etiqueta ya resuelta ("FIJO"/"VARIABLE"), no el "1-Fijo" crudo: ver _etiqueta_tipo_salario.
+COLS_TRABAJADOR_EXTRA = ("tipo_trabajador_text", "tipo_salario_text")
+
+# Todo lo que hay que asegurar/insertar/seleccionar de mas en la tabla de trabajadores.
+COLS_TRABAJADOR_NUEVAS = COLS_ACTIVIDAD + COLS_TRABAJADOR_EXTRA
+
+# Veredicto por base: True si las columnas existen y se pueden usar. Se resuelve una vez
+# por proceso para no lanzar un ALTER ni consultar el catalogo en cada import.
+_rep_legal_cols_ok: dict[str, bool] = {}
+
+
+_cols_aseguradas: dict[tuple[str, str], bool] = {}
+
+
+def _asegurar_columnas_texto(base: str, tabla: str, columnas: tuple[str, ...]) -> bool:
+    """Crea columnas text si faltan. True si quedaron todas disponibles.
+
+    El ALTER va en el codigo y no en un script de migracion a proposito: el paquete delta
+    que se aplica en los servidores lleva SOLO codigo, asi que una version que dependa de
+    un ALTER corrido a mano se despliega y revienta en el primer import con "column does
+    not exist". ADD COLUMN IF NOT EXISTS es idempotente, asi que correrlo de mas no hace
+    nada. El veredicto se memoriza por (base, tabla) para no tocar el catalogo en cada
+    peticion.
+    """
+    clave = (base, tabla)
+    listas = _cols_aseguradas.get(clave)
+    if listas is not None:
+        return listas
+    for col in columnas:
+        try:
+            execute_by_alias(base, f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS {col} text")
+        except (ValueError, SQLAlchemyError):
+            pass
+    try:
+        existentes = {c.lower() for c in get_table_columns_by_alias(base, tabla)}
+        listas = all(col in existentes for col in columnas)
+    except (ValueError, SQLAlchemyError):
+        listas = False
+    _cols_aseguradas[clave] = listas
+    return listas
+
+
+def _asegurar_columnas_rep_legal(base: str, fields: list[str]) -> list[str]:
+    """Crea las columnas del representante legal si faltan y devuelve los campos usables.
+
+    El ALTER va en el codigo y no en un script de migracion a proposito: el paquete delta
+    que se aplica en los servidores lleva SOLO codigo, asi que una version que dependa de
+    un ALTER corrido a mano se despliega y revienta en el primer import con "column does
+    not exist". ADD COLUMN IF NOT EXISTS es idempotente, asi que correrlo de mas no hace
+    nada.
+
+    Si no se pueden crear -por permisos del usuario de base, por ejemplo- se sacan de la
+    lista de campos y el INSERT sigue funcionando como antes: el plano cae al split
+    posicional de _split_name. Se pierde la correccion, no el proceso.
+    """
+    listas = _asegurar_columnas_texto(base, "proc_servicios_obtenerempleadortramite", COLS_REP_LEGAL)
+    _rep_legal_cols_ok[base] = listas
+    if listas:
+        return fields
+    return [f for f in fields if f not in COLS_REP_LEGAL]
+
+
+def _rep_legal_partes(row: Any, fallback_nombre: Any = "") -> tuple[str, str, str, str]:
+    """(primer apellido, segundo apellido, primer nombre, segundo nombre) del rep. legal.
+
+    Prefiere las columnas separadas de proc_servicios_obtenerempleadortramite, que llegan
+    desde las cuatro casillas del XLSX por los tokens NOVA_REP_*. Solo si la fila no las
+    trae -tramites guardados antes de que existieran, o un caso que entro por OCR sin
+    esos tokens- cae a partir el concatenado `nombrerepresentantelegal` con _split_name.
+
+    Ese fallback es posicional y pierde informacion: con un solo nombre y un solo apellido
+    ("GARCIA LUZ") lee LUZ como segundo apellido y deja los nombres vacios, y con un
+    apellido de dos palabras ("DE CASTRO ANA") corre todos los campos. Es exactamente el
+    motivo por el que existen las columnas separadas.
+    """
+    r = row or {}
+    partes = (
+        as_text(r.get("repprimerapellido")).strip().upper(),
+        as_text(r.get("repsegundoapellido")).strip().upper(),
+        as_text(r.get("repprimernombre")).strip().upper(),
+        as_text(r.get("repsegundonombre")).strip().upper(),
+    )
+    if any(partes):
+        return partes
+    nombre = as_text(r.get("nombrerepresentantelegal")).strip() or as_text(fallback_nombre).strip()
+    return _split_name(nombre)
+
+
 def _resp_sede_partes(sede_row: Any, fallback_nombre: Any = "") -> tuple[str, str, str, str]:
     """(primer apellido, segundo apellido, primer nombre, segundo nombre) del responsable.
 
@@ -2804,6 +2980,7 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
         return f"w.{column} AS {column}" if column in trabajador_cols else f"NULL::text AS {column}"
     def _empleador_col_expr(column: str) -> str:
         return f"e.{column}::text AS {column}" if column in empleador_cols else f"NULL::text AS {column}"
+    actividad_cols_sql = ",\n      ".join(_worker_col_expr(c) for c in COLS_TRABAJADOR_NUEVAS)
     ciudad_trab_expr = "w.ciudadresidencia"
     if "municipioresidencia" in trabajador_cols:
         ciudad_trab_expr = "w.municipioresidencia"
@@ -2850,6 +3027,10 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
       {_empleador_col_expr("sedeprincipalnombre")},
       {_empleador_col_expr("numeroradicacion")},
       {_empleador_col_expr("profilenumerotrabajadores")},
+      {_empleador_col_expr("repprimerapellido")},
+      {_empleador_col_expr("repsegundoapellido")},
+      {_empleador_col_expr("repprimernombre")},
+      {_empleador_col_expr("repsegundonombre")},
       {_empleador_col_expr("respsedeprimerapellido")},
       {_empleador_col_expr("respsedesegundoapellido")},
       {_empleador_col_expr("respsedeprimernombre")},
@@ -2914,7 +3095,9 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
       w.tipocontrato,
       w.jornada,
       w.suministratransporte,
-      w.numeromesescontrato
+      w.numeromesescontrato,
+      {_worker_col_expr("actividad_especial")},
+      {actividad_cols_sql}
     FROM proc_servicios_obtenertramites t
     LEFT JOIN proc_servicios_obtenerempleadortramite e ON e.idtramite = t.idtramite
     LEFT JOIN proc_servicios_obtenertrabajadortramite w ON w.idtramite = t.idtramite
@@ -3499,7 +3682,8 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
         numdoc_emp = as_text(row.get("numerodocumentoempleador"))
         contrato_num = as_text(row.get("numero_contrato")).strip() or idtramite_key
         rep = as_text(row.get("nombrerepresentantelegal"))
-        rep_p1, rep_p2, rep_p3, rep_p4 = _split_name(rep)
+        # Componentes separados si el tramite los tiene; si no, split posicional.
+        rep_p1, rep_p2, rep_p3, rep_p4 = _rep_legal_partes(row, rep)
         ciudad_emp = _city_code(row.get("ciudadempleador") or row.get("ciudad") or row.get("municipio")) or "11001"
         correo_emp = as_text(row.get("correoelectronicoempleador"))
         razon_social_emp = as_text(row.get("razonsocialempleador"))
@@ -3780,6 +3964,8 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                 rep_doc = as_text((sede_row or {}).get("documentoresponsable"))
             if rep.strip() == "":
                 rep = as_text((sede_row or {}).get("nombreresponsable"))
+                # Aqui el nombre viene de la SEDE, no del empleador: las columnas rep* no
+                # aplican y el split posicional es el unico camino.
                 rep_p1, rep_p2, rep_p3, rep_p4 = _split_name(rep)
             resp_td = as_text((sede_row or {}).get("tipodocumentoresponsable") or rep_tipodoc)
             resp_nom = as_text((sede_row or {}).get("nombreresponsable") or rep)
@@ -4130,6 +4316,30 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
             telefono_norm = telefono_raw if len(telefono_raw) == 7 else "0"
             celular_norm = celular_raw if len(celular_raw) == 10 else "0"
             direccion_norm = as_text(wr.get("direccionresidencia")).replace("#", "").replace("-", "")
+            # Geo del trabajador contra catálogos img004: municipio=ciudades.codigo
+            # (desambiguado por su departamento), departamento=departamentos.coddep.
+            # Se resuelve ANTES de bifurcar porque la necesitan las dos ramas: estaba solo
+            # en la del dependiente, asi que el estudiante salia con ciudad vacia -_city_code
+            # a secas no resuelve un nombre de municipio- y departamento fijo en "".
+            _geo_trab = _resolve_geo(
+                wr.get("ciudadresidencia"),
+                dept_hint=wr.get("departamento"),
+                contexto=f"trabajador {as_text(wr.get('numerodocumento')).strip() or 's/d'}",
+            )
+            _mun_code = (_geo_trab or {}).get("codigo") or _city_code(wr.get("ciudadresidencia"))
+            _dep_code = _dept_code_from_hint(wr.get("departamento")) or (_geo_trab or {}).get("coddep", "")
+            # Zona: wdestudiantes espera la palabra completa en mayuscula ("URBANA"/"RURAL")
+            # y afiliadosarp la misma palabra capitalizada ("Urbana"). Las dos se derivan de
+            # la misma lectura para que no se puedan separar.
+            _zona_raw = as_text(wr.get("zona")).strip().upper()
+            _zona_est = (
+                "URBANA" if _zona_raw.startswith("U")
+                else ("RURAL" if _zona_raw.startswith("R") else _zona_raw)
+            )
+            # Jornada: primera letra en mayuscula y el resto en minuscula, sin tildes
+            # ("UNICA"/"ÚNICA" -> "Unica"). Las dos ramas usan el mismo valor.
+            _jornada_txt = unicodedata.normalize("NFKD", as_text(wr.get("jornada")).strip())
+            _jornada_txt = "".join(ch for ch in _jornada_txt if not unicodedata.combining(ch)).lower().capitalize()
             if _is_estudiante_worker(wr):
                 wdest.append(
                     {
@@ -4153,17 +4363,28 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                         "telefono": telefono_norm,
                         "celular": celular_norm,
                         "correo": as_text(wr.get("correoelectronico")),
-                        "ciudad": _city_code(wr.get("ciudadresidencia")),
+                        "ciudad": _mun_code,
                         "localidad": as_text(wr.get("localidad")),
-                        "zona": RULES_ENGINE.normalize_zona(wr.get("zona")),
-                        "departamento": "",
-                        "jornada": as_text(wr.get("jornada")),
+                        "zona": _zona_est,
+                        "departamento": _dep_code,
+                        "jornada": _jornada_txt,
                         "modalidad": as_text(wr.get("modalidad")),
                         # Esquema real: NOT NULL. codigo_tipo_trabajador = tipoafiliadocotizante,
                         # tipo_trabajador = subtipoafiliadocotizante (mapeo directo de la fuente).
                         # El "0" es guarda para no violar NOT NULL si la fuente llega vacia.
                         "codigo_tipo_trabajador": as_text(wr.get("tipoafiliadocotizante")) or "0",
-                        "tipo_trabajador": as_text(wr.get("subtipoafiliadocotizante")) or "0",
+                        # Etiqueta literal de la columna AH del XLSX. Si el tramite se
+                        # guardo antes de que existiera la columna -o no se pudo crear- se
+                        # cae al codigo del subtipo, que es lo que habia antes.
+                        "tipo_trabajador": (
+                            as_text(wr.get("tipo_trabajador_text"))
+                            or as_text(wr.get("subtipoafiliadocotizante"))
+                            or "0"
+                        ),
+                        # Esquema real: NOT NULL. Mismo valor de origen que tipo_trabajador
+                        # (subtipoafiliadocotizante); la columna existia en la tabla pero no
+                        # se estaba escribiendo, asi que la fila salia con 67 de 68 campos.
+                        "subtipo_afiliado": as_text(wr.get("subtipoafiliadocotizante")) or "0",
                         "codigo_actividad": as_text(wr.get("actividadeconomica")),
                         # Esquema real: fecha_inicio/fecha_final NOT NULL (numeric). Si el
                         # trabajador no trae su propia fecha de contrato, se usa la fecha de
@@ -4182,25 +4403,32 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                         "meses": str(max(_ruta_to_int(wr.get("numeromesescontrato")) or 0, 1)),
                         "tipo_contrato": as_text(wr.get("tipocontrato")),
                         "monto_contrato": as_text(wr.get("valorcontrato")),
-                        "tipo_salario": as_text(wr.get("tipo_salario") or "FIJO"),
+                        "actividad_especial": as_text(wr.get("actividad_especial")),
+                        # Dias y horario de la actividad: "X" donde el XLSX marco, cadena
+                        # vacia donde no. La normalizacion a mayuscula ya la hizo el parser
+                        # del clean (_marca_actividad); aqui solo se trasladan.
+                        **{nombre: as_text(wr.get(nombre)) for nombre in COLS_ACTIVIDAD},
+                        # Primera letra en mayuscula y el resto en minuscula ("FIJO" ->
+                        # "Fijo"). Los consumidores pasan por _catalog_normalize, que hace
+                        # upper() antes de buscar, asi que el cambio de caja no los afecta.
+                        # Numero de contrato independiente (plano, registro 3, posicion
+                        # 164, longitud 25). Se reserva aqui -no al formatear el plano-
+                        # para no quemar un numero nuevo en cada regeneracion.
+                        "cont_independiente": _reservar_cont_independiente(
+                            idtramite_key, wr.get("numerodocumento")
+                        ),
+                        # Etiqueta real de la columna T ("1-Fijo" -> "Fijo"). El
+                        # "FIJO" solo queda como respaldo para un tramite guardado
+                        # antes de que existiera la columna.
+                        "tipo_salario": as_text(
+                            wr.get("tipo_salario_text") or wr.get("tipo_salario") or "FIJO"
+                        ).strip().capitalize(),
                     }
                 )
             else:
                 _eps_c, _eps_n = _eps_lookup(wr.get("eps"))
                 _afp_c, _afp_n = _afp_lookup(wr.get("afp"))
-                # Geo del trabajador contra catálogos img004: municipio=ciudades.codigo
-                # (desambiguado por su departamento), departamento=departamentos.coddep.
-                _geo_trab = _resolve_geo(
-                    wr.get("ciudadresidencia"),
-                    dept_hint=wr.get("departamento"),
-                    contexto=f"trabajador {as_text(wr.get('numerodocumento')).strip() or 's/d'}",
-                )
-                _mun_code = (_geo_trab or {}).get("codigo") or _city_code(wr.get("ciudadresidencia"))
-                _dep_code = _dept_code_from_hint(wr.get("departamento")) or (_geo_trab or {}).get("coddep", "")
-                _zona_raw = as_text(wr.get("zona")).strip().upper()
                 _zona_txt = "Urbana" if _zona_raw.startswith("U") else ("Rural" if _zona_raw.startswith("R") else _zona_raw.capitalize())
-                _jornada_txt = unicodedata.normalize("NFKD", as_text(wr.get("jornada")).strip())
-                _jornada_txt = "".join(ch for ch in _jornada_txt if not unicodedata.combining(ch)).lower().capitalize()
                 _alturas_raw = as_text(wr.get("actividad_especial")).strip().upper()
                 _trabajoalturas = "0" if (not _alturas_raw or _alturas_raw == "NO DEFINIDO") else "1"
                 wd.append(
@@ -4236,7 +4464,11 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
                         "modalidad": as_text(wr.get("modalidad")).strip().capitalize(),
                         "jornada": _jornada_txt,
                         "trabajoalturas": _trabajoalturas,
-                        "tipo_salario": as_text(wr.get("tipo_salario") or "FIJO"),
+                        # Igual que en el estudiante: la columna T aplica a todos los
+                        # trabajadores normales, no solo a los de practica.
+                        "tipo_salario": as_text(
+                            wr.get("tipo_salario_text") or wr.get("tipo_salario") or "FIJO"
+                        ),
                     }
                 )
                 if _is_independiente_worker(wr):
@@ -4493,12 +4725,22 @@ def _load_proc_servicios_to_engine(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
     if bool(payload.get("apply_to_db", False)):
+        # cont_independiente viaja al MOTOR -lo necesita el registro 3 del plano en la
+        # posicion 164- pero no a la tabla de estudiantes: ese numero se guarda en
+        # img004.independientes_apolo, que es donde se reserva, y no esta en el esquema
+        # real de brwdestudiantes/bkwdestudiantes (68 columnas, ver
+        # files_migration/schemas/brwdestudiantes.csv). _import_real_lote_to_db crea de
+        # oficio cualquier columna que vea en el payload ("paridad clone"), asi que
+        # dejarlo pasar le agregaba a esas dos tablas una columna que no debe existir.
+        wdest_db = [
+            {k: v for k, v in fila.items() if k != "cont_independiente"} for fila in wdest
+        ]
         br_tables_payload = {
             "brempresasarp": wh,
             "brafiliadosarp": wd,
             "brcentrot": wcentrot,
             "brwddias": wddias,
-            "brwdestudiantes": wdest,
+            "brwdestudiantes": wdest_db,
             "brwdindependientes": wdind,
             "brwdcomisiones": wdcom,
         }
@@ -4988,6 +5230,10 @@ def _parse_empleador_from_contrato_clean(content: str) -> dict[str, str]:
         "sedeprincipalnombre": "",
         "numeroradicacion": "",
         "profilenumerotrabajadores": "",
+        "repprimerapellido": "",
+        "repsegundoapellido": "",
+        "repprimernombre": "",
+        "repsegundonombre": "",
         "respsedeprimerapellido": "",
         "respsedesegundoapellido": "",
         "respsedeprimernombre": "",
@@ -5191,6 +5437,10 @@ def _parse_empleador_from_contrato_clean(content: str) -> dict[str, str]:
     # principal). Se aplican al final para ganar sobre el parseo del texto crudo. Solo se
     # sobrescribe con valores no vacíos, para no borrar fallbacks válidos (ej. ARL "10").
     nova_field_map = {
+        "NOVA_REP_APELLIDO1": "repprimerapellido",
+        "NOVA_REP_APELLIDO2": "repsegundoapellido",
+        "NOVA_REP_NOMBRE1": "repprimernombre",
+        "NOVA_REP_NOMBRE2": "repsegundonombre",
         "NOVA_RESP_APELLIDO1": "respsedeprimerapellido",
         "NOVA_RESP_APELLIDO2": "respsedesegundoapellido",
         "NOVA_RESP_NOMBRE1": "respsedeprimernombre",
@@ -5309,6 +5559,10 @@ def _parse_sede_from_contrato_clean(content: str) -> dict[str, str]:
         "correoresponsable": "",
         # Componentes separados: son los que realmente se persisten y consumen. El
         # nombreresponsable concatenado se conserva por compatibilidad con lo ya guardado.
+        "repprimerapellido": "",
+        "repsegundoapellido": "",
+        "repprimernombre": "",
+        "repsegundonombre": "",
         "respsedeprimerapellido": "",
         "respsedesegundoapellido": "",
         "respsedeprimernombre": "",
@@ -5499,6 +5753,120 @@ def _to_num_text(value: Any) -> str:
     return digits or "0"
 
 
+# Clave del lock que serializa la reserva del numero de contrato independiente. Es un
+# entero fijo y no un hash para que todos los procesos tomen exactamente la misma:
+# 926164 = plano 926, posicion 164, que es el campo que alimenta este contador.
+LOCK_CONT_INDEPENDIENTE = 926164
+
+
+def _cont_independiente_texto(value: Any) -> str:
+    """cont_independiente (double precision) -> entero como texto.
+
+    No se puede usar _to_int_safe ni _to_num_text: los dos arrancan los no-digitos, asi
+    que 1234.0 -lo que devuelve Postgres para un double- se convertiria en "12340".
+    """
+    txt = as_text(value).strip()
+    if not txt:
+        return ""
+    try:
+        return str(int(float(txt)))
+    except (TypeError, ValueError):
+        return ""
+
+
+def _reservar_cont_independiente(idtramite: Any, documento: Any) -> str:
+    """Reserva (o recupera) el "Numero de contrato independiente" del plano.
+
+    Es el campo que arranca en la posicion 164 del registro tipo 3 y ocupa 25 posiciones.
+    El numero sale de img004.independientes_apolo, igual que en el legacy PHP:
+
+        SELECT max(cont_independiente)+1 FROM independientes_apolo
+        INSERT INTO independientes_apolo (tipo_tramite, cont_independiente)
+             VALUES ('Voluntario', <siguiente>)
+
+    El INSERT no es opcional: es lo que RESERVA el numero. Sin esa fila el max() nunca
+    avanza y todos los planos saldrian con el mismo numero de contrato.
+
+    Dos diferencias deliberadas con el PHP:
+
+    1) Antes de reservar se busca si este tramite+trabajador YA tiene numero. El plano se
+       puede regenerar -la vista de planos por lote lo hace-, y sin esa busqueda cada
+       regeneracion quemaria un numero nuevo y el contrato cambiaria de numero entre una
+       entrega y la siguiente.
+
+    2) El max() y el INSERT van en UNA sola sentencia, y la transaccion arranca tomando
+       un lock de aviso (pg_advisory_xact_lock). El PHP lee el max y despues inserta: entre
+       esas dos consultas otro proceso puede leer el mismo max y quedarse con el mismo
+       numero. El lock serializa las reservas de Nova entre si, asi que por este lado dos
+       entregas simultaneas ya no pueden llevarse el mismo numero. Una secuencia no sirve:
+       se desincronizaria de las filas que el legacy inserta por su cuenta.
+
+       Lo que NO cierra -y no se puede cerrar desde aqui- es una reserva del PHP legacy
+       corriendo en paralelo: ese codigo no toma el lock. Un LOCK TABLE tampoco lo
+       resolveria, porque el modo que bloquea su INSERT deja pasar su SELECT del max: ya
+       leyo el numero viejo antes de quedarse esperando. Para cerrarlo del todo habria que
+       tocar el PHP.
+
+    Se usa engine.begin() y no fetch_all_by_alias a proposito: ese helper abre la conexion
+    con engine.connect(), SIN transaccion, asi que el INSERT ... RETURNING se revertiria al
+    cerrarla y la reserva se perderia.
+
+    Devuelve "" si no se pudo obtener. El plano sale entonces con ceros en ese campo -lo
+    que hacia hasta ahora- en vez de abortar la generacion por un sistema vecino.
+    """
+    doc = _only_digits(documento)
+    tram = _only_digits(as_text(idtramite))
+    try:
+        engine = get_engine_by_alias("wimg004")
+        with engine.begin() as conn:
+            # El lock se libera solo al cerrar la transaccion (COMMIT o ROLLBACK), no hay
+            # que soltarlo a mano. La transaccion es un SELECT y un INSERT, asi que la
+            # espera normal es de milisegundos; el lock_timeout esta por si un proceso
+            # quedara colgado, para fallar rapido en vez de frenar la entrega -y entonces
+            # el campo sale en ceros, que es la degradacion que ya tenia esta funcion-.
+            conn.execute(text("SET LOCAL lock_timeout = '5s'"))
+            conn.execute(
+                text("SELECT pg_advisory_xact_lock(:clave)"),
+                {"clave": LOCK_CONT_INDEPENDIENTE},
+            )
+            if tram and doc:
+                previa = (
+                    conn.execute(
+                        text(
+                            "SELECT cont_independiente FROM independientes_apolo "
+                            "WHERE idtramite = :idtramite AND num_id_trabajador = :doc "
+                            "  AND cont_independiente IS NOT NULL AND cont_independiente > 0 "
+                            "ORDER BY fechainsert LIMIT 1"
+                        ),
+                        {"idtramite": int(tram), "doc": doc},
+                    )
+                    .mappings()
+                    .first()
+                )
+                if previa:
+                    return _cont_independiente_texto(previa.get("cont_independiente"))
+            fila = (
+                conn.execute(
+                    text(
+                        "INSERT INTO independientes_apolo "
+                        "       (tipo_tramite, cont_independiente, idtramite, num_id_trabajador) "
+                        "SELECT 'Voluntario', COALESCE(MAX(cont_independiente), 0) + 1, "
+                        "       :idtramite, :doc "
+                        "  FROM independientes_apolo "
+                        "RETURNING cont_independiente"
+                    ),
+                    {"idtramite": int(tram) if tram else 0, "doc": doc},
+                )
+                .mappings()
+                .first()
+            )
+            if fila:
+                return _cont_independiente_texto(fila.get("cont_independiente"))
+    except (ValueError, SQLAlchemyError):
+        return ""
+    return ""
+
+
 def _normalize_ct_code_token(value: Any) -> str:
     """
     Normaliza código de centro de trabajo a formato legacy numérico (6 dígitos).
@@ -5557,6 +5925,85 @@ def _parse_money_text(value: Any) -> tuple[str, bool]:
     # Fallback conservador: extraer dígitos (evita vacío), pero marcar saneamiento.
     digits = "".join(ch for ch in compact if ch.isdigit())
     return (digits or "0"), True
+
+
+# Tipo de contrato del estudiante (plano, registro 3, posicion 189, longitud 1).
+# La plantilla trae la etiqueta con su codigo delante ("3-Admnistrativo", con la errata
+# de origen), asi que el prefijo de 3 letras es lo unico estable para resolver por nombre.
+TIPOS_CONTRATO_PRACTICA = (("CIV", "1"), ("COM", "2"), ("ADM", "3"), ("VOL", "4"))
+
+
+def _etiqueta_tipo_salario(value: Any) -> str:
+    """Columna T del XLSX ("Tipo de Salario") -> etiqueta del catalogo.
+
+    La lista de validacion de la plantilla es exactamente "1-Fijo,2-Variable", asi que el
+    valor llega con el codigo delante. Se devuelve la ETIQUETA ("FIJO"/"VARIABLE") y no el
+    codigo porque es lo que consume CATALOG_SYNONYMS["tipo_salario"] del motor del plano:
+    _catalog_normalize devuelve el token tal cual cuando no lo reconoce, asi que un
+    "1-FIJO" sin limpiar no coincidiria con "FIJO" y el plano lo tomaria como variable.
+    """
+    txt = _clean_token(value)
+    if not txt or txt.upper() == "NULL":
+        return ""
+    norm = unicodedata.normalize("NFKD", txt)
+    norm = "".join(ch for ch in norm if not unicodedata.combining(ch)).upper()
+    if "VAR" in norm or norm == "V":
+        return "VARIABLE"
+    if "FIJ" in norm or norm == "F":
+        return "FIJO"
+    # Sin etiqueta, solo el codigo de la plantilla (1 fijo, 2 variable).
+    marca = re.match(r"^\s*([12])\b", norm)
+    if marca:
+        return "FIJO" if marca.group(1) == "1" else "VARIABLE"
+    return ""
+
+
+def _codigo_tipo_contrato(value: Any) -> str:
+    """Columna AO del XLSX ("Tipo de contrato") -> codigo del catalogo.
+
+    1 civil, 2 comercial, 3 administrativo, 4 voluntario. Se toma el numero que la
+    plantilla pone a la izquierda del guion y, si no viene, se resuelve por el nombre
+    sin tildes. Devuelve "" cuando la celda esta vacia: para el registro del estudiante
+    _vb_num lo convierte en "0", que es lo correcto para un dato que no vino.
+    """
+    txt = _clean_token(value)
+    if not txt or txt.upper() == "NULL":
+        return ""
+    marca = re.match(r"^\s*([1-4])\b", txt)
+    if marca:
+        return marca.group(1)
+    norm = unicodedata.normalize("NFKD", txt)
+    norm = "".join(ch for ch in norm if not unicodedata.combining(ch)).upper()
+    for prefijo, codigo in TIPOS_CONTRATO_PRACTICA:
+        if prefijo in norm:
+            return codigo
+    return ""
+
+
+def _fecha_iso_desde_clean(value: Any) -> str:
+    """Celda de fecha del clean -> "YYYY-MM-DD", o "" si no es una fecha.
+
+    No alcanza con mirar _only_digits: el generador del clean serializa las celdas de
+    fecha del XLSX como ISO con hora ("2026-10-01T00:00:00"), asi que trae 14 digitos y
+    no 8. Se aceptan ISO (con o sin hora), YYYYMMDD y DD/MM/YYYY.
+    """
+    txt = _clean_token(value)
+    if not txt or txt.upper() == "NULL":
+        return ""
+    cabeza = txt.split("T", 1)[0].split(" ", 1)[0]
+    iso = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})$", cabeza)
+    if iso:
+        return "%04d-%02d-%02d" % (int(iso.group(1)), int(iso.group(2)), int(iso.group(3)))
+    digitos = _only_digits(cabeza)
+    if len(digitos) == 8:
+        # El ano de 4 digitos desambigua YYYYMMDD de DDMMYYYY.
+        if digitos[0:2] in ("19", "20"):
+            return f"{digitos[0:4]}-{digitos[4:6]}-{digitos[6:8]}"
+        return f"{digitos[4:8]}-{digitos[2:4]}-{digitos[0:2]}"
+    trozos = re.split(r"[/.\-]", cabeza)
+    if len(trozos) == 3 and all(t.isdigit() for t in trozos) and len(trozos[2]) == 4:
+        return "%04d-%02d-%02d" % (int(trozos[2]), int(trozos[1]), int(trozos[0]))
+    return ""
 
 
 def _parse_trabajadores_from_sede_clean(
@@ -5635,15 +6082,18 @@ def _parse_trabajadores_from_sede_clean(
             parts[mon_idx] if len(parts) > mon_idx else "",
             parts[year_idx] if len(parts) > year_idx else "",
         )
-        iniciocontrato = ""
-        finalizacion = ""
-        if len(parts) > 33:
-            fi = _clean_token(parts[32])
-            ff = _clean_token(parts[33])
-            if len(_only_digits(fi)) == 8:
-                iniciocontrato = f"{fi[0:4]}-{fi[4:6]}-{fi[6:8]}"
-            if len(_only_digits(ff)) == 8:
-                finalizacion = f"{ff[0:4]}-{ff[4:6]}-{ff[6:8]}"
+        # "Contrato en practica" del bloque DATOS DE LOS ESTUDIANTES: AL = fecha de inicio,
+        # AM = fecha de finalizacion -> idx 34/35 con la regla idx = columna - 4; en el
+        # layout legacy compacto van dos antes, igual que el resto de los indices de esta
+        # funcion. Estaban fijos en 32/33 SIN esa rama, asi que en el clean del XLSX se
+        # leia "ACTIVIDAD ESPECIAL" y la actividad economica: nunca cuadraban 8 digitos,
+        # los dos campos quedaban vacios y el registro del estudiante caia al mismo
+        # respaldo (la cobertura del empleador) para inicio Y fin. De ahi que las
+        # posiciones 246 y 254 del plano salieran con la misma fecha.
+        fecha_ini_idx = 32 if sexo_idx == 11 else 34
+        fecha_fin_idx = 33 if sexo_idx == 11 else 35
+        iniciocontrato = _fecha_iso_desde_clean(_part(parts, fecha_ini_idx))
+        finalizacion = _fecha_iso_desde_clean(_part(parts, fecha_fin_idx))
 
         tipoaf_idx = 27 if sexo_idx == 11 else 29
         subtipo_idx = 29 if sexo_idx == 11 else 31
@@ -5660,6 +6110,26 @@ def _parse_trabajadores_from_sede_clean(
             valor_contrato = ingreso_mensual
         actividad_idx = 31 if sexo_idx == 11 else 33
         actividad = _to_num_text(parts[actividad_idx]) if len(parts) > actividad_idx else "0"
+        # Dias (AQ..AW) y horario (AX..BU) en que se ejecuta la actividad: las ultimas 7+24
+        # casillas de la fila. En el clean generado del XLSX arrancan en idx 39 y 46
+        # (idx = columna - 4, verificado contra la hoja real); en el layout legacy compacto
+        # van dos antes, igual que el resto de los indices de esta funcion.
+        dias_idx0 = 37 if sexo_idx == 11 else 39
+        horas_idx0 = 44 if sexo_idx == 11 else 46
+
+        def _marca_actividad(idx: int) -> str:
+            # Mismo criterio que _has_mark_after_label: SOLO una X -mayuscula o minuscula-
+            # cuenta como marca, y se normaliza a mayuscula. Cualquier otro contenido,
+            # incluido NULL, queda como cadena vacia (no None): es lo que espera
+            # wdestudiantes para una casilla sin marcar.
+            return "X" if _part(parts, idx).upper() == "X" else ""
+
+        marcas_actividad = {
+            nombre: _marca_actividad(dias_idx0 + i) for i, nombre in enumerate(DIAS_ACTIVIDAD)
+        }
+        marcas_actividad.update(
+            {nombre: _marca_actividad(horas_idx0 + i) for i, nombre in enumerate(HORAS_ACTIVIDAD)}
+        )
         ct_code = _normalize_ct_code_token(parts[1]) if len(parts) > 1 else ""
         ct_meta = ct_meta_by_code.get(ct_code, {})
 
@@ -5714,8 +6184,18 @@ def _parse_trabajadores_from_sede_clean(
             "iniciocobertura": (iniciocontrato or _clean_token(cobertura_fallback) or None),
             "tipoafiliadocotizante": tipoaf,
             "subtipoafiliadocotizante": subtipo,
-            "tipo_trabajador_text": _clean_token(parts[28 if sexo_idx == 11 else 30]).upper() if len(parts) > (28 if sexo_idx == 11 else 30) else "",
-            "tipocontrato": _clean_token(parts[14 if sexo_idx == 11 else 16]) if len(parts) > (14 if sexo_idx == 11 else 16) else "",
+            # Sin .upper(): wdestudiantes guarda esta etiqueta literal, tal como viene en
+            # la columna AH ("Estudiantes Decreto 055 de 2015"). El unico consumidor que la
+            # compara -_is_independiente_worker- ya hace .upper() por su cuenta.
+            "tipo_trabajador_text": _clean_token(parts[28 if sexo_idx == 11 else 30]) if len(parts) > (28 if sexo_idx == 11 else 30) else "",
+            # Tipo de contrato (plano, registro 3, posicion 189): columna AO del bloque
+            # de estudiantes -> idx 37 (35 en el layout legacy compacto). Antes apuntaba
+            # al idx 16, que en la hoja real es "Tipo de Salario" ("1-Fijo"): por eso el
+            # plano salia con el codigo del salario y no con el del contrato -un
+            # "3-Admnistrativo" en el Excel aparecia como 1 en la posicion 189-.
+            "tipocontrato": _codigo_tipo_contrato(_part(parts, 35 if sexo_idx == 11 else 37)),
+            # Columna T de la hoja: el indice que "tipocontrato" tenia mal asignado.
+            "tipo_salario_text": _etiqueta_tipo_salario(_part(parts, 14 if sexo_idx == 11 else 16)),
             "jornada": _clean_token(parts[25 if sexo_idx == 11 else 27]).upper() if len(parts) > (25 if sexo_idx == 11 else 27) else "",
             "suministratransporte": ("NO" if "NO" in _clean_token(parts[30 if sexo_idx == 11 else 32]).upper() else "SI") if len(parts) > (30 if sexo_idx == 11 else 32) else "NO",
             # Misma columna del XLSX que "suministratransporte" de arriba: en el layout real
@@ -5724,6 +6204,7 @@ def _parse_trabajadores_from_sede_clean(
             "actividad_especial": _clean_token(parts[30 if sexo_idx == 11 else 32]).upper() if len(parts) > (30 if sexo_idx == 11 else 32) else "",
             "numeromesescontrato": meses,
             "tipotramite": 1,
+            **marcas_actividad,
             "ct_nombreactividad": ct_meta.get("ct_nombreactividad", ""),
             "ct_codigoactividad": ct_meta.get("ct_codigoactividad", ""),
             "ct_claseriesgo": ct_meta.get("ct_claseriesgo", ""),
@@ -7914,9 +8395,18 @@ def legacy_flatfile_build(
     strict_validate: bool = False,
     fecha_proceso: str = "",
     lote_usuario: str = "",
+    # Opcional: hace exacta la reposicion del numero de contrato independiente
+    # (ver _cont_independiente_por_trabajador). Sin el se usa la reserva mas reciente.
+    idtramite: str = "",
 ) -> Response:
     if lote and from_db:
-        _sync_engine_from_db(lote=lote, base=base, fecha_proceso=fecha_proceso, lote_usuario=lote_usuario)
+        _sync_engine_from_db(
+            lote=lote,
+            base=base,
+            fecha_proceso=fecha_proceso,
+            lote_usuario=lote_usuario,
+            idtramite=idtramite,
+        )
     precheck = _prebuild_rules_check(lote=lote)
     if strict_validate and not precheck.get("ok", False):
         raise HTTPException(status_code=400, detail={"message": "Prevalidacion de reglas fallo", "precheck": precheck})
@@ -8338,7 +8828,12 @@ def legacy_rules_prebuild_check_post(payload: Optional[dict[str, Any]] = None) -
     base = as_text(data.get("base") or "temporal").strip() or "temporal"
     sync_info: Optional[dict[str, Any]] = None
     if from_db and lote:
-        sync_info = _sync_engine_from_db(lote=lote, base=base)
+        # El estado del motor es compartido: si este sync deja el numero de contrato
+        # independiente vacio, lo rellena despues el sync de la generacion del plano -que
+        # si trae idtramite-. Se pasa igual para no depender de ese orden.
+        sync_info = _sync_engine_from_db(
+            lote=lote, base=base, idtramite=as_text(data.get("idtramite")).strip()
+        )
     prebuild = _prebuild_rules_check(lote=lote)
 
     expected_map_raw = data.get("excel_sede_totals")
@@ -8418,6 +8913,7 @@ def legacy_reporte_ejecutivo_contrato(payload: Optional[dict[str, Any]] = None) 
         excel_bytes=excel_bytes,
         flatfile_926_content=flat_926_content,
         generate_926_if_missing=bool(data.get("generate_926_if_missing", True)),
+        idtramite=as_text(data.get("idtramite")).strip(),
     )
     return out
 
@@ -9903,6 +10399,12 @@ def ruta_inclusion_importar_empleador_contrato(payload: dict[str, Any]) -> dict[
         "sedeprincipalnombre",
         "numeroradicacion",
         "profilenumerotrabajadores",
+        # Componentes separados del nombre del representante legal: evitan que el plano
+        # tenga que re-partir el concatenado por posicion (ver _rep_legal_partes).
+        "repprimerapellido",
+        "repsegundoapellido",
+        "repprimernombre",
+        "repsegundonombre",
         "respsedeprimerapellido",
         "respsedesegundoapellido",
         "respsedeprimernombre",
@@ -9912,6 +10414,7 @@ def ruta_inclusion_importar_empleador_contrato(payload: dict[str, Any]) -> dict[
         "respsedecorreo",
         "sedeprincipalcorreo",
     ]
+    fields = _asegurar_columnas_rep_legal(base, fields)
     params = {k: data.get(k, "") for k in fields}
     params["idtramite"] = idtramite
 
@@ -9994,6 +10497,10 @@ def ruta_inclusion_importar_empleador_contrato(payload: dict[str, Any]) -> dict[
         "action": action,
         "rows_affected": affected,
         "empleador": data,
+        # False = no se pudieron asegurar las columnas de componentes del representante
+        # legal y su nombre se seguira partiendo por posicion (ver
+        # _asegurar_columnas_rep_legal). Se expone para que no sea una degradacion muda.
+        "rep_legal_componentes": bool(_rep_legal_cols_ok.get(base)),
         "validation": {
             "strict": strict_validate,
             "ok": len(validation_errors) == 0,
@@ -10145,6 +10652,14 @@ def ruta_inclusion_importar_trabajadores_contrato(payload: dict[str, Any]) -> di
                 {"idtramite": idtramite},
             )
 
+        # Dias/horario de la actividad y etiqueta del tipo de trabajador: solo se insertan
+        # si las columnas existen (o se pudieron crear). Si no, el INSERT sigue como antes
+        # y el estudiante queda sin esa informacion, pero el import no se cae.
+        cols_actividad = (
+            COLS_TRABAJADOR_NUEVAS
+            if _asegurar_columnas_texto(base, "proc_servicios_obtenertrabajadortramite", COLS_TRABAJADOR_NUEVAS)
+            else ()
+        )
         sql = (
             "INSERT INTO proc_servicios_obtenertrabajadortramite("
             "sr,idtrabajador,tipodocumento,numerodocumento,primerapellido,segundoapellido,primernombre,segundonombre,"
@@ -10156,7 +10671,8 @@ def ruta_inclusion_importar_trabajadores_contrato(payload: dict[str, Any]) -> di
             "ct_ciudad,ct_departamento,ct_zona,ct_direccion,ct_telefono,ct_correo,"
             "ct_responsable_pa,ct_responsable_sa,ct_responsable_pn,ct_responsable_sn,"
             "ct_responsable_td,ct_responsable_doc,ct_responsable_correo,departamento,actividad_especial"
-            ") VALUES ("
+            + ("," + ",".join(cols_actividad) if cols_actividad else "")
+            + ") VALUES ("
             ":sr,:idtrabajador,:tipodocumento,:numerodocumento,:primerapellido,:segundoapellido,:primernombre,:segundonombre,"
             ":fechanacimiento,:sexo,:direccionresidencia,:ciudadresidencia,:localidad,:zona,:telefono,:celular,:correoelectronico,"
             ":eps,:actividadeconomica,:modalidad,:arlanterior,:afp,:iniciocontrato,:finalizacioncontrato,:valorcontrato,"
@@ -10165,7 +10681,9 @@ def ruta_inclusion_importar_trabajadores_contrato(payload: dict[str, Any]) -> di
             ":cargo,:codigoct,:ct_nombreactividad,:ct_codigoactividad,:ct_claseriesgo,:ct_montocotizacion,:ct_cantidadtrabajadores,"
             ":ct_ciudad,:ct_departamento,:ct_zona,:ct_direccion,:ct_telefono,:ct_correo,"
             ":ct_responsable_pa,:ct_responsable_sa,:ct_responsable_pn,:ct_responsable_sn,"
-            ":ct_responsable_td,:ct_responsable_doc,:ct_responsable_correo,:departamento,:actividad_especial)"
+            ":ct_responsable_td,:ct_responsable_doc,:ct_responsable_correo,:departamento,:actividad_especial"
+            + ("," + ",".join(f":{c}" for c in cols_actividad) if cols_actividad else "")
+            + ")"
         )
         batch_params = []
         for r in rows:
@@ -10175,7 +10693,7 @@ def ruta_inclusion_importar_trabajadores_contrato(payload: dict[str, Any]) -> di
                 "ct_responsable_pa", "ct_responsable_sa", "ct_responsable_pn", "ct_responsable_sn",
                 "ct_responsable_td", "ct_responsable_doc", "ct_responsable_correo", "ct_cantidadtrabajadores",
                 "departamento", "actividad_especial",
-            ):
+            ) + tuple(cols_actividad):
                 params.setdefault(key, "")
             params["idtramite"] = idtramite
             batch_params.append(params)
